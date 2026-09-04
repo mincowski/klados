@@ -1,0 +1,399 @@
+/**
+ * Grid mode (CONCEPT.md §4.3, M2-PLAN.md E5). Semantic tokens only —
+ * stylelint enforces it here like every other component stylesheet
+ * (invariant 9). Derived-cell dimming is expressed as reduced opacity plus
+ * italic, not a separate color token, matching `tokens.css`'s own
+ * `--disabled-opacity` convention for "muted, not a new hue."
+ */
+.grid-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.grid-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-bottom: var(--border-width) solid var(--surface-border);
+  flex: none;
+}
+
+.grid-quick-filter {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  padding: var(--space-1) var(--space-2);
+  border: var(--border-width) solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-bg);
+  color: var(--surface-fg);
+  min-width: 160px;
+}
+
+/* R106 addendum: `.grid-scroll` was dropped from this selector. It drew an
+ * inset `--focus-ring` box around the grid on F6, which reads as a
+ * sub-region of the Detail pane being highlighted rather than as "this pane
+ * has focus" — the same complaint that removed `.detail:focus-visible`, and
+ * the same answer: `.pane:focus-within::after` (`Layout.css`) is where this
+ * app says which pane has focus, for every pane. Grid mode also already has
+ * a within-pane indication the list has not — `.grid-cell-active` rings the
+ * keyboard-focused cell — which made the container ring the redundant one
+ * of the two.
+ *
+ * `.grid-quick-filter` keeps it: an ordinary text input needs its own focus
+ * ring, since neither the pane overlay nor an active cell says anything
+ * about where typing will go. */
+.grid-quick-filter:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.grid-column-picker,
+.grid-hidden-matches {
+  position: relative;
+}
+
+/* R34 §5: the quick filter's "N more match in hidden columns" affordance —
+ * a plain-text button, not a badge, since it's reporting a count that isn't
+ * part of the result the way `.grid-toolbar-badge` counts are. */
+.grid-hidden-matches-toggle {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  color: var(--surface-fg-secondary);
+  background: none;
+  border: none;
+  padding: var(--space-1) 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+}
+
+.grid-hidden-matches-toggle:hover {
+  color: var(--surface-fg);
+}
+
+.grid-hidden-matches-list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 4;
+  margin: var(--space-1) 0 0 0;
+  padding: var(--space-2);
+  list-style: none;
+  background: var(--elev-2-bg);
+  box-shadow: var(--elev-2-shadow);
+  border: var(--border-width) solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  max-height: 240px;
+  overflow: auto;
+  min-width: 160px;
+}
+
+.grid-hidden-matches-list li {
+  padding: var(--space-1) 0;
+  font-size: var(--font-size-ui);
+}
+
+.grid-column-picker > button,
+.grid-copy-buttons > button,
+.grid-filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  padding: var(--space-1) var(--space-2);
+  border: var(--border-width) solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-bg);
+  color: var(--surface-fg);
+  cursor: pointer;
+}
+
+.grid-toolbar-badge {
+  color: var(--surface-fg-secondary);
+  font-size: var(--font-size-ui);
+}
+
+.grid-toolbar-label {
+  font-size: var(--font-size-ui);
+}
+
+.grid-column-picker > button:hover,
+.grid-copy-buttons > button:hover,
+.grid-filter-toggle:hover {
+  background: var(--row-hover-bg);
+}
+
+.grid-filter-toggle[aria-pressed='true'] {
+  background: var(--row-selected-bg);
+  color: var(--row-selected-fg);
+  border-color: var(--focus-ring);
+}
+
+.grid-column-picker-list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 4;
+  margin: var(--space-1) 0 0 0;
+  padding: var(--space-2);
+  list-style: none;
+  background: var(--elev-2-bg);
+  box-shadow: var(--elev-2-shadow);
+  border: var(--border-width) solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  max-height: 240px;
+  overflow: auto;
+  min-width: 200px;
+}
+
+.grid-column-picker-list li {
+  padding: var(--space-1) 0;
+}
+
+.grid-copy-buttons {
+  display: flex;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+
+/* M5c-PLAN.md J4 / D-051 — the positioning context `Scrollbar`'s overlay
+ * tracks anchor to; see `.tree-viewport`'s own comment in Tree.css for why
+ * this can't just be `.grid-scroll` itself. Takes over `.grid-scroll`'s own
+ * flex-grow role so the scroll element underneath can be `height: 100%`. */
+.grid-viewport {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.grid-scroll {
+  height: 100%;
+  overflow: auto;
+  position: relative;
+  outline: none;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  /* R33 follow-up: leaves room for the vertical `<Scrollbar>` track
+   * (`.grid-viewport`'s absolutely-positioned child, pinned to its right
+   * edge) — without this, the rightmost column's cells sat underneath the
+   * track/thumb instead of beside it. Same fix as `Raw.css`'s `.raw`. */
+  margin-right: var(--scrubber-width);
+}
+
+/* R44b: mirrors `margin-right` above, but conditionally — reserving a
+   bottom gutter unconditionally would cost every narrow table (no
+   horizontal scroll at all) 15px of vertical space for nothing. Without
+   this, the horizontal `<Scrollbar>` track (`.grid-viewport`'s own
+   absolutely-positioned child, `bottom: 0`) sat directly on top of the
+   last row instead of beside it — the same defect R33's addendum 1 already
+   fixed on the vertical axis, here on the one axis that still needed it.
+   `Grid.tsx` adds this class only once its own geometry says the table
+   actually overflows horizontally. */
+.grid-scroll-has-horizontal-track {
+  margin-bottom: var(--scrubber-width);
+}
+
+/* Every row (body, header, filter) lays its cells out side by side. This
+ * matters beyond plain visual order: pinned cells are `position: sticky`,
+ * not `absolute`, so they stay in normal flow — without `display: flex`
+ * here they stack as block boxes instead, one row-height below the
+ * previous pinned cell, for every row that has a pinned column. */
+.grid-row,
+.grid-header-row,
+.grid-filter-row {
+  display: flex;
+}
+
+.grid-cell {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-1);
+  overflow: hidden;
+  white-space: nowrap;
+  border-right: var(--border-width) solid var(--surface-border);
+  border-bottom: var(--border-width) solid var(--surface-border);
+  background: var(--surface-bg);
+  color: var(--surface-fg);
+}
+
+.grid-cell-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The keyboard-focused cell (E9: arrows move a per-cell focus, not just a
+ * row highlight) — an inset ring so it reads distinctly from row selection
+ * even when both are visible on the same row. */
+.grid-cell-active {
+  outline: 2px solid var(--selection-ring);
+  outline-offset: -2px;
+  z-index: 2;
+}
+
+.grid-cell-numeric {
+  justify-content: flex-end;
+  font-variant-numeric: tabular-nums;
+}
+
+.grid-cell-derived .grid-cell-text {
+  color: var(--surface-fg-secondary);
+  font-style: italic;
+}
+
+.grid-cell-absent .grid-cell-text {
+  color: var(--surface-fg-secondary);
+}
+
+.grid-cell-badge {
+  flex: none;
+  font-size: 11px;
+  color: var(--surface-fg-secondary);
+}
+
+.grid-cell-drill {
+  flex: none;
+  color: var(--surface-fg-secondary);
+}
+
+.grid-row-header-cell {
+  justify-content: flex-end;
+  color: var(--surface-fg-secondary);
+  background: var(--elev-1-bg);
+  font-variant-numeric: tabular-nums;
+  z-index: 1;
+}
+
+.grid-header-row .grid-cell {
+  background: var(--elev-1-bg);
+  align-items: center;
+  flex-direction: row;
+  justify-content: flex-start;
+  gap: var(--space-1);
+  padding: 0 var(--space-1);
+}
+
+.grid-header-cell {
+  font-weight: 600;
+}
+
+.grid-header-pin {
+  flex: none;
+  border: none;
+  background: transparent;
+  color: var(--surface-fg-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0;
+}
+
+.grid-header-glyph {
+  flex: none;
+  color: var(--syntax-punctuation);
+  font-size: 11px;
+}
+
+.grid-header-label {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--surface-fg);
+  font-weight: 600;
+  font-size: var(--font-size-ui);
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.grid-header-label:disabled {
+  cursor: default;
+  opacity: var(--disabled-opacity);
+}
+
+.grid-header-filter-active {
+  flex: none;
+  color: var(--focus-ring);
+  font-size: 8px;
+}
+
+/* R43/D-071: the column resize handle — a thin strip over the header
+   cell's own right border, wide enough to grab without needing pixel
+   precision. Transparent at rest; a hover tint is the only feedback a
+   drag handle needs, same as `Scrollbar`'s own thumb. */
+.grid-header-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 4;
+  touch-action: none;
+}
+
+.grid-header-resize-handle:hover {
+  background: var(--focus-ring);
+  opacity: 0.5;
+}
+
+.grid-filter-row .grid-cell {
+  background: var(--elev-1-bg);
+}
+
+.grid-header-filter {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  border: var(--border-width) solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-bg);
+  color: var(--surface-fg);
+  padding: 1px var(--space-1);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.grid-row:hover .grid-cell {
+  background: var(--row-hover-bg);
+}
+
+.grid-row-alt .grid-cell {
+  background: var(--row-alt-bg);
+}
+
+.grid-row-alt:hover .grid-cell {
+  background: var(--row-hover-bg);
+}
+
+.grid-row-selected .grid-cell {
+  background: var(--selection-bg);
+  color: var(--row-selected-fg);
+}
+
+.grid-row-selected .grid-cell-derived .grid-cell-text,
+.grid-row-selected .grid-cell-absent .grid-cell-text,
+.grid-row-selected .grid-cell-badge,
+.grid-row-selected .grid-cell-drill,
+.grid-row-selected .grid-row-header-cell {
+  color: inherit;
+}
+
+/* Find overlay (M4-PLAN.md G5) — a marker, not a filter; the grid's own
+ * quick/column filters are separate and both stay active alongside this. */
+.grid-row-matched .grid-row-header-cell {
+  box-shadow: inset 3px 0 0 var(--find-match-marker);
+}
+
+/* R21-notifications.md §1: the export soft-cap confirmation (§11.2's
+   shape, applied to copy rather than open) moved to a pushed choice
+   notification (`notifications/Notifications.css`) — no local styling left
+   to own here. */

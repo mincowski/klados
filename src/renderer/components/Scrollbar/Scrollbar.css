@@ -1,0 +1,53 @@
+/**
+ * M5c-PLAN.md J4 / D-051. Semantic tokens only — stylelint enforces it here
+ * like every other component stylesheet (invariant 9). Shares
+ * `--scrubber-width` with Scrubber.css so every pane's scroll strip is
+ * literally the same width, not two tokens that happen to match today.
+ *
+ * R33 addendum 2: the strip styling itself — track background/width, thumb
+ * geometry, radius, transition, hover/active — now lives in `ScrollStrip.css`,
+ * imported by this file and by `Scrubber.css`. This file keeps only what's
+ * genuinely Scrollbar's: the native-scrollbar hiding, per-orientation
+ * placement, and the vertical/horizontal corner handoff.
+ */
+@import './ScrollStrip.css';
+
+/* Applied to whatever element `Scrollbar`'s `target` ref points at — keeps
+ * `overflow: auto` (native scrolling still does the actual work) while
+ * hiding the browser's own bar, the same rule Raw.css already applies to
+ * `.cm-scroller` for the same reason. */
+.scrollbar-host {
+  scrollbar-width: none;
+}
+
+.scrollbar-host::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-track {
+  position: absolute;
+}
+
+.scrollbar-track-vertical {
+  top: 0;
+  bottom: 0;
+  right: 0;
+}
+
+.scrollbar-track-horizontal {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--scrubber-width);
+}
+
+/* Both axes present at once (the Grid) would otherwise overlap in the
+ * corner — the vertical track yields it to the horizontal one. */
+.scrollbar-track-vertical:has(~ .scrollbar-track-horizontal) {
+  bottom: var(--scrubber-width);
+}
+
+.scrollbar-track-horizontal .scrollbar-thumb {
+  top: 1px;
+  bottom: 1px;
+}

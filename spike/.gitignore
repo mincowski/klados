@@ -1,0 +1,10 @@
+# Generated fixtures — ~1 GB, deterministic, rebuilt by generate-fixtures.ts
+fixtures/
+
+# Harness dependencies and Vite build output
+node_modules/
+codemirror-harness/dist/
+
+# NOTE: codemirror-harness/out/ is deliberately NOT ignored. It holds the raw
+# measurement JSON behind RESULTS.md — the evidence for D-030 and D-031 — and is
+# ~100 KB. An earlier version of this file excluded it.

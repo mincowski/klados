@@ -1,0 +1,41 @@
+{
+  "fixture": "cars-100mb.json",
+  "gcExposed": true,
+  "baselineRssMB": 76.3,
+  "readMs": 165,
+  "docChars": 104857802,
+  "fileMB": 100,
+  "loadMs": 689,
+  "lines": 3760868,
+  "afterLoadRssMB": 357.8,
+  "memoryDeltaMB": 281.5,
+  "keystroke_1%": {
+    "p50": 16.7,
+    "p95": 16.9,
+    "min": 15,
+    "max": 19.5
+  },
+  "keystroke_50%": {
+    "p50": 16.6,
+    "p95": 17.8,
+    "min": 14.8,
+    "max": 21.1
+  },
+  "keystroke_99%": {
+    "p50": 16.7,
+    "p95": 17.1,
+    "min": 14.5,
+    "max": 19.2
+  },
+  "scroll": {
+    "p50": 65.9,
+    "p95": 100.1,
+    "min": 1.8,
+    "max": 113.3,
+    "pctOver32ms": 57,
+    "pctOver16ms": 57.5
+  },
+  "fullReplaceMs": 650,
+  "finalRssMB": 1370,
+  "ok": true
+}

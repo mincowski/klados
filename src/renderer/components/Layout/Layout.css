@@ -1,0 +1,209 @@
+/**
+ * Layout shell (CONCEPT.md §4.1, §9.4): thin flat header strips per pane,
+ * panes and dividers filling the rest. The command bar this used to also
+ * draw is retired (M5d-PLAN.md R3) — `TitleBar.css` owns window/document
+ * chrome now, and `notifications/Notifications.css` owns what
+ * `DocumentStatus.css` used to (R21-notifications.md / R22, itself
+ * retired). Semantic tokens only — stylelint enforces it here like every
+ * other component stylesheet (invariant 9).
+ */
+.layout {
+  position: relative; /* R70 (`R69-focus-and-find.md` §2) — the Find bar's own `position: absolute` anchor; see `Find.css`. */
+  display: flex;
+  flex-direction: column;
+  /* M5d-PLAN.md R1: `Layout` is no longer the sole occupant of `main`'s
+   * height — `TitleBar` (`App.tsx`) sits above it, so this flexes to fill
+   * whatever `main`'s flex column leaves rather than claiming 100% and
+   * pushing the title bar's own height off-screen. */
+  flex: 1;
+  min-height: 0;
+  background: var(--surface-bg);
+  /* M5e-PLAN.md R8c: the title bar/pane boundary, moved here from
+   * `.title-bar`'s own `border-bottom` — one pixel lower puts it below
+   * Windows' `titleBarOverlay` rectangle (which paints over the title
+   * bar's own top-right corner), so it spans the full window width instead
+   * of stopping short at the caption buttons. */
+  border-top: var(--border-width) solid var(--surface-border);
+}
+
+.layout-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  /* R106 addendum 2 — ON TRIAL, not settled. The pane focus overlay
+   * (`.pane::after`, below) draws a 1px border in the pane's outermost
+   * pixel. On the leftmost and rightmost panes that pixel is the window's
+   * own edge, where Windows' frame and rounded-corner mask cover it, so a
+   * focused Tree loses its left edge and a focused Detail/Raw its right —
+   * the focus box reads as open on one side.
+   *
+   * Only left and right are ever at risk: `TitleBar` sits above `.layout`
+   * and `StatusBar` below this element, so no pane touches the window's
+   * top or bottom.
+   *
+   * This 1px gutter moves every pane off the window edge so the overlay is
+   * fully inside the client area. Chosen over insetting the overlay
+   * itself, which cannot work: the scrollbar track is pinned to `right: 0`
+   * and its thumb is inset `left: 1px; right: 1px`, so the overlay
+   * currently occupies exactly the one free pixel column the thumb leaves,
+   * and moving it inward by 1px would put it on the thumb.
+   *
+   * KNOWN COST, the thing to look at: the track's background is
+   * deliberately opaque (`--scrollbar-track-bg`, R33/1c) and differs from
+   * `--surface-bg` — `--gray-800` on `--gray-900` in dark, `--gray-100` on
+   * `--gray-0` in light. So on Detail and Raw this leaves a 1px seam of
+   * surface colour between the scrollbar and the window edge, at all
+   * times, focused or not. Adjacent steps on the grey ramp, so it should
+   * be faint, but it is a real always-on change in exchange for a focus
+   * edge that only matters while the pane has focus. On the Tree's left
+   * edge there is no track, so the gutter is invisible there. */
+  padding: 0 1px;
+}
+
+.layout-tree {
+  flex: none;
+  min-width: 0;
+  display: flex;
+}
+
+.layout-column {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.layout-detail,
+.layout-raw {
+  min-height: 0;
+  display: flex;
+}
+
+.pane {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-bg);
+}
+
+/* §7's keyboard navigation (F6/Shift+F6, Ctrl+1-3) has nowhere else to
+ * show where it landed — R91 (`R91-focus-into-content.md` §1) moved actual
+ * DOM focus onto each pane's own interactive heart (`.tree`, `.cm-content`,
+ * `.grid-scroll`, or `.pane-body` itself when nothing else is registered),
+ * a descendant of `registerPane`'s own ref rather than that ref itself, so
+ * `:focus-within` here is what lights up the whole pane rather than just
+ * whichever element actually holds focus.
+ *
+ * UI-FEEDBACK.md M5b: this used to be an `outline`, which paints with
+ * `.pane`'s own box and so gets covered by anything that paints later or
+ * lifts into a higher stacking context — a native scrollbar (Tree), Grid's
+ * sticky header/filter/row-header cells (`z-index: 1`–`3`), CodeMirror's
+ * gutter and the scrubber (Raw). A `::after` overlay sidesteps all of that
+ * at once: it's a separate box, painted after everything else in `.pane`'s
+ * own stacking context (the `position: relative` above), at a z-index no
+ * sticky cell reaches. `border`, not `outline`, since an overlay box drawn
+ * exactly at `.pane`'s own edge has no scrollbar or sibling pane to be
+ * clipped by the way the old outline did — `--pane-focus-ring` is also a
+ * deliberately quieter token than `--focus-ring` (its own comment explains
+ * why), not a dimmed copy of it. */
+.pane::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+  border: 1px solid transparent;
+}
+
+.pane:focus-within::after {
+  border-color: var(--pane-focus-ring);
+}
+
+.pane-header {
+  flex: none;
+  height: var(--row-height);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 0 var(--space-1) 0 var(--space-3);
+  color: var(--surface-fg-secondary);
+  font-size: var(--font-size-ui);
+  border-bottom: var(--border-width) solid var(--surface-border);
+}
+
+.pane-header-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: none;
+}
+
+.pane-header-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--surface-fg-secondary);
+  cursor: pointer;
+}
+
+.pane-header-button:hover {
+  background: var(--row-hover-bg);
+  color: var(--surface-fg);
+}
+
+.pane-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  outline: none;
+}
+
+.pane-placeholder {
+  padding: var(--space-3);
+  color: var(--surface-fg-secondary);
+}
+
+.layout-divider {
+  flex: none;
+  background: var(--surface-border);
+}
+
+.layout-divider-vertical {
+  width: var(--border-width);
+  cursor: col-resize;
+  position: relative;
+}
+
+.layout-divider-vertical::after {
+  content: '';
+  position: absolute;
+  inset: 0 -3px;
+}
+
+.layout-divider-horizontal {
+  height: var(--border-width);
+  cursor: row-resize;
+  position: relative;
+}
+
+.layout-divider-horizontal::after {
+  content: '';
+  position: absolute;
+  inset: -3px 0;
+}

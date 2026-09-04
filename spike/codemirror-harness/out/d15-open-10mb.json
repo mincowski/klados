@@ -1,0 +1,23 @@
+{
+  "ok": true,
+  "fixture": "cars-10mb.xml",
+  "sizeBytes": 10485791,
+  "complete": true,
+  "nodeCount": 329575,
+  "rowCount": 389815,
+  "lineCount": 389815,
+  "parseWorkerMs": 278.5,
+  "rehydrateMs": 0.5,
+  "totalMs": 286.2,
+  "frameCount": 17,
+  "frameStats": {
+    "p50": 18,
+    "p95": 18.2,
+    "min": 0.3,
+    "max": 18.2
+  },
+  "framesOver32ms": 0,
+  "approxFpsDuringParse": 59.3,
+  "baselineRssMB": 94.2,
+  "afterRssMB": 122.6
+}

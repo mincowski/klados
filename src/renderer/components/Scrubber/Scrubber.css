@@ -1,0 +1,80 @@
+/**
+ * Scrubber (CONCEPT.md §4.5, M1-PLAN.md D13). Semantic tokens only —
+ * stylelint enforces it here like every other component stylesheet
+ * (invariant 9).
+ *
+ * R33 addendum 2: the strip styling shared with `Scrollbar.css` (track
+ * background/width, thumb geometry, radius, transition, hover/active) now
+ * lives in `ScrollStrip.css`, imported here. This file keeps only what's
+ * genuinely Raw's: markers, `cursor: grab`, `min-height`, and the
+ * `.scrubber-active` variant.
+ */
+@import '../Scrollbar/ScrollStrip.css';
+
+.scrubber {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  cursor: pointer;
+}
+
+/* UI-FEEDBACK.md M5b: the viewport thumb — replaces CodeMirror's own
+ * (now-hidden, Raw.css) scrollbar as the actual scroll indicator. Shows the
+ * visible viewport, not the ~1 MB window (D-031's own "the window must be
+ * invisible"); `min-height` keeps it grabbable at any document size, the
+ * same way a native scrollbar thumb never shrinks past a usable size.
+ *
+ * M5c-PLAN.md J4 / D-051: same shape, background and radius as
+ * `Scrollbar.css`'s own `.scrollbar-thumb` — the Raw view can't use that
+ * component directly (its thumb tracks a real `scrollHeight` the ~1 MB
+ * window doesn't have), but it adopts the *visual language*: same width
+ * (`--scrubber-width`, already shared), same thumb shape, same hover/active
+ * treatment, so the two read as one control across every pane. */
+.scrubber-thumb {
+  /* Kept in sync with Scrubber.tsx's own THUMB_MIN_HEIGHT_PX — that
+   * constant clamps `top` against this exact value so the two can't drift
+   * into the overflow this pairing exists to prevent. */
+  min-height: 20px;
+  /* M5c-PLAN.md J4: the thumb now has its own drag handler (continuous
+   * ratio-scrub), distinct from the track's click-to-page gesture — it
+   * needs to receive pointer events instead of passing them through to the
+   * strip underneath, unlike the markers below (which stay decoration). */
+  cursor: grab;
+}
+
+.scrubber.scrubber-active .scrubber-thumb {
+  cursor: grabbing;
+}
+
+.scrubber-marker {
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  height: 2px;
+  transform: translateY(-1px);
+  pointer-events: none;
+}
+
+.scrubber-marker-selected {
+  height: 3px;
+  background: var(--accent);
+}
+
+.scrubber-marker-warning {
+  background: var(--diagnostic-warning-fg);
+}
+
+.scrubber-marker-error {
+  background: var(--diagnostic-error-fg);
+}
+
+.scrubber-marker-fatal {
+  background: var(--diagnostic-fatal-bg);
+}
+
+/* Bucketed search hits (UI-FEEDBACK.md M5b) — opacity is set inline per
+ * marker from its own `density`, so this only supplies the base color. */
+.scrubber-marker-match {
+  background: var(--find-match-marker);
+}

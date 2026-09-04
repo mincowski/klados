@@ -1,0 +1,99 @@
+/**
+ * R21-notifications.md §3e: `position: fixed`, anchored above the status
+ * bar, inset from the right edge — never in layout flow, and never
+ * covering the Scrubber (Raw's right-edge overlay) or the grid's own
+ * horizontal scrollbar (verified against real Chromium layout,
+ * `test/notifications.test.tsx`).
+ *
+ * Elevation per CONCEPT.md §9.4 / invariant 9: a token *pair*
+ * (`--elev-2-bg` + `--elev-2-shadow`), the same tier `Find.css` and
+ * `CommandPalette.css` already use for a transient floating surface.
+ */
+.notifications {
+  position: fixed;
+  right: var(--space-3);
+  bottom: calc(var(--row-height) + var(--space-3));
+  z-index: 95;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: flex-end;
+  max-width: 360px;
+  pointer-events: none;
+}
+
+.notifications-more {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--elev-1-bg);
+  color: var(--surface-fg);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  opacity: 0.8;
+}
+
+/**
+ * R57 (`R57-notification-emphasis.md` §4): severity used to be a full
+ * background fill (`--diagnostic-*-bg`) — too loud for how common a warning
+ * actually is (three of `derivedNotifications.ts`'s four cases), and a
+ * fill this strong made `.notification-action`'s own `--elev-1-bg` pills
+ * (white in light) read as a second full-strength surface stacked inside
+ * it. Severity now lives on a 3px left edge instead; every severity keeps
+ * the same neutral `--elev-2-bg`/`--elev-2-shadow`/`--surface-fg` triple, so
+ * a warning and an error differ only in that one edge colour.
+ *
+ * The 1px `--surface-border` hairline on the other three sides is not
+ * decoration — §2's own measurement is that light theme's `--elev-2-bg` and
+ * the pane behind it are the *same* colour (`--gray-0`), so a neutral
+ * notification is white-on-white without it, and it's also what gives
+ * `info` (no severity colour at all) a defined shape.
+ */
+.notification {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--elev-2-bg);
+  box-shadow: var(--elev-2-shadow);
+  border: var(--border-width) solid var(--surface-border);
+  border-left: 3px solid var(--surface-border);
+  color: var(--surface-fg);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+}
+
+.notification-warning {
+  border-left-color: var(--diagnostic-warning-fg);
+}
+
+.notification-error {
+  border-left-color: var(--diagnostic-error-fg);
+}
+
+.notification-message {
+  margin: 0;
+}
+
+.notification-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.notification-action {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  padding: var(--space-1) var(--space-3);
+  border: var(--border-width) solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  background: var(--elev-1-bg);
+  color: var(--surface-fg);
+  cursor: pointer;
+}
+
+.notification-action:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}

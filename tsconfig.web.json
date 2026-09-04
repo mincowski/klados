@@ -1,0 +1,11 @@
+{
+  "extends": "@electron-toolkit/tsconfig/tsconfig.web.json",
+  "include": ["src/renderer/**/*.ts", "src/renderer/**/*.tsx", "src/preload/*.d.ts", "src/core/parseClient.ts", "src/shared/**/*", "test/**/*.test.tsx"],
+  "compilerOptions": {
+    "composite": true,
+    "types": ["vite/client"],
+    "jsx": "react-jsx",
+    "noImplicitAny": true,
+    "noUncheckedIndexedAccess": true
+  }
+}

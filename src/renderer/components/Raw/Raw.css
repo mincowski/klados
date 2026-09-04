@@ -1,0 +1,218 @@
+/**
+ * Raw View (CONCEPT.md §4.4, M1-PLAN.md D10). Semantic tokens only —
+ * stylelint enforces it here like every other component stylesheet
+ * (invariant 9). CodeMirror's own theme lives here too (D2), not in a
+ * separate editor config.
+ */
+.raw-pane {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  /* R113 (`R113-inactive-selection.md` §3, §7) */
+  --selection-bg: var(--row-selected-inactive-bg);
+}
+
+.raw-pane:focus-within {
+  --selection-bg: var(--row-selected-bg);
+}
+
+.raw-container {
+  /* Takes whatever height is left after the banners above it — `min-height:
+   * 0` is what lets a flex child's own overflow (CodeMirror's scroller)
+   * actually scroll instead of the child growing to fit its content. */
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}
+
+/* Same banner shape as DocumentStatus.css's own convention (§9's
+ * semantic-token-only rule, invariant 9) — reused rather than re-invented,
+ * per M3-PLAN.md F9's own instruction to follow an established convention
+ * over inventing a second one. */
+.raw-banner {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+}
+
+.raw-banner-warning {
+  color: var(--diagnostic-warning-fg);
+  background: var(--diagnostic-warning-bg);
+}
+
+.raw-banner-error {
+  color: var(--diagnostic-error-fg);
+  background: var(--diagnostic-error-bg);
+}
+
+.raw {
+  height: 100%;
+  /* Leaves room for the scrubber (D13), an absolutely-positioned sibling
+   * pinned to the container's right edge — without this, CodeMirror's own
+   * content would sit underneath it rather than beside it. Shares
+   * `--scrubber-width` with `Scrubber.css` (tokens.css) rather than two
+   * hardcoded literals that could drift apart. */
+  margin-right: var(--scrubber-width);
+}
+
+/* D12: shown for the one frame before an about-to-be-enabled wrap does its
+ * ~400 ms layout pass over the window — a visible "why did typing/scrolling
+ * just pause" answer rather than silence while the main thread blocks. */
+.raw-wrapping-overlay {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--elev-2-bg);
+  box-shadow: var(--elev-2-shadow);
+  color: var(--surface-fg-secondary);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+}
+
+.raw .cm-editor {
+  height: 100%;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-mono);
+  color: var(--surface-fg);
+  background: var(--surface-bg);
+}
+
+.raw .cm-scroller {
+  overflow: auto;
+  /* UI-FEEDBACK.md M5b: CodeMirror's own scrollbar describes the
+   * ~1 MB window, not the document — dragging it fires a stream of scroll
+   * events that each re-slice the window mid-drag, moving the thumb out
+   * from under the pointer. The scrubber (Scrubber.tsx) is the real scroll
+   * control now; this one is actively misleading, not merely redundant.
+   * Wheel/keyboard scrolling are unaffected — only the drag handle goes. */
+  scrollbar-width: none;
+}
+
+.raw .cm-scroller::-webkit-scrollbar {
+  display: none;
+}
+
+.raw .cm-content {
+  caret-color: var(--accent);
+}
+
+/* UI-FEEDBACK.md M5b: the gutter was added late (see this file's own
+ * "No line numbers" history) and its styling was never brought into the
+ * theme system, so CodeMirror's own built-in light-gutter theme showed
+ * through in dark mode regardless of `data-theme`. `--elev-1-bg` (not
+ * `--surface-bg`) so the gutter reads as a slightly distinct strip next to
+ * the text, the same relationship the Tree/Detail panes use for their own
+ * secondary surfaces. */
+.raw .cm-gutters {
+  background: var(--elev-1-bg);
+  color: var(--surface-fg-secondary);
+  border-right: var(--border-width) solid var(--surface-border);
+}
+
+.raw .cm-lineNumbers .cm-gutterElement {
+  color: var(--surface-fg-secondary);
+}
+
+/* R117 (`R113-inactive-selection.md` §12) — the text selection, themed and
+ * focus-aware through `::selection`, which is what actually paints here.
+ *
+ * R115 originally wrote this as a `.cm-selectionBackground` pair, on the
+ * reasonable-looking assumption that CodeMirror renders the selection
+ * itself. It does not, in *this* editor: `drawSelection()` is what mounts
+ * `.cm-selectionBackground` and `.cm-cursorLayer`, and it is not among
+ * `Raw.tsx`'s extensions (there is no `basicSetup` here — every extension
+ * is listed explicitly). Measured on a real mounted view: zero
+ * `.cm-selectionBackground` nodes, focused or blurred. Those rules were
+ * dead, and `!important` made them look load-bearing.
+ *
+ * What paints instead is the browser's own selection over
+ * `.cm-content`'s `contenteditable`, and `::selection` is the handle on
+ * it. Both forms are needed: the text lives in descendant `.cm-line`
+ * elements, so the bare `.cm-content::selection` alone never matches it.
+ *
+ * Custom properties resolve inside `::selection` (they inherit from the
+ * originating element), so this follows `--selection-bg` from `.raw-pane`
+ * exactly like `.cm-np-selected` below — and an ancestor `:focus-within`
+ * change repaints it, verified on screen rather than only in
+ * `getComputedStyle`.
+ *
+ * `::selection` accepts a restricted property set — `background-color` is
+ * in it; `outline` and `box-shadow` are not. Do not reach for those here.
+ *
+ * `test/inactiveSelection.test.tsx`'s characterization test still asserts
+ * `drawSelection()`'s layers are absent, so this stays honest the day
+ * someone adds it and both mechanisms would otherwise go live at once. */
+.raw .cm-content ::selection,
+.raw .cm-content::selection {
+  background: var(--selection-bg);
+}
+
+/* Syntax decorations (D11) — driven by Klados's own parse tree, not a
+ * separate tokenizer; see decorations.ts for what each class covers and,
+ * as importantly, what it deliberately doesn't (attribute names,
+ * punctuation — NodeStore doesn't retain their byte offsets). */
+.raw .cm-np-tagName {
+  color: var(--syntax-tag-name);
+}
+
+.raw .cm-np-string {
+  color: var(--syntax-string);
+}
+
+.raw .cm-np-number {
+  color: var(--syntax-number);
+}
+
+.raw .cm-np-keyword {
+  color: var(--syntax-keyword);
+}
+
+.raw .cm-np-comment {
+  color: var(--syntax-comment);
+}
+
+/* The selected node's span (§4.4) — a highlight, not a syntax class, so it
+ * layers underneath text color via background rather than competing with
+ * it. */
+.raw .cm-np-selected {
+  background: var(--selection-bg);
+}
+
+/* Find (M4-PLAN.md G5) — a background, not a syntax class, same layering
+ * as .cm-np-selected. Each match mark gets exactly one of these two
+ * classes (never both — the current match is `.cm-np-match-current`
+ * instead of `.cm-np-match`, not in addition to it).
+ *
+ * R80 (`R78-find-affordances.md` §3): the current match used to swap in a
+ * brighter *fill* — measured down to 1.04:1 for text over it. No fill
+ * between the dim one (already at its own contrast floor) and the old
+ * value is both legible and visibly distinct, so the signal is a ring
+ * instead: `inset` box-shadow, not `outline`/`border`, so it never changes
+ * line height in this virtualized CodeMirror window. */
+.raw .cm-np-match {
+  background: var(--find-match-bg);
+}
+
+/* R89 (`R86-find-as-query-surface.md` §5, "two knock-ons") — a multi-line
+ * match's own decoration is what CodeMirror splits per line, one
+ * `.cm-np-match-current` span per fragment, each in a different `.cm-line`.
+ * A full `inset 0 0 0` ring drew each fragment as its own closed box —
+ * two matches, not one spanning match. A left edge instead of a full ring
+ * reads as one continuous mark down every fragment regardless of how many
+ * lines it spans, and matches the app's own existing severity language
+ * (R57's notification hairline: "severity moves to a 3px left edge") rather
+ * than inventing a second visual vocabulary for "the current one."
+ *
+ * Kept by R102 (`R102-find-single-line.md`), which reverted the multi-line
+ * *find field* — this outlived the feature that prompted it. A multi-line
+ * match can still arise from a needle typed elsewhere (a regex, or a path
+ * query result spanning a wrapped line), and R57's severity language is the
+ * better reason for this shape regardless. Do not "finish" R102's revert by
+ * undoing it. */
+.raw .cm-np-match-current {
+  background: var(--find-match-bg);
+  box-shadow: inset 3px 0 0 0 var(--find-match-current-border);
+}

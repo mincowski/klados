@@ -1,0 +1,89 @@
+/**
+ * Dark theme (CONCEPT.md §9.1, §9.3). A peer of light.css, authored
+ * independently rather than derived by inversion — accent, diagnostic and
+ * syntax hues are each hand-picked for contrast on a dark surface, not
+ * computed from the light theme's values. Elevation drops the shadow to
+ * near-zero and steps the background lighter instead (§9.3). Token names
+ * must exactly match light.css — enforced by a parity test
+ * (`test/themeTokens.test.ts`).
+ */
+:root[data-theme='dark'] {
+  /* UI-FEEDBACK.md M5b: nothing in this codebase declared
+   * `color-scheme` anywhere, so Chromium painted its default *light*
+   * scrollbars (and default form-control/canvas colors) regardless of
+   * `data-theme`. This is what makes the browser's own UA-level chrome
+   * agree with the theme, not just this app's own painted surfaces. */
+  color-scheme: dark;
+
+  --surface-bg: var(--gray-900);
+  --surface-fg: var(--gray-100);
+  --surface-fg-secondary: var(--gray-400);
+  --surface-border: var(--gray-700);
+
+  --elev-1-bg: var(--gray-800);
+  --elev-1-shadow: none;
+  --elev-2-bg: var(--gray-850);
+  --elev-2-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+
+  --row-hover-bg: var(--gray-800);
+  --row-selected-bg: var(--blue-900);
+  --row-selected-fg: var(--gray-50);
+  --row-alt-bg: var(--gray-850);
+
+  /* R113 (`R113-inactive-selection.md` §4) — the same selection, drawn when
+   * the keyboard is not in this pane. Measured against the focused band and
+   * against hover, not against the usual 3:1 text bar — see the plan's own
+   * contrast table for why. */
+  --row-selected-inactive-bg: var(--gray-700);
+  --focus-ring-inactive: var(--gray-400);
+
+  /* R33/D-051 §1b — see light.css's own comment on these tokens. Minimum
+   * contrast: thumb-vs-track >= 3:1 in both themes — gray-500-on-gray-800
+   * is 3.32:1. Check both when changing either
+   * (`test/scrollbarContrast.test.tsx` asserts it). */
+  --scrollbar-track-bg: var(--gray-800);
+  --scrollbar-thumb-bg: var(--gray-500);
+  --scrollbar-thumb-hover-bg: var(--gray-400);
+  --scrollbar-thumb-active-bg: var(--accent);
+
+  --focus-ring: var(--blue-dark-accent);
+  --accent: var(--blue-dark-accent);
+  --accent-fg: var(--gray-900);
+
+  /* UI-FEEDBACK.md M5b — see light.css's own comment on this token;
+   * one step past --surface-border in the same direction that theme's own
+   * elevation steps go. */
+  --pane-focus-ring: var(--gray-600);
+
+  /* M5d-PLAN.md R1 — see light.css's own comment on this token. */
+  --mark-fg: var(--amber-mark-dark);
+
+  --diagnostic-warning-fg: var(--amber-400);
+  --diagnostic-warning-bg: var(--amber-900);
+  --diagnostic-error-fg: var(--red-400);
+  --diagnostic-error-bg: var(--red-900);
+  --diagnostic-fatal-fg: var(--gray-950);
+  --diagnostic-fatal-bg: var(--red-400);
+
+  /* Find (M4-PLAN.md G5) — same amber-as-"found" reasoning as light.css,
+   * hand-picked for a dark surface rather than inverted (§9.1): the base
+   * match fill sits near-black-amber so it doesn't wash out body text.
+   *
+   * R80 (`R78-find-affordances.md` §3): the current match used to step up
+   * to a brighter fill, measured down to 1.04:1 for text over it. See
+   * light.css's own comment on this token split — the current match is now
+   * a ring, and this fill token stays one thing. */
+  --find-match-bg: var(--amber-900);
+  /* Against `--find-match-bg` itself: 7.61:1. */
+  --find-match-current-border: var(--amber-400);
+  /* Tree/Grid/Scrubber's marker bar — keeps today's exact value. */
+  --find-match-marker: var(--amber-600);
+
+  --syntax-tag-name: var(--blue-400);
+  --syntax-attr-name: var(--green-400);
+  --syntax-string: var(--amber-400);
+  --syntax-number: var(--purple-400);
+  --syntax-comment: var(--gray-500);
+  --syntax-keyword: var(--blue-300);
+  --syntax-punctuation: var(--gray-400);
+}

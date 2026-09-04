@@ -1,0 +1,49 @@
+{
+  "fixture": "cars-10mb.xml",
+  "gcExposed": true,
+  "baselineRssMB": 78.5,
+  "readMs": 19,
+  "docChars": 10485791,
+  "fileMB": 10,
+  "loadMs": 107,
+  "lines": 389816,
+  "afterLoadRssMB": 129.2,
+  "memoryDeltaMB": 50.7,
+  "keystroke_1%": {
+    "p50": 16.7,
+    "p95": 17.3,
+    "min": 15,
+    "max": 18.4
+  },
+  "keystroke_50%": {
+    "p50": 16.6,
+    "p95": 17.7,
+    "min": 12.7,
+    "max": 24
+  },
+  "keystroke_99%": {
+    "p50": 16.7,
+    "p95": 17.4,
+    "min": 14.1,
+    "max": 20.5
+  },
+  "scroll": {
+    "p50": 16.7,
+    "p95": 17.5,
+    "min": 13,
+    "max": 22.5,
+    "pctOver32ms": 0,
+    "pctOver16ms": 47.5
+  },
+  "scrollWheel": {
+    "p50": 16.6,
+    "p95": 23.4,
+    "min": 6.3,
+    "max": 27.2,
+    "pctOver32ms": 0,
+    "pctOver16ms": 45
+  },
+  "fullReplaceMs": 75,
+  "finalRssMB": 256.9,
+  "ok": true
+}

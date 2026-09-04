@@ -1,0 +1,66 @@
+/**
+ * A flat bottom strip (CONCEPT.md §9.4 names the command bar as the
+ * elevated one; this one isn't in either named bucket, so it follows the
+ * flat pane-header convention instead — a border and background tone, no
+ * elevation). Semantic tokens only — stylelint enforces it (invariant 9).
+ *
+ * M5f-PLAN.md: two groups (left = document state, right = document facts),
+ * `justify-content: space-between` between them rather than one flat row —
+ * VS Code's own layout. Every item is unconditional (§1's "nothing in the
+ * strip ever reflows"), so no conditional width/flex logic is needed here.
+ */
+.status-bar {
+  flex: none;
+  height: var(--row-height);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 0 var(--space-3);
+  color: var(--surface-fg-secondary);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  border-top: var(--border-width) solid var(--surface-border);
+}
+
+.status-bar-group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.status-bar-item {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Status bar items that are also commands (invariant 10) — reset from a
+ * `<button>`'s own chrome to read as plain strip text until hovered. */
+button.status-bar-clickable {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 0 var(--space-1);
+  margin: calc(var(--space-1) * -1) 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+button.status-bar-clickable:hover:not(:disabled) {
+  background: var(--row-hover-bg);
+  color: var(--surface-fg);
+}
+
+button.status-bar-clickable:disabled {
+  cursor: default;
+  opacity: var(--disabled-opacity);
+}
+
+.status-bar-info-anchor {
+  position: relative;
+  display: flex;
+  align-items: center;
+}

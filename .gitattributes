@@ -1,0 +1,11 @@
+# R47 (docs/R47-repo-hygiene.md): core.autocrlf=true plus no .gitattributes meant
+# every tracked text file checked out as CRLF on Windows, which is a Prettier
+# violation (LF-configured) on every single line — the buried signal that hid
+# four real lint errors. `eol=lf` normalizes storage and checkout to LF for text
+# files regardless of the checking-out machine's own autocrlf setting.
+* text=auto eol=lf
+
+# Never text-normalize these — corrupts binary image formats.
+*.ico binary
+*.icns binary
+*.png binary

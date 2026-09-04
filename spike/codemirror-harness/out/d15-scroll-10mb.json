@@ -1,0 +1,48 @@
+{
+  "ok": true,
+  "fixture": "cars-10mb.xml",
+  "sizeBytes": 10485791,
+  "nodeCount": 329575,
+  "rowCount": 389815,
+  "parseMs": 182.5,
+  "withDecorations": {
+    "label": "decorations-on",
+    "scroll": {
+      "p50": 17.5,
+      "p95": 21.6,
+      "min": 11,
+      "max": 24,
+      "pctOver32ms": 0,
+      "pctOver16ms": 86.5
+    },
+    "crossing": {
+      "crossings": 20,
+      "frameStats": {
+        "p50": 17.7,
+        "p95": 28.9,
+        "min": 12.1,
+        "max": 28.9
+      }
+    }
+  },
+  "withoutDecorations": {
+    "label": "decorations-off",
+    "scroll": {
+      "p50": 17.6,
+      "p95": 19.5,
+      "min": 14.2,
+      "max": 20.9,
+      "pctOver32ms": 0,
+      "pctOver16ms": 89
+    },
+    "crossing": {
+      "crossings": 20,
+      "frameStats": {
+        "p50": 17.8,
+        "p95": 18.2,
+        "min": 17.1,
+        "max": 18.2
+      }
+    }
+  }
+}

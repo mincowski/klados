@@ -1,0 +1,48 @@
+/**
+ * R33 addendum 2 / D-051. The strip styling shared by `Scrollbar.tsx` (Tree,
+ * Detail, Grid) and `Scrubber.tsx` (Raw) — the components themselves stay
+ * separate (Scrubber can't derive a thumb from `scrollHeight`, D-031, §1d),
+ * but their visual language must not be able to drift again the way three
+ * separate addenda already found it drifting by accident when each file
+ * kept its own copy of the same declarations. `Scrollbar.css` and
+ * `Scrubber.css` both `@import` this and add only what's genuinely their
+ * own on top of it.
+ */
+
+/* Track background — R33/1c: deliberately visible, not transparent. */
+.scrollbar-track,
+.scrubber {
+  background: var(--scrollbar-track-bg);
+}
+
+/* Track width — the vertical case, which both share. The horizontal track
+ * (Scrollbar-only, sized by height instead) stays local to Scrollbar.css. */
+.scrollbar-track-vertical,
+.scrubber {
+  width: var(--scrubber-width);
+}
+
+/* Thumb geometry, radius, transition. The horizontal thumb's inline
+ * `left`/`width` override this `left`/`right`, and `right` is then ignored
+ * as over-constrained — Scrollbar.css only needs to add its own
+ * `top`/`bottom` inset on top of this, not replace it. */
+.scrollbar-thumb,
+.scrubber-thumb {
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  background: var(--scrollbar-thumb-bg);
+  border-radius: var(--radius-sm);
+  transition: background-color 120ms ease;
+}
+
+/* Hover/active states — R33/1b's control tokens. */
+.scrollbar-thumb:hover,
+.scrubber:hover .scrubber-thumb {
+  background: var(--scrollbar-thumb-hover-bg);
+}
+
+.scrollbar-thumb:active,
+.scrubber.scrubber-active .scrubber-thumb {
+  background: var(--scrollbar-thumb-active-bg);
+}

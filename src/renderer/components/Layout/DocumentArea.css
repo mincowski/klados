@@ -1,0 +1,275 @@
+/**
+ * M5c-PLAN.md J8. Semantic tokens only — stylelint enforces it here like
+ * every other component stylesheet (invariant 9). Replaces the old
+ * `.layout-empty` rule (Layout.css) — sized for the whole window, not a
+ * toolbar, since every phase this now covers used to render as small text
+ * beside the command bar's Open button.
+ */
+.document-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  text-align: center;
+  color: var(--surface-fg-secondary);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  padding: var(--space-4);
+}
+
+.document-area-confirm,
+.document-area-parsing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 480px;
+}
+
+/* R104: an inline element's padding/border never grows the line box it
+ * sits in, so the `kbd` key caps stand proud of the paragraph's own
+ * `line-height: normal` and collide on a wrapped second line
+ * (`R104-start-pane-polish.md` §3). Fixed on the line box, not the caps —
+ * padding on `kbd` would make the caps taller and the overlap worse. Also
+ * applies to the `parsing` phase's percentage line, which shares this
+ * class; harmless there. */
+.document-area-hint {
+  line-height: 1.9;
+}
+
+.document-area-hint kbd {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  padding: 0 var(--space-1);
+  border: var(--border-width) solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  background: var(--elev-1-bg);
+}
+
+.document-area-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.document-area button {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  padding: var(--space-1) var(--space-3);
+  border: var(--border-width) solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  background: var(--elev-1-bg);
+  color: var(--surface-fg);
+  cursor: pointer;
+}
+
+.document-area button:hover {
+  background: var(--row-hover-bg);
+}
+
+/* A determinate bar, not just a percentage in text — J8's own acceptance
+ * ("a centred, legible progress state… with a working Cancel"). */
+.document-area-progress {
+  width: 100%;
+  max-width: 320px;
+  height: 8px;
+  border-radius: var(--radius-sm);
+  background: var(--elev-1-bg);
+  border: var(--border-width) solid var(--surface-border);
+  overflow: hidden;
+}
+
+.document-area-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 120ms ease;
+}
+
+.document-area-banner {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  margin: 0;
+}
+
+.document-area-banner-error {
+  color: var(--diagnostic-error-fg);
+  background: var(--diagnostic-error-bg);
+}
+
+/* R96 (`R95-recent-files.md` §4): the two-column start layout — `empty`
+ * and `error` both render it (R97). `.document-area` itself sets
+ * `text-align: center` and `max-width: 480px` on every phase; both are
+ * overridden here (`text-align: left` on the columns, a wider ~720px cap)
+ * since a two-column layout needs more room and left-aligned rows. */
+.document-area-start {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  max-width: 560px;
+}
+
+/* R104: Open stacked above Recent, not side by side — at the narrower
+ * 560px cap a two-column split left too little width for a recent row's
+ * file name (`R104-start-pane-polish.md` §1). Open stays first (source
+ * order), which is also the right reading/tab order.
+ *
+ * R104 addendum: the gap grew from `--space-4` — the Open column's own
+ * internal gap shrank in the same pass (below), so with both at the same
+ * value the Open File… button read as closer to "Recent" than to its own
+ * heading/hint. A section boundary needs to read as looser than anything
+ * inside a section. */
+.document-area-columns {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space-4) + var(--space-2));
+  width: 100%;
+  text-align: left;
+}
+
+/* `flex: none`, not `flex: 1 1 260px` — in a *column* flex container
+ * `flex-basis` is a height, and `flex-grow: 1` stretches both sections to
+ * fill the container's height rather than sizing to content
+ * (`R104-start-pane-polish.md` §2's trap). */
+.document-area-column {
+  flex: none;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* R104 addendum: tighter than `.document-area-column`'s default — Open's
+ * heading, hint and button read as one unit, not three evenly-spaced
+ * items competing with the gap to the next section. */
+.document-area-open-column {
+  gap: var(--space-1);
+}
+
+.document-area-column h2 {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  font-weight: 600;
+  color: var(--surface-fg);
+}
+
+.document-area-empty-inline {
+  margin: 0;
+  color: var(--surface-fg-secondary);
+}
+
+.document-area-recent-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+/* R104 addendum: the row itself is no longer interactive — only the file
+ * name is (`.document-area-recent-name` below). No hover background, no
+ * cursor, no button semantics here; those belonged to R105's whole-row
+ * button, which read as a mis-sized click target once the name was
+ * already styled as a link. `overflow: hidden` (R105): middle truncation
+ * gives each field an incompressible floor (the tail is always fully
+ * visible), so without this the row overflows rather than clips at the
+ * narrowest widths. */
+.document-area-recent-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  overflow: hidden;
+  padding: var(--space-1) var(--space-2);
+  color: var(--surface-fg);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+}
+
+/* Same fixed-width-centered-glyph shape `.tab-icon` uses (R83/R98) —
+ * `--font-mono` here is correct even for the XML `<>` marker (R98 keys the
+ * font on the glyph, not the surface; this is `--font-mono`'s box, not
+ * `--font-ui`'s). */
+.document-area-recent-glyph {
+  flex: none;
+  width: 20px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* R105 / R104 addendum: the file name and directory were both
+ * `flex: 1 1 auto`, so shrink was distributed proportional to content
+ * width — the long directory kept more absolute width while the short
+ * filename was squeezed to nothing. `flex-shrink: 1` here and `100` on
+ * `.document-area-recent-dir` makes the path absorb essentially all
+ * shrink pressure first, so the name is never clipped while the path
+ * still has room to give (`R104-start-pane-polish.md` §4).
+ *
+ * This is the row's only clickable element (the addendum that reversed
+ * R105's whole-row button), so it resets every box property
+ * `.document-area button` sets — border, background, padding — down to
+ * inline text, and gets underline-on-hover/focus instead of a background
+ * change, the affordance an actual link uses. Selector is the
+ * `.document-area-recent-row` descendant form, not the bare class, purely
+ * for specificity: `.document-area button` (element + class) otherwise
+ * outranks a single class and its `color`/`background` win regardless of
+ * source order. */
+.document-area-recent-row .document-area-recent-name {
+  flex: 1 1 auto;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-align: left;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.document-area-recent-row .document-area-recent-name:hover,
+.document-area-recent-row .document-area-recent-name:focus-visible {
+  /* Overrides `.document-area button:hover`'s `background` — a link
+   * underlines, it doesn't grow a box around itself. */
+  background: transparent;
+  text-decoration: underline;
+}
+
+.document-area-recent-row .document-area-recent-name:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.document-area-recent-dir {
+  flex: 1 1 auto;
+  flex-shrink: 100;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  color: var(--surface-fg-secondary);
+}
+
+/* `splitForMiddleTruncation`'s head/tail split (`TabStrip.css`'s own
+ * `.tab-label-head`/`-tail`, the pattern this copies): the head is what
+ * CSS ellipsis-truncates when the row is too narrow, the tail is always
+ * fully visible. */
+.document-area-recent-head {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: bottom;
+}
+
+.document-area-recent-tail {
+  white-space: nowrap;
+}

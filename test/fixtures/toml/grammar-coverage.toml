@@ -1,0 +1,79 @@
+# M6-PLAN.md R17 — one small document exercising every grammar feature R14
+# lists, so the architecture-validation check (docs/M6-RESULTS.md) has a
+# real file to open through the app, not just inline test strings.
+
+# Bare, quoted and literal keys.
+bare_key = 1
+"quoted key" = 2
+'literal key' = 3
+
+# Dotted key paths creating an implicit nested table.
+physical.color = "orange"
+physical.shape = "round"
+
+# Strings: basic (with escapes), literal (no escapes), and both multi-line
+# forms — including the "trim the first newline" rule.
+basic = "line one\nline two\ttabbed"
+literal = 'C:\Users\klados\no\escapes'
+multiline_basic = """
+first line after the trim rule
+second line"""
+multiline_literal = '''
+raw \n stays literal'''
+
+# Numbers: decimal/hex/octal/binary integers with digit separators, floats,
+# inf/nan, signed forms.
+int_dec = 1_000_000
+int_hex = 0xDEADBEEF
+int_oct = 0o755
+int_bin = 0b1010_1010
+float_val = 3.141_59
+float_exp = 6.02e23
+float_inf = inf
+float_neg_inf = -inf
+float_nan = nan
+signed_pos = +99
+signed_neg = -17
+
+# Booleans.
+flag_true = true
+flag_false = false
+
+# All four date/time forms.
+offset_datetime = 1979-05-27T07:32:00Z
+local_datetime = 1979-05-27T07:32:00
+local_date = 1979-05-27
+local_time = 07:32:00
+
+# Inline table and inline array, including nesting.
+inline_table = { x = 1, y = 2, nested = { z = 3 } }
+inline_array = [1, 2, 3, [4, 5], { a = 1 }]
+
+# A multi-line inline array with a comment between elements — R15's own
+# resumeContextFor gap (a Comment here is classified as an inline value by
+# ancestor chain alone) and R16's own verbatim-copy carve-out both live
+# here.
+multiline_array_with_comment = [
+  1, # first
+  2, # second
+  3,
+]
+
+[table]
+key = "value"
+
+[table.nested]
+key = "value"
+
+[[array_of_tables]]
+name = "first"
+
+[[array_of_tables]]
+name = "second"
+
+# A dotted array-of-tables name, at the top level (not nested inside another
+# array's own element — that shape is a disclosed, separately-tested
+# incremental-reparse limitation, see this file's own top comment and
+# test/subtreeSplice.test.ts).
+[[settings.profiles]]
+name = "profile one"

@@ -1,0 +1,94 @@
+/**
+ * Light theme (CONCEPT.md §9.1, §9.3). Authored as a peer of dark.css, not
+ * derived from it — every token here is a deliberate choice, not an
+ * inversion. Elevation carries in the shadow; background stays near-white
+ * (§9.3). Token names must exactly match dark.css — enforced by a parity
+ * test (`test/themeTokens.test.ts`).
+ */
+:root[data-theme='light'] {
+  /* See dark.css's own comment on this declaration. */
+  color-scheme: light;
+
+  --surface-bg: var(--gray-0);
+  --surface-fg: var(--gray-900);
+  --surface-fg-secondary: var(--gray-600);
+  --surface-border: var(--gray-200);
+
+  --elev-1-bg: var(--gray-0);
+  --elev-1-shadow: 0 1px 2px rgba(20, 23, 30, 0.08), 0 1px 1px rgba(20, 23, 30, 0.04);
+  --elev-2-bg: var(--gray-0);
+  --elev-2-shadow: 0 4px 12px rgba(20, 23, 30, 0.14), 0 2px 4px rgba(20, 23, 30, 0.08);
+
+  --row-hover-bg: var(--gray-100);
+  --row-selected-bg: var(--blue-100);
+  --row-selected-fg: var(--gray-900);
+  --row-alt-bg: var(--gray-50);
+
+  /* R113 (`R113-inactive-selection.md` §4) — see dark.css's own comment on
+   * this pair. */
+  --row-selected-inactive-bg: var(--gray-300);
+  --focus-ring-inactive: var(--gray-600);
+
+  /* R33/D-051 §1b: control tokens, not elevation surface tokens.
+   * `--elev-2-bg` is the lightest surface in this theme, which made the
+   * thumb near-invisible against a near-white pane. Minimum contrast:
+   * thumb-vs-track must be >= 3:1 (WCAG's non-text contrast minimum) in
+   * both themes — gray-500-on-gray-100 is 3.68:1. Check both when changing
+   * either (`test/scrollbarContrast.test.tsx` asserts it). */
+  --scrollbar-track-bg: var(--gray-100);
+  --scrollbar-thumb-bg: var(--gray-500);
+  --scrollbar-thumb-hover-bg: var(--gray-600);
+  --scrollbar-thumb-active-bg: var(--accent);
+
+  --focus-ring: var(--blue-500);
+  --accent: var(--blue-500);
+  --accent-fg: var(--gray-0);
+
+  /* UI-FEEDBACK.md M5b: "which pane am I in" — deliberately quieter
+   * than --focus-ring, which stays loud for its real job (§9.6/§11.5's
+   * keyboard focus ring on controls). A step past --surface-border rather
+   * than the accent hue, so it reads as "this pane" without competing with
+   * an actual focused control inside it. */
+  --pane-focus-ring: var(--gray-300);
+
+  /* M5d-PLAN.md R1 — the title bar's inline app mark (assets/README.md's
+   * "Later — a Klados-drawn title bar"). */
+  --mark-fg: var(--amber-mark-light);
+
+  --diagnostic-warning-fg: var(--amber-600);
+  --diagnostic-warning-bg: var(--amber-100);
+  --diagnostic-error-fg: var(--red-600);
+  --diagnostic-error-bg: var(--red-100);
+  --diagnostic-fatal-fg: var(--gray-0);
+  --diagnostic-fatal-bg: var(--red-600);
+
+  /* Find (M4-PLAN.md G5) — a highlight, not a diagnostic or syntax hue, but
+   * amber reads as "found" the same way it reads as "warning": attention
+   * without alarm.
+   *
+   * R80 (`R78-find-affordances.md` §3): the current match used to step to a
+   * stronger, more saturated *fill* — measured down to 1.04:1 for text over
+   * it, not merely "intense" but unreadable, and no fill between the dim
+   * one (already at its own contrast floor) and the old value is both
+   * legible and visibly distinct. So the current match is a ring instead
+   * (`--find-match-current-border`, `Raw.css`), and this fill token stays
+   * one thing — the highlight under every match, current or not. */
+  --find-match-bg: var(--amber-100);
+  /* The ring around the current match, drawn as an inset box-shadow so it
+   * never changes line height in Raw's virtualized window. Against
+   * `--find-match-bg` itself: 3.41:1. */
+  --find-match-current-border: var(--amber-600);
+  /* Tree/Grid/Scrubber's "this row/bucket has a match" marker bar — R80's
+   * pure rename half of the old `--find-match-current-bg` split: these three
+   * uses were never "current," they were "any match," and this keeps their
+   * exact prior value so nothing there changes visually. */
+  --find-match-marker: var(--amber-400);
+
+  --syntax-tag-name: var(--blue-600);
+  --syntax-attr-name: var(--green-600);
+  --syntax-string: var(--amber-600);
+  --syntax-number: var(--purple-600);
+  --syntax-comment: var(--gray-500);
+  --syntax-keyword: var(--blue-700);
+  --syntax-punctuation: var(--gray-600);
+}

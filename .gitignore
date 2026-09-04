@@ -1,0 +1,68 @@
+# ---------------------------------------------------------------------------
+# Dependencies
+# ---------------------------------------------------------------------------
+node_modules/
+
+# ---------------------------------------------------------------------------
+# Build output
+# ---------------------------------------------------------------------------
+# Anchored to the repository root on purpose: electron-vite writes to out/ and
+# electron-builder to dist/, but spike/codemirror-harness/out/ holds the M0a
+# measurement data and must stay. An unanchored `out/` would swallow it.
+/out/
+/dist/
+/release/
+/.vite/
+
+# Generated at build time (README, "Third-party notices").
+/THIRD-PARTY-NOTICES.txt
+
+# ---------------------------------------------------------------------------
+# Test fixtures
+# ---------------------------------------------------------------------------
+# Written by `npm run fixtures:generate`. Around a gigabyte, deterministic, and
+# regenerable — never committed. Tests that need them skip cleanly if absent.
+test/fixtures/generated/
+
+# ---------------------------------------------------------------------------
+# M0a spike
+# ---------------------------------------------------------------------------
+# spike/ is committed, not ignored: RESULTS.md is a decision record and the
+# harness sources are the evidence behind D-030 and D-031. spike/.gitignore
+# narrows what is excluded inside it (fixtures, node_modules, build output).
+
+# ---------------------------------------------------------------------------
+# Tooling and local state
+# ---------------------------------------------------------------------------
+.claude/settings.local.json
+.claude/*.lock
+.claude/worktrees/
+coverage/
+*.tsbuildinfo
+.eslintcache
+
+# Vitest browser mode's own failure-screenshot artifacts (R10) — not the
+# Electron screenshot in docs/screenshots/, which is deliberately committed.
+test/__screenshots__/
+
+# ---------------------------------------------------------------------------
+# Logs
+# ---------------------------------------------------------------------------
+*.log
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---------------------------------------------------------------------------
+# OS cruft
+# ---------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------------------------------------------------------------------------
+# Local environment
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example

@@ -1,0 +1,52 @@
+name: CI
+
+# R49 (R47-repo-hygiene.md): nothing prevented a push that failed
+# typecheck, lint, or either test project. R47 is a prerequisite — this
+# gates on `npm run lint`, and that command only became meaningful once the
+# buried CRLF signal stopped hiding real errors under it.
+#
+# Deliberately not in scope: release/packaging automation, signing or
+# notarization. Those belong to the publication round.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      - run: npm run lint
+
+      # R54 addendum (R54-signal-followups.md): `typecheck` is four
+      # `tsc --noEmit` passes and never invokes Vite, so it cannot catch a
+      # bundling failure. Demonstrated: replacing an icon import's path with
+      # a file that does not exist still typechecks clean, because
+      # `vite/client`'s ambient `*.svg?raw` declaration types any such path —
+      # only the real build resolves the file. R38 added four of those
+      # imports.
+      #
+      # `npx electron-vite build`, not `npm run build`: that script is
+      # `npm run typecheck && electron-vite build`, and typecheck already ran
+      # as its own step above. Running it here too would double ~40s and
+      # report a type error under a step labelled "build".
+      - run: npx electron-vite build
+
+      # The browser project (`vitest.config.ts`) drives real Chromium via
+      # Playwright — needs the browser binary and its OS-level deps
+      # installed before `npm test` (which now runs both projects, R48a).
+      - run: npx playwright install --with-deps chromium
+
+      - run: npm test

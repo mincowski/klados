@@ -1,0 +1,110 @@
+/**
+ * Elevated surface (CONCEPT.md §9.4/§9.3, R60 — `R60-dark-elevation.md`):
+ * `--elev-2-bg` + `--elev-2-shadow` + the `--surface-border` hairline, the
+ * same tier `Find.css`/`CommandPalette.css` already use for a transient
+ * floating surface. The first new elevated surface since R60 — the border
+ * is what R60's own acceptance criterion 3 exists to guard against a new
+ * surface skipping.
+ */
+/* R118 — no scrim, for the reasons `CommandPalette.css`'s own
+ * `.palette-overlay` comment gives in full: an `inset: 0` veil can never
+ * cover Windows' OS-drawn caption buttons, and in dark it lightened the
+ * background rather than dimming it. Both overlays dropped it together —
+ * they had the identical rule, and one modal dimming while the other does
+ * not would be a worse inconsistency than either choice. */
+.shortcuts-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.shortcuts-panel {
+  width: min(720px, calc(100vw - var(--space-4) * 2));
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--elev-2-bg);
+  box-shadow: var(--elev-2-shadow);
+  border: var(--border-width) solid var(--surface-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.shortcuts-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: var(--border-width) solid var(--surface-border);
+}
+
+.shortcuts-header h2 {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  color: var(--surface-fg);
+  outline: none;
+}
+
+.shortcuts-close {
+  border: none;
+  background: transparent;
+  color: var(--surface-fg-secondary);
+  cursor: pointer;
+  font-size: var(--font-size-ui);
+  padding: var(--space-1) var(--space-2);
+}
+
+.shortcuts-close:hover {
+  color: var(--surface-fg);
+}
+
+.shortcuts-body {
+  overflow-y: auto;
+  padding: var(--space-4);
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-4);
+}
+
+.shortcuts-section h3 {
+  margin: 0 0 var(--space-2) 0;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  color: var(--surface-fg-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.shortcuts-pane-group {
+  margin-bottom: var(--space-3);
+}
+
+.shortcuts-pane-group h4 {
+  margin: 0 0 var(--space-1) 0;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  color: var(--surface-fg);
+}
+
+.shortcuts-section table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.shortcuts-section td {
+  padding: var(--space-1) var(--space-2) var(--space-1) 0;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  color: var(--surface-fg);
+  vertical-align: top;
+}
+
+.shortcuts-key {
+  white-space: nowrap;
+  color: var(--surface-fg-secondary);
+  font-family: var(--font-mono);
+}

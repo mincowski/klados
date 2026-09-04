@@ -1,0 +1,19 @@
+out
+dist
+pnpm-lock.yaml
+tsconfig.json
+tsconfig.*.json
+spike/**
+src/core/types.ts
+
+# R55 (docs/R54-signal-followups.md): the prose in this repository — CLAUDE.md,
+# every docs/*.md plan/results/decision document, README.md — is hand-wrapped
+# and deliberately structured, not auto-wrapped. Prettier's markdown output
+# (*emphasis* -> _emphasis_, reflowing) is a different house style, not a more
+# correct one; running `npm run format` before this existed rewrote 51
+# documents for zero benefit and would have made `git blame` useless on the
+# files this project most depends on being readable. If markdown formatting
+# is ever wanted here, that should be a deliberate decision reversing this
+# one, not something `prettier --write .` does as a side effect of
+# formatting code. (Subsumes the old standalone `LICENSE.md` entry above.)
+*.md

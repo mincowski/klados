@@ -1,0 +1,11 @@
+{
+  "extends": "@electron-toolkit/tsconfig/tsconfig.node.json",
+  "include": ["src/core/**/*", "src/formats/**/*", "src/cli/**/*", "test/**/*"],
+  "exclude": ["src/core/parseClient.ts", "test/**/*.test.tsx"],
+  "compilerOptions": {
+    "composite": true,
+    "types": ["node", "vite/client"],
+    "noImplicitAny": true,
+    "noUncheckedIndexedAccess": true
+  }
+}

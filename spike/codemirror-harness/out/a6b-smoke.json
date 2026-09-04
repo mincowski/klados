@@ -1,0 +1,363 @@
+{
+  "ok": true,
+  "part1": {
+    "fixture": "cars-500mb.xml",
+    "windowBytes": 1048576,
+    "boundaryCrossing": {
+      "crossings": 20,
+      "iterations": 608,
+      "incrementalCount": {
+        "yes": 20,
+        "no": 0
+      },
+      "frameMs": [
+        33,
+        16.3,
+        15.9,
+        18.6,
+        16.1,
+        16.2,
+        16.5,
+        16.1,
+        16.6,
+        16.1,
+        16.4,
+        16.9,
+        16.2,
+        16.5,
+        15.5,
+        12.1,
+        16.1,
+        16.1,
+        16,
+        16
+      ],
+      "frameStats": {
+        "p50": 16.2,
+        "p95": 33,
+        "min": 12.1,
+        "max": 33
+      },
+      "topDriftBytes": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        149,
+        0,
+        0,
+        0,
+        0
+      ],
+      "caretDriftBytes": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "maxAbsTopDrift": 149,
+      "maxAbsCaretDrift": 0
+    },
+    "offsetRoundTrip": {
+      "ok": true,
+      "checks": [
+        {
+          "label": "1%",
+          "targetAbs": 104857,
+          "origin": 0,
+          "windowEnd": 1048576,
+          "localOffset": 104857,
+          "inRange": true,
+          "reconstructedAbs": 104857,
+          "arithmeticOk": true,
+          "charOk": true
+        },
+        {
+          "label": "50%",
+          "targetAbs": 5242895,
+          "origin": 4718607,
+          "windowEnd": 5767183,
+          "localOffset": 524288,
+          "inRange": true,
+          "reconstructedAbs": 5242895,
+          "arithmeticOk": true,
+          "charOk": true
+        },
+        {
+          "label": "99%",
+          "targetAbs": 10380933,
+          "origin": 9437215,
+          "windowEnd": 10485791,
+          "localOffset": 943718,
+          "inRange": true,
+          "reconstructedAbs": 10380933,
+          "arithmeticOk": true,
+          "charOk": true
+        }
+      ]
+    }
+  },
+  "part2Min": {
+    "label": "min.json+wrap",
+    "openMs": 21.3,
+    "rssDeltaMB": -1.7,
+    "scrollHeight": 655002,
+    "clientHeight": 835,
+    "hasScrollRange": true,
+    "estimatedVisualLines": 38995,
+    "keystroke_1%": {
+      "p50": 16.7,
+      "p95": 16.9,
+      "min": 16.2,
+      "max": 17.1
+    },
+    "keystroke_50%": {
+      "p50": 16.6,
+      "p95": 17,
+      "min": 16.2,
+      "max": 18
+    },
+    "keystroke_99%": {
+      "p50": 16.7,
+      "p95": 17.1,
+      "min": 15.8,
+      "max": 17.5
+    },
+    "scrollWheel": {
+      "p50": 16.6,
+      "p95": 20,
+      "min": 12.5,
+      "max": 21.2,
+      "pctOver32ms": 0,
+      "pctOver16ms": 48
+    },
+    "boundaryCrossing": {
+      "crossings": 20,
+      "iterations": 609,
+      "incrementalCount": {
+        "yes": 20,
+        "no": 0
+      },
+      "frameMs": [
+        32.3,
+        33.2,
+        17.6,
+        17.1,
+        16.7,
+        17.5,
+        17.5,
+        19.1,
+        17.4,
+        17.3,
+        17.8,
+        17.2,
+        16.9,
+        18.2,
+        17.6,
+        14.7,
+        16.1,
+        16.4,
+        16.1,
+        15.9
+      ],
+      "frameStats": {
+        "p50": 17.4,
+        "p95": 33.2,
+        "min": 14.7,
+        "max": 33.2
+      },
+      "topDriftBytes": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "caretDriftBytes": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "maxAbsTopDrift": 0,
+      "maxAbsCaretDrift": 0
+    },
+    "ok": true
+  },
+  "part2Sanity500": {
+    "label": "500mb+wrap",
+    "openMs": 17.6,
+    "rssDeltaMB": -1.1,
+    "scrollHeight": 655002,
+    "clientHeight": 835,
+    "hasScrollRange": true,
+    "estimatedVisualLines": 38995,
+    "keystroke_1%": {
+      "p50": 16.7,
+      "p95": 17.1,
+      "min": 15.5,
+      "max": 18.1
+    },
+    "keystroke_50%": {
+      "p50": 16.6,
+      "p95": 17,
+      "min": 15.7,
+      "max": 18
+    },
+    "keystroke_99%": {
+      "p50": 16.7,
+      "p95": 17,
+      "min": 16.2,
+      "max": 18.2
+    },
+    "scrollWheel": {
+      "p50": 16.7,
+      "p95": 20.1,
+      "min": 12.3,
+      "max": 21.2,
+      "pctOver32ms": 0,
+      "pctOver16ms": 49.5
+    },
+    "boundaryCrossing": {
+      "crossings": 20,
+      "iterations": 609,
+      "incrementalCount": {
+        "yes": 20,
+        "no": 0
+      },
+      "frameMs": [
+        33.5,
+        17,
+        16.5,
+        16.9,
+        34,
+        16.2,
+        16.2,
+        18.9,
+        16.8,
+        16.8,
+        19.3,
+        17.9,
+        17.4,
+        33.5,
+        17.2,
+        14.9,
+        16.2,
+        16.1,
+        16.1,
+        16.1
+      ],
+      "frameStats": {
+        "p50": 16.9,
+        "p95": 34,
+        "min": 14.9,
+        "max": 34
+      },
+      "topDriftBytes": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "caretDriftBytes": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "maxAbsTopDrift": 0,
+      "maxAbsCaretDrift": 0
+    },
+    "ok": true
+  }
+}

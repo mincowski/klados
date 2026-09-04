@@ -1,0 +1,283 @@
+/**
+ * R25 (`R24-tabs.md` §3, `CONCEPT.md` §11.4). Semantic tokens only —
+ * stylelint enforces it here like every other component stylesheet
+ * (invariant 9).
+ */
+.tab-strip {
+  display: flex;
+  align-items: stretch;
+  height: 32px;
+  background: var(--surface-bg);
+  border-bottom: var(--border-width) solid var(--surface-border);
+  flex: none;
+}
+
+/* §11.4: tabs shrink to fit down to ~120px, after which the strip scrolls
+ * rather than shrinking further — `overflow-x: auto` plus each `.tab`'s own
+ * `min-width` is what stops the shrink and hands off to scrolling instead
+ * of the flex items just clipping. */
+.tab-strip-scroll {
+  display: flex;
+  align-items: stretch;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.tab-strip-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 1 1 160px;
+  min-width: 120px;
+  max-width: 240px;
+  padding: 0 var(--space-2);
+  border-right: var(--border-width) solid var(--surface-border);
+  color: var(--surface-fg-secondary);
+  cursor: pointer;
+  /* The active tab's own underline (below) needs a positioning context;
+   * `border-bottom` can't double as it without fighting `.tab-active`'s
+   * 2px version shifting layout by a pixel on activation. */
+  position: relative;
+}
+
+.tab:hover {
+  background: var(--row-hover-bg);
+}
+
+.tab-active {
+  color: var(--surface-fg);
+  background: var(--elev-1-bg);
+}
+
+/* §11.4: "the brand amber marks the active tab" — the same token the
+ * drawn title bar's mark uses (`Mark.tsx`, D-054a), not the blue `--accent`
+ * used for focus/selection elsewhere, so the active tab reads as brand
+ * identity rather than an ordinary selection highlight. */
+.tab-active::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--mark-fg);
+}
+
+/* R71 (`R71-text-as-icons.md` §1/§5a) removed `font-family: var(--font-mono)`
+ * on the theory that the three markers `<>`/`{}`/`[]` weren't the same
+ * character count so a fixed advance width couldn't equalise them anyway —
+ * true when written, false by the end of the same round: §5a itself changed
+ * TOML's marker from `'[ ]'` to `'[]'`, making all three two characters.
+ *
+ * R83 (`R82-hover-and-glyphs.md` §2) restored the monospace for all three:
+ * measured at this 11px/600 in `--font-ui`, `<>` draws at 15.28px and
+ * `{}`/`[]` at 7.30px against the same 20px box — XML more than twice
+ * JSON's width, not a subtle difference, and the reported "JSON looked
+ * better before." In `--font-mono` all three measure 12.89px, identical by
+ * construction.
+ *
+ * R98 (`R98-glyph-font-per-glyph.md` §2) narrowed that back to `{}`/`[]`
+ * only — Cascadia (`--font-mono`'s second entry, matched ahead of
+ * Consolas) closes `<>`'s two chevrons into a solid diamond at this
+ * weight/size, one font's letterform rather than a property of monospace
+ * in general. `font-family` no longer lives here: `glyphFontClass`
+ * (`glyphFont.ts`) picks `.glyph-ui`/`.glyph-mono` (`base.css`) per glyph
+ * string instead, applied alongside this class in the markup. `width` +
+ * `text-align: center` stays — R71's own contribution, and what lets a
+ * future four-character marker still center correctly. */
+.tab-icon {
+  flex: none;
+  width: 20px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.tab-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: var(--font-size-ui);
+}
+
+.tab-label-head {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: bottom;
+}
+
+.tab-label-tail {
+  white-space: nowrap;
+}
+
+/* §11.4: "the dirty indicator and close button share one slot" — a dot at
+ * rest, a close cross on hover, rather than two elements competing for a
+ * narrow tab's own width. */
+.tab-close-slot {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--surface-fg-secondary);
+}
+
+.tab-close-slot:hover {
+  background: var(--row-hover-bg);
+  color: var(--surface-fg);
+}
+
+.tab-dirty-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--mark-fg);
+}
+
+.tab-close-slot:not(:hover) .tab-close-cross,
+.tab-close-slot:hover .tab-dirty-dot {
+  display: none;
+}
+
+.tab-close-cross {
+  width: 10px;
+  height: 10px;
+  position: relative;
+}
+
+.tab-close-cross::before,
+.tab-close-cross::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: currentColor;
+}
+
+.tab-close-cross::before {
+  transform: rotate(45deg);
+}
+
+.tab-close-cross::after {
+  transform: rotate(-45deg);
+}
+
+.tab-strip-new {
+  flex: none;
+  width: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-left: var(--border-width) solid var(--surface-border);
+  background: transparent;
+  color: var(--surface-fg-secondary);
+  cursor: pointer;
+}
+
+.tab-strip-new:hover {
+  background: var(--row-hover-bg);
+  color: var(--surface-fg);
+}
+
+/* R36 (D-067): the Firefox-style overflow controls — smaller than
+ * `.tab-strip-new`'s 32px so three of them in a row don't start competing
+ * with the tabs themselves, sharing its hover treatment and border idiom
+ * so the right-hand cluster reads as one group. */
+.tab-strip-scroll-btn {
+  flex: none;
+  width: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-left: var(--border-width) solid var(--surface-border);
+  background: transparent;
+  color: var(--surface-fg-secondary);
+  cursor: pointer;
+}
+
+.tab-strip-scroll-btn:hover:not(:disabled) {
+  background: var(--row-hover-bg);
+  color: var(--surface-fg);
+}
+
+/* R36 §3b: disabled, not hidden — the same distinction D-055 drew for the
+ * title bar. A greyed-out control answers "is there more that way?" where
+ * a missing one is ambiguous, and it doesn't reflow the strip or move the
+ * next control under the pointer. */
+.tab-strip-scroll-btn:disabled {
+  opacity: var(--disabled-opacity);
+  cursor: default;
+}
+
+.tab-strip-menu {
+  position: relative;
+  display: flex;
+}
+
+.tab-strip-menu-list {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 4;
+  margin: var(--space-1) 0 0 0;
+  padding: var(--space-1);
+  list-style: none;
+  background: var(--elev-2-bg);
+  box-shadow: var(--elev-2-shadow);
+  border: var(--border-width) solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  max-height: 320px;
+  overflow: auto;
+  min-width: 220px;
+}
+
+.tab-strip-menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  padding: var(--space-1) var(--space-2);
+  border: none;
+  background: transparent;
+  color: var(--surface-fg);
+  font-size: var(--font-size-ui);
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.tab-strip-menu-item:hover {
+  background: var(--row-hover-bg);
+}
+
+.tab-strip-menu-item-active {
+  color: var(--mark-fg);
+}
+
+.tab-strip-menu-item-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

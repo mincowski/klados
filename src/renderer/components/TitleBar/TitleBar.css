@@ -1,0 +1,182 @@
+/**
+ * M5d-PLAN.md R1. Semantic tokens only (invariant 9) — colors come from
+ * `--elev-1-bg`/`--surface-fg`/`--mark-fg`, the same tokens `Layout.css`'s
+ * command bar already used, so the drawn bar reads as "the same chrome",
+ * not a new surface.
+ */
+.title-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  background: var(--elev-1-bg);
+  /* M5e-PLAN.md R8c: no border here. Windows' `titleBarOverlay` paints an
+   * opaque caption-button strip on top of this element's own right edge,
+   * so a border drawn on `.title-bar` itself is covered under it — see
+   * `.layout`'s `border-top` in `Layout.css` for where it actually lives. */
+  /* R6: the whole bar drags by default; every interactive child opts back
+   * out with `-webkit-app-region: no-drag` (`.title-bar-no-drag` below and
+   * every button added in R2/R7). */
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+/* R1: the OS used to dim the whole bar on window blur; this is the
+ * replacement — dims the mark/title rather than the background, since the
+ * background is the OS-drawn overlay strip on Windows and repainting it on
+ * every focus change would mean an IPC round trip per blur/focus. */
+.title-bar-blurred .title-bar-mark,
+.title-bar-blurred .title-bar-title {
+  opacity: var(--disabled-opacity);
+}
+
+/* Windows' `titleBarOverlay` caption buttons paint themselves at the
+ * window's top-right, outside this component's own DOM — reserved so our
+ * own content never renders (functionally reachable, but visually
+ * obscured) underneath them. */
+.title-bar-win32 {
+  padding-right: 138px;
+}
+
+/* macOS `hiddenInset`: the traffic lights are OS-placed at the top-left and
+ * need the same space reserved on our side — collapsed in fullscreen
+ * (`TitleBar.tsx`'s `useFullscreen`), where the lights themselves hide. */
+.title-bar-mac-inset {
+  flex: none;
+  width: 78px;
+  -webkit-app-region: drag;
+}
+
+.title-bar-title-area {
+  /* R5: grows for nothing (that's `.title-bar-spacer`'s job) but shrinks
+   * when the window is narrow — `min-width: 0` is what lets it shrink
+   * *below* the title text's own natural width, which is what makes the
+   * ellipsis in `.title-bar-title-head` ever actually trigger. */
+  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+  -webkit-app-region: drag;
+}
+
+/* R7: Save/Undo/Redo sit beside the filename (D-055); the pane toggles sit
+ * at the far end (`TitleBar.tsx`'s `windowCommands`) — this is what
+ * separates the two groups, and it's still `drag` so the gap between them
+ * remains part of the window's draggable surface. */
+.title-bar-spacer {
+  flex: 1;
+  min-width: var(--space-3);
+  -webkit-app-region: drag;
+}
+
+/* User feedback: the mark and the title text both sit in boxes centered on
+ * the same 18px line, but their *ink* doesn't optically match — measured
+ * (real Chromium, `mark.getBBox()` for the artwork vs canvas
+ * `TextMetrics.actualBoundingBox{Ascent,Descent}` for the "K" glyph): the
+ * mark's ink is 12px tall and already centered in its own box (top 12,
+ * bottom 24), while "Klados"'s cap-height ink is only 9px and sits with
+ * its baseline low in its line box (top 14.5, bottom 23.5 — a capital
+ * letter has no descender, but the font still reserves descender space
+ * below the baseline, which is what pulls its visual center down). The
+ * two ink centers are 1px apart (18 vs 19) before this nudge; matching
+ * them is what actually reads as "aligned" — a taller icon and a shorter
+ * cap-height next to each other can't share top *and* bottom edges at
+ * once, so centering their ink (not their boxes) is the balanced result. */
+.title-bar-mark {
+  flex: none;
+  color: var(--mark-fg);
+  transform: translateY(1px);
+}
+
+.title-bar-title {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  color: var(--surface-fg);
+}
+
+/* R5: "middle truncation, never end truncation" (`textTruncate.ts`) — the
+ * head is the only shrinkable, ellipsis-truncated part; the tail (the
+ * fixed-length end of the filename, extension included) and the dirty dot
+ * never shrink, so they stay visible however narrow the bar gets. */
+.title-bar-title-head {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.title-bar-title-tail {
+  flex: none;
+  white-space: nowrap;
+}
+
+.title-bar-dirty-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-left: var(--space-1);
+  border-radius: 50%;
+  background: var(--mark-fg);
+}
+
+.title-bar-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+.title-bar-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+}
+
+.title-bar-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--surface-fg-secondary);
+  cursor: pointer;
+}
+
+.title-bar-button:hover {
+  background: var(--row-hover-bg);
+  color: var(--surface-fg);
+}
+
+.title-bar-button:disabled {
+  opacity: var(--disabled-opacity);
+  cursor: default;
+}
+
+.title-bar-button:disabled:hover {
+  background: transparent;
+  color: var(--surface-fg-secondary);
+}
+
+/* R6: Windows High Contrast (`forced-colors`) is exactly what a hand-drawn,
+ * border-less icon button breaks under — `titleBarOverlay`'s own caption
+ * buttons already handle themselves (they're OS-drawn), this covers only
+ * the bar's own drawn buttons, which would otherwise have no visible
+ * boundary once forced-colors overrides `background`/`color` but leaves
+ * `border-style: none` exactly as authored. */
+@media (forced-colors: active) {
+  .title-bar-button {
+    border: var(--border-width) solid ButtonText;
+  }
+
+  .title-bar-button:disabled {
+    border-color: GrayText;
+  }
+}

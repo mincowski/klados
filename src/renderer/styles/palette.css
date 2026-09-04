@@ -1,0 +1,69 @@
+/**
+ * Raw color ramp (CONCEPT.md §9.2). Referenced only by the theme files —
+ * components reference semantic tokens (tokens.css / themes/*.css), never
+ * this file. Enforced by stylelint (D2's own acceptance criterion).
+ *
+ * Each theme picks its own steps per token rather than sharing a mapping,
+ * so the two themes stay peers rather than one being a mechanical inversion
+ * of the other (§9.1) — most visibly in the two `-dark-accent` swatches
+ * below, hand-tuned for contrast on dark surfaces rather than reused as a
+ * lighter step of the light theme's accent.
+ */
+:root {
+  /* Neutrals */
+  --gray-0: #ffffff;
+  --gray-50: #f7f8fa;
+  --gray-100: #eceef2;
+  --gray-200: #dde1e7;
+  --gray-300: #c3c9d3;
+  --gray-400: #9aa3b2;
+  --gray-500: #717b8c;
+  --gray-600: #545d6e;
+  --gray-700: #3d4453;
+  --gray-800: #262b36;
+  --gray-850: #1c202a;
+  --gray-900: #14171e;
+  --gray-950: #0b0d12;
+
+  /* Blue — accent */
+  --blue-50: #eef4ff;
+  --blue-100: #dbe7ff;
+  --blue-200: #b3cdff;
+  --blue-300: #85adff;
+  --blue-400: #5b8cff;
+  --blue-500: #3768e0;
+  --blue-600: #2951b8;
+  --blue-700: #1f3d8c;
+  --blue-900: #17233f;
+  /* Hand-tuned for dark surfaces, not derived from the ramp above (§9.1). */
+  --blue-dark-accent: #7aa2ff;
+
+  /* Amber — warning */
+  --amber-100: #fbe8c6;
+  --amber-400: #f5b942;
+  --amber-600: #a8730f;
+  --amber-900: #3d2c0c;
+
+  /* The brand mark's own amber (assets/README.md, D-054a) — deliberately not
+   * a reuse of the warning ramp above: these two exact hexes are the ones
+   * measured for 3:1 contrast on a title bar surface specifically, not
+   * chosen for a warning/found semantic. */
+  --amber-mark-light: #a9701e;
+  --amber-mark-dark: #e9a33c;
+
+  /* Red — error / fatal */
+  --red-100: #f9d6d1;
+  --red-400: #f2685c;
+  --red-600: #a8281c;
+  --red-900: #3a1512;
+
+  /* Green — the XML attribute-name syntax hue */
+  --green-100: #cdeee0;
+  --green-400: #4cc38a;
+  --green-600: #1f7a4e;
+
+  /* Purple — a fourth syntax hue, kept out of the diagnostic set so numbers
+   * never read as an error state. */
+  --purple-400: #9b7cf0;
+  --purple-600: #5f39c2;
+}

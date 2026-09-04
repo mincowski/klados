@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="Klados">
+  <defs>
+    <linearGradient id="lift" gradientUnits="userSpaceOnUse" x1="0" y1="100" x2="0" y2="924">
+      <stop offset="0" stop-color="#1F222A"/><stop offset="1" stop-color="#101216"/>
+    </linearGradient>
+    <linearGradient id="bevel" gradientUnits="userSpaceOnUse" x1="0" y1="100" x2="0" y2="640">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity=".14"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(100,100)">
+    <rect width="824" height="824" rx="184" fill="url(#lift)"/>
+    <rect x="9.6" y="9.6" width="804.8" height="804.8" rx="174.4" fill="none" stroke="#2A2E37" stroke-width="19.2"/>
+    <rect x="9.6" y="9.6" width="804.8" height="804.8" rx="174.4" fill="none" stroke="url(#bevel)" stroke-width="19.2"/>
+    <g transform="scale(12.875)">
+      <path d="M20 18V48M46 17Q33 22 20 33M37.08 21.14Q44 34 49 48" fill="none" stroke="#E9A33C" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </g>
+</svg>

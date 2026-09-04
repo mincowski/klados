@@ -1,0 +1,187 @@
+/**
+ * Elevated surface (CONCEPT.md §9.4) — the palette is a transient overlay,
+ * never inline in the layout. Semantic tokens only (invariant 9); stylelint
+ * enforces it for every file except palette.css and themes/*.css.
+ */
+/* R118 — no scrim. This carried
+ * `color-mix(in srgb, var(--surface-fg) 30%, transparent)`, which was two
+ * separate problems.
+ *
+ * It could never be complete: on Windows the caption buttons are drawn by
+ * the OS over the web contents (`titleBarStyle: 'hidden'` +
+ * `titleBarOverlay` — see `src/shared/titleBar.ts`, "paints outside CSS's
+ * reach", and `.title-bar-win32`'s reserved 138px), so an `inset: 0` scrim
+ * covers the whole window *except* that rectangle, by construction. The
+ * only lever on it is `setTitleBarOverlay`, an async IPC round-trip that
+ * would lag the scrim by a frame, cannot touch Windows' own hover
+ * feedback, and puts a second writer on state the theme sync already owns.
+ *
+ * And in dark it did not dim: `--surface-fg` is `#eceef2` there, so the
+ * 30% veil composited `#14171e` up to roughly `#55585e` — a pale fog, not
+ * a dim, which is exactly why the untouched caption buttons read as
+ * mismatched.
+ *
+ * Modality is already carried by focus capture and by elevation, and
+ * neither theme was relying on the scrim for it — measured, because the
+ * two themes separate this panel by different halves of D-051's elevation
+ * pair:
+ *
+ *   dark  — border 1.84 against the app behind it, doing essentially all
+ *           the work; the background step is only 1.10 and `--elev-2-shadow`
+ *           is near-black on a near-black surface.
+ *   light — the shadow, and only the shadow. `--elev-2-bg` *is*
+ *           `--surface-bg` here (both `#ffffff`, so 1.00), with the border
+ *           at 1.31. Flattening that two-layer shadow would leave nothing
+ *           separating the palette from the page.
+ *
+ * `Shortcuts.css` dropped the identical scrim in the same change. */
+.palette-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  justify-content: center;
+  padding-top: 12vh;
+}
+
+.palette {
+  width: min(560px, calc(100vw - var(--space-4) * 2));
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--elev-2-bg);
+  box-shadow: var(--elev-2-shadow);
+  border: var(--border-width) solid var(--surface-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.palette-input {
+  border: none;
+  outline: none;
+  padding: var(--space-3) var(--space-4);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  color: var(--surface-fg);
+  background: transparent;
+  border-bottom: var(--border-width) solid var(--surface-border);
+}
+
+.palette-input::placeholder {
+  color: var(--surface-fg-secondary);
+}
+
+.palette-list {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-1) 0;
+  overflow-y: auto;
+}
+
+.palette-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  height: var(--row-height);
+  padding: 0 var(--space-4);
+  color: var(--surface-fg);
+  cursor: pointer;
+}
+
+.palette-option-active {
+  background: var(--row-selected-bg);
+  color: var(--row-selected-fg);
+}
+
+.palette-option-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette-option-title mark {
+  background: transparent;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.palette-option-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: none;
+}
+
+/* R66: the category moved into `.palette-option-title` itself
+ * (`Category: Title`, matched and rendered as one string) — this class no
+ * longer exists as a separate span. R68: `.palette-option-state` takes its
+ * place in `.palette-option-meta`, the toggle's On/Off. */
+.palette-option-state {
+  color: var(--surface-fg-secondary);
+  font-size: var(--font-size-ui);
+}
+
+.palette-option-hint {
+  color: var(--surface-fg-secondary);
+  font-size: var(--font-size-ui);
+  padding: 0 var(--space-1);
+  border: var(--border-width) solid var(--surface-border);
+  border-radius: var(--radius-sm);
+}
+
+.palette-empty,
+.palette-disabled-mode {
+  padding: var(--space-4);
+  color: var(--surface-fg-secondary);
+}
+
+/* R72 (`R72-path-query.md` §5) — the `/` mode's empty-state grammar
+ * table, shown in place of the old single hint line. */
+.palette-path-help {
+  padding: var(--space-3) var(--space-4);
+}
+
+.palette-path-help-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.palette-path-help-table td {
+  padding: var(--space-1) var(--space-3) var(--space-1) 0;
+  color: var(--surface-fg);
+  font-size: var(--font-size-ui);
+}
+
+.palette-path-help-example {
+  font-family: var(--font-mono);
+  color: var(--surface-fg-secondary);
+  white-space: nowrap;
+}
+
+/* R72 §5 — a malformed query rendered with a caret under the offending
+ * character, replacing "Error at N: message". `--font-mono` on both the
+ * query and the caret row is load-bearing: a proportional font would
+ * silently misalign the caret from the character it points at. */
+.palette-path-error {
+  padding: var(--space-3) var(--space-4);
+}
+
+.palette-path-error-query,
+.palette-path-error-caret {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-ui);
+  white-space: pre;
+  color: var(--surface-fg);
+}
+
+.palette-path-error-caret {
+  color: var(--diagnostic-error-fg);
+}
+
+.palette-path-error-message {
+  margin-top: var(--space-1);
+  color: var(--surface-fg-secondary);
+  font-size: var(--font-size-ui);
+}

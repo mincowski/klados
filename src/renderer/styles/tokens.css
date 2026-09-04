@@ -1,0 +1,48 @@
+@import './palette.css';
+@import './themes/light.css';
+@import './themes/dark.css';
+
+/**
+ * Structural tokens that don't vary by theme — spacing, type, motion,
+ * radii. Colors live in themes/light.css and themes/dark.css instead
+ * (CONCEPT.md §9.2): they're the one category of token that must differ
+ * between the two themes, so they can't live in a theme-agnostic file.
+ */
+:root {
+  /* CONCEPT.md §9.4 — not Fluent's 32–44px touch defaults, which would
+   * cost roughly a third of the visible rows in a dense inspection tool. */
+  --row-height: 23px;
+
+  --font-ui: -apple-system, 'Segoe UI', system-ui, sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  --font-size-ui: 13px;
+  --font-size-mono: 13px;
+  --font-size-lg: 16px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+
+  /* UI-FEEDBACK.md M5b: the scrubber (D13) replaces CodeMirror's own
+   * scrollbar in the Raw view (`.raw .cm-scroller` hides it), so it's sized
+   * to match — Chromium's classic (non-overlay) scrollbar at default DPI on
+   * Windows — rather than the narrower 10px it used when it was a marker
+   * strip alongside a real scrollbar. Read by both `Scrubber.css` (the
+   * strip's own width) and `Raw.css` (`.raw`'s margin, so CodeMirror's
+   * content doesn't sit underneath it) — a single token so the two can't
+   * drift out of sync the way the two hardcoded `10px` literals had. */
+  --scrubber-width: 15px;
+
+  --border-width: 1px;
+  --transition-fast: 100ms;
+
+  /* Disabled state is expressed as reduced opacity of the existing
+   * foreground/background tokens rather than a duplicate color per token
+   * per theme (§9.6 flags disabled states as one of the three things that
+   * reliably break first — fewer moving parts here is deliberate). */
+  --disabled-opacity: 0.45;
+}

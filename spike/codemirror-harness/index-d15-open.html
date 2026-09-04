@@ -1,0 +1,19 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>M1 D15 — open time + main-thread responsiveness</title>
+    <style>
+      html, body { margin: 0; height: 100%; font: 12px system-ui; }
+      #status { position: fixed; z-index: 10; bottom: 0; left: 0; right: 0;
+                background: #111; color: #0f0; padding: 4px 8px;
+                font-family: ui-monospace, monospace; }
+    </style>
+  </head>
+  <body>
+    <div id="status">starting…</div>
+    <script>
+      require(require('path').join(__dirname, 'dist', 'renderer-d15-open.cjs'));
+    </script>
+  </body>
+</html>

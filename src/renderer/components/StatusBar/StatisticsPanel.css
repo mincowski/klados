@@ -1,0 +1,105 @@
+/**
+ * The statistics panel (M5f-PLAN.md §3) — anchored above the status bar's
+ * `ⓘ` item (`.status-bar-info-anchor`, `position: relative`). Elevation
+ * token *pair* (invariant 9) — `elev-1-shadow` is `none` on dark, so a
+ * shadow alone would not read there; `elev-2` is Find.css's own precedent
+ * for a floating, anchored panel.
+ */
+.statistics-panel {
+  position: absolute;
+  bottom: calc(100% + var(--space-2));
+  left: 0;
+  z-index: 90;
+  width: 320px;
+  max-width: min(320px, calc(100vw - var(--space-4)));
+  background: var(--elev-2-bg);
+  box-shadow: var(--elev-2-shadow);
+  border: var(--border-width) solid var(--surface-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  color: var(--surface-fg);
+}
+
+.statistics-panel:focus {
+  outline: none;
+}
+
+.statistics-panel-close {
+  position: absolute;
+  top: var(--space-1);
+  right: var(--space-1);
+  border: none;
+  background: transparent;
+  color: var(--surface-fg-secondary);
+  font-size: calc(var(--font-size-ui) + 4px);
+  line-height: 1;
+  padding: var(--space-1);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.statistics-panel-close:hover {
+  background: var(--row-hover-bg);
+  color: var(--surface-fg);
+}
+
+.statistics-panel-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: var(--space-3);
+  row-gap: var(--space-1);
+  margin: 0 0 var(--space-3);
+}
+
+.statistics-panel-facts dt {
+  color: var(--surface-fg-secondary);
+}
+
+.statistics-panel-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.statistics-panel-path {
+  font-family: var(--font-mono);
+  font-size: calc(var(--font-size-ui) - 1px);
+}
+
+.statistics-panel-heading {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-ui);
+  font-weight: 600;
+  color: var(--surface-fg-secondary);
+}
+
+.statistics-panel-memory {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.statistics-panel-memory th {
+  text-align: left;
+  font-weight: normal;
+  color: var(--surface-fg-secondary);
+  padding: var(--space-1) 0;
+}
+
+.statistics-panel-memory td {
+  text-align: right;
+  padding: var(--space-1) 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.statistics-panel-undo-count {
+  color: var(--surface-fg-secondary);
+  font-size: calc(var(--font-size-ui) - 2px);
+}
+
+.statistics-panel-total th,
+.statistics-panel-total td {
+  border-top: var(--border-width) solid var(--surface-border);
+  font-weight: 600;
+  padding-top: var(--space-2);
+}

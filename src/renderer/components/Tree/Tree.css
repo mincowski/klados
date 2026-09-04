@@ -1,0 +1,133 @@
+/**
+ * Tree View (CONCEPT.md §4.2, M1-PLAN.md D8). Semantic tokens only —
+ * stylelint enforces it here like every other component stylesheet
+ * (invariant 9).
+ */
+/* M5c-PLAN.md J4 / D-051 — the positioning context `Scrollbar`'s overlay
+ * track anchors to, distinct from `.tree` itself (the scrolling element):
+ * an absolutely-positioned child of the scroll container would scroll away
+ * with the content instead of staying pinned to the pane's edge. */
+.tree-viewport {
+  height: 100%;
+  position: relative;
+  /* R113 (`R113-inactive-selection.md` §3) — blue while the keyboard is in
+   * this pane, grey while it is not. Every rule that draws the selection
+   * reads this variable instead of the token directly, so a future
+   * selectable thing participates automatically. */
+  --selection-bg: var(--row-selected-inactive-bg);
+}
+
+.tree-viewport:focus-within {
+  --selection-bg: var(--row-selected-bg);
+}
+
+.tree {
+  height: 100%;
+  overflow: auto;
+  position: relative;
+  outline: none;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  /* R33 follow-up: leaves room for the overlay `<Scrollbar>` track
+   * (`.tree-viewport`'s absolutely-positioned child, pinned to its right
+   * edge) — rows are virtualized with `right: 0` relative to `.tree` itself
+   * (Tree.tsx), so without this a row's own hover/selected background sat
+   * underneath the track/thumb instead of beside it. Same fix as
+   * `Raw.css`'s `.raw`. */
+  margin-right: var(--scrubber-width);
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding-right: var(--space-2);
+  color: var(--surface-fg);
+  cursor: default;
+  white-space: nowrap;
+}
+
+.tree-row:hover {
+  background: var(--row-hover-bg);
+}
+
+.tree-row-selected {
+  background: var(--selection-bg);
+  color: var(--row-selected-fg);
+}
+
+/* Find overlay (M4-PLAN.md G5) — a marker, not a filter (G6's
+ * filter-to-matches is the separate hide-non-matching-subtrees mode). A
+ * left border rather than a background so it composes visibly with
+ * .tree-row-selected instead of being overridden by it. */
+.tree-row-matched {
+  box-shadow: inset 3px 0 0 var(--find-match-marker);
+}
+
+.tree-row-indent {
+  flex: none;
+}
+
+.tree-row-disclosure {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--surface-fg-secondary);
+  cursor: pointer;
+  padding: 0;
+}
+
+.tree-row-disclosure-empty {
+  cursor: default;
+}
+
+/* R83 (`R82-hover-and-glyphs.md` §2): `.tab-icon` (`TabStrip.css`) regained
+ * `--font-mono` — this glyph regains it too, so the two stay matched (R71's
+ * own original point: the tab marker should look like the tree's node
+ * icon). Measured: all thirteen glyphs this renders (`D : " ¶ # ? !`
+ * alongside `<> {} []`) draw at exactly 6.45px in `--font-mono` at this
+ * size — the uniform advance that proves none of them falls back to a
+ * different font. Weight and colour stay the deliberate differences from
+ * `.tab-icon` R71 documented (400 here vs 600 there, this tint vs
+ * inherited). */
+/* R98 (`R98-glyph-font-per-glyph.md` §2): `font-family` no longer lives
+ * here — `glyphFontClass` (`glyphFont.ts`) picks `.glyph-ui`/`.glyph-mono`
+ * (`base.css`) per glyph string, applied alongside this class in the
+ * markup, since Cascadia closes `<>` into a diamond at this size while
+ * every other marker still wants `--font-mono` (R83's own measurement). */
+.tree-row-glyph {
+  flex: none;
+  width: 20px;
+  text-align: center;
+  color: var(--syntax-punctuation);
+  font-size: 11px;
+}
+
+.tree-row-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tree-row-count {
+  flex: none;
+  color: var(--surface-fg-secondary);
+  font-size: 11px;
+}
+
+.tree-row-preview {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--surface-fg-secondary);
+}
+
+.tree-row-selected .tree-row-preview,
+.tree-row-selected .tree-row-count,
+.tree-row-selected .tree-row-glyph {
+  color: inherit;
+}

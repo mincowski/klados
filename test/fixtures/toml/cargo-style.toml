@@ -1,0 +1,49 @@
+# M6-PLAN.md R17 — a real-world-shaped fixture (Cargo.toml/pyproject.toml
+# style): deeply mixed table/array-of-tables/inline-table content, which a
+# synthetic generator tends to under-produce.
+
+[package]
+name = "klados-toml-fixture"
+version = "0.1.0"
+edition = "2021"
+authors = ["Klados <klados@example.com>"]
+description = "A fixture used to validate Klados's TOML support"
+license = "MIT"
+keywords = ["viewer", "editor", "xml", "json", "toml"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+log = "0.4"
+
+[dependencies.regex]
+version = "1"
+default-features = false
+features = ["std", "unicode"]
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bin]]
+name = "klados-cli"
+path = "src/main.rs"
+
+[[bin]]
+name = "klados-inspect"
+path = "src/inspect.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+panic = "abort"
+
+[workspace]
+members = ["crates/core", "crates/cli"]
+
+[[workspace.metadata.reviewers]]
+name = "first reviewer"
+since = 2024-01-15
+
+[[workspace.metadata.reviewers]]
+name = "second reviewer"
+since = 2025-06-01

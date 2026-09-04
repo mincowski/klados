@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Fixture for docs/R72-path-query.md §6 and R76.
+
+  Each pair below is two characters that render nearly identically but are
+  distinct codepoints, chosen because Klados's two case-insensitive find paths
+  disagree about them. The codepoint is named in every comment because the
+  characters are indistinguishable on screen.
+
+  DO NOT retype, reformat or normalise this file. U+212B and U+2126 are
+  canonical singletons: any NFC-normalising step silently replaces them with
+  U+00C5 and U+03A9 and the fixture stops testing anything. It is generated from
+  explicit escapes for that reason, and a test asserts the codepoints are still
+  present before asserting anything else.
+
+  Small and hand-checkable on purpose: tests assert exact match counts, not
+  shape (docs/FINDINGS.md, "tests that assert shape but not exact values").
+-->
+<measurements>
+  <!-- U+00B5 MICRO SIGN vs U+03BC GREEK SMALL LETTER MU -->
+  <pitch unit="µm">250</pitch>
+  <gap unit="μm">180</gap>
+
+  <!-- U+00C5 LATIN CAPITAL LETTER A WITH RING ABOVE vs U+212B ANGSTROM SIGN -->
+  <lattice unit="Å">3.61</lattice>
+  <spacing unit="Å">2.87</spacing>
+
+  <!-- U+03A9 GREEK CAPITAL LETTER OMEGA vs U+2126 OHM SIGN -->
+  <load unit="Ω">220</load>
+  <shunt unit="Ω">47</shunt>
+
+  <!-- U+00DF SHARP S vs U+1E9E CAPITAL SHARP S -->
+  <street>Hauptstraße</street>
+  <sign>HAUPTSTRAẞE</sign>
+
+  <!-- R76: U+0130 lowercases to two code units (i + U+0307 combining dot) -->
+  <city>İstanbul</city>
+
+  <!-- confusable detection: U+0430 CYRILLIC SMALL LETTER A inside an ASCII run -->
+  <owner>Ivаn</owner>
+
+  <!-- control: ASCII only, must never be affected by any of the above -->
+  <control>plain ascii only</control>
+</measurements>

@@ -1,0 +1,239 @@
+/**
+ * The Find bar (M4-PLAN.md G5) — an elevated surface (CONCEPT.md §9.4),
+ * floating over the layout rather than inline in it, same family as the
+ * palette's own overlay. Semantic tokens only (invariant 9).
+ *
+ * M5e-PLAN.md R8e: `position: fixed` anchored to the *viewport* used to
+ * land the bar under Windows' caption buttons (the region the OS paints
+ * over) once M5d's drawn title bar shipped — fixed then by mounting inside
+ * `.raw-container` and anchoring `absolute` within it. R70
+ * (`R69-focus-and-find.md` §2) hoists the bar out of `Raw.tsx`
+ * entirely (Find is document-wide, D-038 — only its *mount point* was
+ * Raw-scoped, so `Ctrl+F` did nothing whenever the Raw pane was hidden) but
+ * keeps R8e's own fix: `.layout` (not the viewport) is the `position:
+ * relative` ancestor now (`Layout.css`), and `.layout` already sits
+ * entirely below the title bar and tab strip — so this still never needs a
+ * pixel offset that guesses the title bar's height. Intrinsic width, no
+ * `flex-wrap` — a find bar that reflows under the pointer is worse than one
+ * that scrolls or truncates.
+ */
+.find-bar {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  background: var(--elev-2-bg);
+  box-shadow: var(--elev-2-shadow);
+  border: var(--border-width) solid var(--surface-border);
+  border-radius: var(--radius-md);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  color: var(--surface-fg);
+  width: max-content;
+  max-width: calc(100% - var(--space-2) * 2);
+}
+
+/* The controls, on their own row — `.find-bar` itself is a column so the
+ * footnote (when shown) sits below at full width rather than wrapping
+ * mid-control (R8e: no `flex-wrap` on the row that matters for layout).
+ *
+ * R89 (`R86-find-as-query-surface.md` §5) — the pre-existing defect this
+ * round's own added content (a third mode button, a growing textarea)
+ * would otherwise have made worse: below ~530px of `.layout` width the
+ * row's content no longer fit `.find-bar`'s own clamped `max-width`, and
+ * with no `overflow` declared anywhere the controls painted *outside* the
+ * bar and the window — the close button included, so Find couldn't be
+ * dismissed with the mouse. `overflow-x: auto` here means that once
+ * `.find-input`'s own `min-width: 0` (below) has given up every pixel of
+ * shrink it can, the row scrolls inside its own rounded surface instead —
+ * "a find bar that reflows under the pointer is worse than one that
+ * scrolls or truncates" (R8e), extended to the horizontal axis.
+ *
+ * R127 (`R126-find-count-stability.md` §4): `align-items: center`, not
+ * `flex-start` — R89's own reason for `flex-start` ("once the textarea can
+ * grow past one line, centering would drift every button away from the
+ * input's own first row") stopped applying the moment R102
+ * (`R102-find-single-line.md`) reverted the multi-line find field; nothing
+ * in this row grows past one line any more, and `flex-start` was left
+ * over, top-aligning `.find-count` (a bare `<span>`, no padding) above
+ * every bordered-and-padded sibling in the row. */
+.find-bar-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  overflow-x: auto;
+}
+
+/* Every control except the textarea is a fixed-size passenger — R89: "the
+ * textarea becomes the *only* shrinkable item in the row." Without this,
+ * flexbox's own default (`flex-shrink: 1` on every child) would shrink the
+ * count/buttons too, and the close button — the one control that must
+ * never be the thing that disappears — would be squeezed same as anything
+ * else instead of being the last thing standing. */
+.find-bar-row > *:not(.find-input) {
+  flex: none;
+}
+
+.find-input {
+  border: var(--border-width) solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  outline: none;
+  padding: var(--space-1) var(--space-2);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  color: var(--surface-fg);
+  background: var(--surface-bg);
+  /* R89, kept by R102 (`R102-find-single-line.md`) — the narrow-width fix,
+   * the half of R89 that stays even though its multi-line field was
+   * reverted. A definite `width` (not just `flex-basis`) is what gives
+   * `.find-bar`'s own `width: max-content` something unambiguous to size
+   * around; `flex: 1 1 auto` lets it grow to fill spare row width and
+   * `min-width: 0` lets it give every one of those pixels back under
+   * pressure — the one shrinkable item `.find-bar-row`'s own rule above
+   * depends on, and what keeps every control down to ~314px of layout
+   * width (`test/r8Layout.test.tsx`'s own R89 tests). 200px matches the
+   * pre-R89 `.find-input`'s own effective width. */
+  width: 200px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.find-input:focus {
+  border-color: var(--focus-ring);
+}
+
+/* R126 (`R126-find-count-stability.md` §3): the count no longer reserves
+ * space by an estimated `min-width` on the growing part — it reserves it
+ * exactly, by stacking a hidden sizer (`{total} of {total}`, the widest
+ * this label ever gets once `(stale)` is gone, §2) and the live value in
+ * one grid cell, right-aligned so the constant part (`of 65,432`) lands at
+ * the same x regardless of the ordinal's own width. `min-width: 6em` stays
+ * as the floor for short labels (`Searching…`, `No matches`) — small
+ * documents keep today's compact bar. */
+.find-count {
+  display: grid;
+  color: var(--surface-fg-secondary);
+  white-space: nowrap;
+  min-width: 6em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.find-count-sizer,
+.find-count-value {
+  grid-area: 1 / 1;
+}
+
+.find-count-sizer {
+  visibility: hidden;
+}
+
+.find-toggle {
+  border: var(--border-width) solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-bg);
+  color: var(--surface-fg-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-ui);
+  padding: var(--space-1) var(--space-2);
+  cursor: pointer;
+}
+
+.find-toggle[aria-pressed='true'],
+.find-toggle[aria-checked='true'] {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+
+/* R87 (`R86-find-as-query-surface.md` §3) — `.*` and `/` grouped in one
+ * bordered segment so the composition rule (pick one of these, `Aa`
+ * independently) reads off the layout, not just the ARIA role. */
+.find-mode-group {
+  display: flex;
+  border: var(--border-width) solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.find-mode-group .find-toggle {
+  border: none;
+  border-radius: 0;
+}
+
+.find-mode-group .find-toggle:first-child {
+  border-right: var(--border-width) solid var(--surface-border);
+}
+
+.find-bar button:not(.find-toggle) {
+  border: none;
+  background: transparent;
+  color: var(--surface-fg);
+  cursor: pointer;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+/* R90 (`R86-find-as-query-surface.md` §6) — the replace row's own
+ * disclosure, narrower than an ordinary icon button (tighter horizontal
+ * padding) since it carries no label and sits right against the bar's own
+ * edge. `.find-replace-spacer` reserves the exact same width on the
+ * (button-less) replace row below, so the replace input starts under the
+ * find textarea rather than further left. */
+.find-replace-disclosure {
+  padding: var(--space-1) 2px;
+  width: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.find-replace-spacer {
+  width: 22px;
+  flex: none;
+}
+
+/* Same resting width as `.find-input` (inherited), but no `flex-grow`:
+ * the replace row has far fewer fixed-width siblings than the find row
+ * (two icon buttons and a spacer, versus the count/mode-group/toggles/
+ * icon buttons above), so without this the input would stretch to fill
+ * all the row's leftover space and end up visibly wider than the field
+ * it sits under, with the Replace/Replace All buttons drifting wherever
+ * that left off. Trailing empty space after the buttons instead — the
+ * same "empty is fine" the disclosure's own leading gap already is. */
+.find-replace-input {
+  flex: 0 1 200px;
+}
+
+.find-bar button:not(.find-toggle):hover:not(:disabled) {
+  background: var(--row-hover-bg);
+}
+
+.find-bar button:disabled {
+  opacity: var(--disabled-opacity);
+  cursor: default;
+}
+
+.find-footnote {
+  max-width: 360px;
+  color: var(--surface-fg-secondary);
+  font-size: calc(var(--font-size-ui) - 2px);
+}
+
+/* R87 §3 — the path query's own parse diagnostic, `PathQueryError`'s shape
+ * (`Palette.tsx`) reused here: `find-footnote-path-query`/`-caret` share
+ * `--font-mono` so the caret's horizontal position lines up with the
+ * character it points at, which a proportional font would silently break. */
+.find-footnote-path {
+  max-width: none;
+}
+
+.find-footnote-path-query,
+.find-footnote-path-caret {
+  font-family: var(--font-mono);
+  white-space: pre;
+}

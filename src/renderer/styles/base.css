@@ -1,0 +1,51 @@
+/**
+ * The one non-theme, non-token stylesheet: base document styling built
+ * entirely from semantic tokens, so it also acts as the first real
+ * consumer of the token set (and the first thing the stylelint hex-literal
+ * rule protects).
+ */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--surface-bg);
+  color: var(--surface-fg);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+}
+
+#root {
+  height: 100%;
+}
+
+/* M5d-PLAN.md R1: `main` now stacks the drawn title bar above `Layout`
+ * rather than `Layout` alone filling the whole window — flex column so
+ * `Layout`'s own `flex: 1; min-height: 0` (Layout.css) is what actually
+ * absorbs the title bar's height instead of both fighting over 100%. */
+#root main {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* R98 (`R98-glyph-font-per-glyph.md` §2): the font a marker glyph draws in
+ * is a property of the glyph, not the surface — `glyphFont.ts`'s
+ * `glyphFontClass` picks one of these two per glyph string. Cross-
+ * component (Tab strip, Tree, Detail all use it), which is why it lives
+ * here rather than in any one component's own stylesheet. */
+.glyph-ui {
+  font-family: var(--font-ui);
+}
+
+.glyph-mono {
+  font-family: var(--font-mono);
+}

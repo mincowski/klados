@@ -1,0 +1,391 @@
+/**
+ * Detail View (CONCEPT.md §4.3, M1-PLAN.md D9). Semantic tokens only —
+ * stylelint enforces it here like every other component stylesheet
+ * (invariant 9).
+ */
+/* R33/1a: the positioning context `Scrollbar`'s overlay track anchors to —
+ * same reason `.tree-viewport` (Tree.css) and `.detail-children-viewport`
+ * below exist. `.detail` itself stays the real `overflow: auto` element
+ * (`Scrollbar` drives its `scrollTop` directly); this wrapper only hosts the
+ * absolutely-positioned track. */
+.detail-viewport {
+  position: relative;
+  height: 100%;
+  /* R113 (`R113-inactive-selection.md` §3, §6) — carried here rather than on
+   * `.grid-scroll`/`.grid-wrapper` so typing in the grid's quick-filter (in
+   * `.grid-toolbar`, outside the scroller but inside this viewport) keeps
+   * the selection blue. List mode inherits these too and simply has nothing
+   * that reads them. */
+  --selection-bg: var(--row-selected-inactive-bg);
+  --selection-ring: var(--focus-ring-inactive);
+}
+
+.detail-viewport:focus-within {
+  --selection-bg: var(--row-selected-bg);
+  --selection-ring: var(--focus-ring);
+}
+
+/* R43 (`R43-grid-sizing-and-scroll.md`, D-071): a flex column, not
+   plain block flow — what lets `.detail-children-grid`/`.detail-grid-
+   container` below claim the pane's *remaining* height instead of a fixed
+   constant. Every other section here is an ordinary (non-flexed) flex item,
+   which sizes to its own content exactly as it did under block layout —
+   only the grid section opts in to growing/shrinking. */
+.detail {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: auto;
+  padding: var(--space-3);
+  /* R33 follow-up: the overlay `<Scrollbar>` track (`.scrollbar-track-
+   * vertical`, `--scrubber-width` wide) is an absolutely-positioned sibling
+   * pinned to `.detail-viewport`'s right edge — `--space-3` alone (12px) is
+   * narrower than the track (15px), so without this the track overlapped
+   * real content (the breadcrumb's copy-path button, the children table's
+   * rightmost column) instead of sitting beside it. Same fix Raw.css
+   * already applies to `.raw` (`margin-right: var(--scrubber-width)`) —
+   * added on top of the existing padding rather than replacing it, so the
+   * content still keeps its own inset from the pane edge. */
+  padding-right: calc(var(--space-3) + var(--scrubber-width));
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  color: var(--surface-fg);
+  outline: none;
+}
+
+/* R106 addendum: `outline: none` above is the whole fix, and there is
+ * deliberately no `:focus-visible` rule to go with it.
+ *
+ * R94 made `.detail` focusable (`tabIndex={-1}`, for arrow-key scrolling)
+ * with no rule of its own, so the user-agent's `outline: auto` ring
+ * applied — and because `.detail`'s border box is exactly `.pane-body`'s,
+ * that ring straddles the boundary `.pane-body`'s `overflow: auto` clips,
+ * leaving a 1px sliver across the top edge that reads as a rendering
+ * artefact. R106 first replaced it with `.grid-scroll`'s own inset
+ * `--focus-ring` ring, on the reasoning that list mode has no active item
+ * so the container needed to show where the arrows go.
+ *
+ * Looking at it settled that: a second ring *inside* the pane reads as a
+ * sub-region being highlighted, not the pane. F6 asks "which pane has
+ * focus", and this app already answers that in one place for every pane —
+ * `.pane:focus-within::after` (`Layout.css`), the quiet `--pane-focus-ring`
+ * border around the whole pane. `.tree` relies on exactly that and sets
+ * only `outline: none`; Detail now matches it, so all three panes indicate
+ * focus the same way and the arrow keys are accounted for by the pane
+ * highlight like everywhere else. */
+
+.detail-empty {
+  padding: var(--space-3);
+  color: var(--surface-fg-secondary);
+}
+
+.detail-empty-inline {
+  color: var(--surface-fg-secondary);
+  margin: 0;
+}
+
+.detail-breadcrumb {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: var(--border-width) solid var(--surface-border);
+}
+
+.detail-breadcrumb ol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.detail-breadcrumb li {
+  display: flex;
+  align-items: center;
+}
+
+.detail-breadcrumb-separator {
+  color: var(--surface-fg-secondary);
+  margin: 0 var(--space-1);
+}
+
+.detail-breadcrumb-segment,
+.detail-breadcrumb-copy {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  border: none;
+  background: transparent;
+  color: var(--surface-fg);
+  cursor: pointer;
+  padding: var(--space-1) var(--space-1);
+  border-radius: var(--radius-sm);
+}
+
+.detail-breadcrumb-segment:hover {
+  background: var(--row-hover-bg);
+}
+
+.detail-breadcrumb-segment[aria-current='true'] {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* D-050: a wrapper hop descended through on the way to the destination —
+   distinct from the segment the user actually selected, which stays at the
+   default weight even though it's also part of the descent. */
+.detail-breadcrumb-segment-skipped {
+  color: var(--surface-fg-secondary);
+}
+
+.detail-breadcrumb-copy {
+  flex: none;
+  border: var(--border-width) solid var(--surface-border);
+  color: var(--surface-fg-secondary);
+}
+
+.detail-section {
+  margin-bottom: var(--space-4);
+}
+
+.detail-section h3 {
+  margin: 0 0 var(--space-2) 0;
+  font-size: var(--font-size-ui);
+}
+
+.detail-node-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.detail-node-glyph {
+  flex: none;
+  color: var(--syntax-punctuation);
+  font-size: var(--font-size-ui);
+  font-weight: 400;
+}
+
+.detail-node-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.detail-node-count {
+  flex: none;
+  margin-left: auto;
+  color: var(--surface-fg-secondary);
+  font-size: var(--font-size-ui);
+  font-weight: 400;
+}
+
+.detail-comment p,
+.detail-value p {
+  margin: 0;
+  padding: var(--space-2);
+  background: var(--elev-1-bg);
+  border-radius: var(--radius-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-mono);
+}
+
+.detail-facets-table {
+  width: auto;
+  min-width: min(240px, 100%);
+  max-width: 100%;
+  border-collapse: collapse;
+}
+
+.detail-facets-table th,
+.detail-facets-table td {
+  text-align: left;
+  padding: var(--space-1) var(--space-2);
+  border-bottom: var(--border-width) solid var(--surface-border);
+  overflow-wrap: anywhere;
+}
+
+.detail-facets-table th {
+  color: var(--surface-fg-secondary);
+  font-weight: 400;
+}
+
+.detail-children-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+/* R43/D-071: only when grid mode is actually showing (`Detail.tsx` adds
+   this class conditionally) does the children section itself become a flex
+   column that grows to fill the pane — in list mode (`ChildrenList` alone,
+   already bounded by its own `max-height: 300px`) the section still sizes
+   to its content, exactly as it did before this round. `min-height: 0`
+   overrides a flex item's default `min-height: auto`, which is what
+   actually lets `.detail-grid-container` below shrink past its content
+   size instead of forcing this section (and `.detail` itself) to keep
+   growing forever. */
+.detail-children-grid {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* R43/D-071: was a fixed `height: 480px` — neither grew into a tall pane
+   nor shrank into a short one, so a small window forced `.detail` itself to
+   scroll on top of this container's own scrollbar (two nested vertical
+   scrollbars, and the one grabbed first was usually the wrong one).
+   `flex: 1` claims whatever height `.detail-children-grid` has left after
+   the heading above it; `min-height` is the floor that keeps a short window
+   from squeezing this to a two-row table — roughly eight rows
+   (`ROW_HEIGHT = 23` in `Grid.tsx`) plus a header row, picked by eye rather
+   than measured against a real document (`R43-grid-sizing-and-scroll.md`
+   says as much: "pick the floor against a real document at a small window
+   size," which this environment has no display to do). */
+.detail-grid-container {
+  flex: 1;
+  min-height: 230px;
+  border: var(--border-width) solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  margin-bottom: var(--space-2);
+}
+
+/* M5c-PLAN.md J4 / D-051 — the positioning context `Scrollbar`'s overlay
+ * track anchors to; see `.tree-viewport`'s own comment in Tree.css for why
+ * this can't just be `.detail-children-list` itself. */
+.detail-children-viewport {
+  position: relative;
+}
+
+/* M5c-PLAN.md J5: shrinks to fit its (content-derived) column widths,
+ * `.detail-facets-table`'s own target shape — `width: max-content` is sized
+ * by `.detail-children-header` below (the one in-flow child; virtualized
+ * rows are `position: absolute` and don't themselves contribute to
+ * intrinsic width), clamped so it never forces the pane wider. */
+.detail-children-list {
+  max-height: 300px;
+  width: max-content;
+  min-width: min(240px, 100%);
+  max-width: 100%;
+  overflow: auto;
+  position: relative;
+  /* R33 follow-up: leaves room for this list's own `<Scrollbar>`
+   * (`.detail-children-viewport`'s absolutely-positioned child) — virtualized
+   * rows are `right: 0` against this element's own padding edge (Detail.tsx),
+   * so without this the rightmost column sat underneath the track/thumb.
+   * Same fix as `Raw.css`'s `.raw`; a right padding here (not margin) is
+   * what keeps `width: max-content` sizing itself to include the reserved
+   * space, per this rule's own comment below. */
+  padding-right: var(--scrubber-width);
+  /* R33/1a: the outer `.detail` pane scrolls too now (D-051's own thumb
+   * nesting inside a thumb). Without this, wheeling past this list's own
+   * top/bottom edge chains the scroll to `.detail` — the browser's default
+   * overscroll behavior for nested `overflow: auto` — which reads as the
+   * wrong pane moving under the pointer. */
+  overscroll-behavior: contain;
+}
+
+/* Matches `.detail-facets-table thead`'s own treatment (secondary color,
+ * weight 400, same border) — sticky so it stays visible while the
+ * virtualized body scrolls beneath it. */
+.detail-children-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  background: var(--surface-bg);
+  border-bottom: var(--border-width) solid var(--surface-border);
+  color: var(--surface-fg-secondary);
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.detail-child-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-bottom: var(--border-width) solid var(--surface-border);
+  cursor: default;
+  white-space: nowrap;
+  box-sizing: border-box;
+}
+
+.detail-child-row:hover {
+  background: var(--row-hover-bg);
+}
+
+.detail-child-glyph {
+  flex: none;
+  width: 20px;
+  text-align: center;
+  color: var(--syntax-punctuation);
+  font-size: 11px;
+}
+
+/* M5c-PLAN.md J5: widths come from `--dc-*`, set once per selection on
+ * `.detail-children-list` (`Detail.tsx`'s `childrenColumnLayout`) — shared
+ * between the header and every row, rather than each guessing its own. */
+.detail-child-name {
+  flex: none;
+  width: var(--dc-name);
+  color: var(--surface-fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.detail-child-kind {
+  flex: none;
+  width: var(--dc-kind);
+  color: var(--surface-fg-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.detail-child-preview {
+  flex: none;
+  width: var(--dc-value);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--surface-fg);
+}
+
+.detail-child-count {
+  flex: none;
+  width: var(--dc-children);
+  text-align: right;
+  color: var(--surface-fg);
+}
+
+/* D-050 follow-up (user feedback after R8): the header row reuses each
+ * column's own `.detail-child-*` class for width alignment
+ * (`Detail.tsx`'s header markup), so 8a's `--surface-fg` on `.detail-
+ * child-name`/`.detail-child-preview` — and now `.detail-child-count` —
+ * also lit up the header's copies of those same classes, since they tie
+ * on specificity and `.detail-children-header`'s own `color` lost to
+ * whichever column rule happens to come later in the file. The header
+ * must stay uniformly dimmed, matching `.detail-facets-table th`, so this
+ * overrides every column's own color inside the header specifically —
+ * higher specificity (two classes) beats a bare `.detail-child-*` rule
+ * regardless of source order. */
+.detail-children-header .detail-child-name,
+.detail-children-header .detail-child-kind,
+.detail-children-header .detail-child-preview,
+.detail-children-header .detail-child-count {
+  color: var(--surface-fg-secondary);
+}

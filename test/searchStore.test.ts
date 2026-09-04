@@ -1,0 +1,420 @@
+/**
+ * M4-PLAN.md G4's own acceptance criteria: search survives selection
+ * changes and view toggles, does not survive closing the document, and an
+ * edit clears/marks-stale the match set visibly rather than leaving stale
+ * highlights around. Uses the same real-session-through-fakeParse harness
+ * `documentSession.test.ts` uses — a real search store against a real
+ * (fake-transport) document session, not a hand-built mock of either.
+ */
+import { describe, expect, it, vi } from 'vitest'
+import {
+  rehydrateParseResult,
+  type ParseClientOptions,
+  type ParseClientResult
+} from '../src/core/parseClient'
+import { runParseJob } from '../src/worker/parse.worker'
+import type { KladosApi } from '../src/preload/api'
+import {
+  createDocumentSession,
+  type DocumentSession,
+  type DocumentSessionDeps
+} from '../src/renderer/session/documentSession'
+import { createSearchStore } from '../src/renderer/session/searchStore'
+
+/** M5-PLAN.md H12 — same test-only extension `documentSession.test.ts`
+ * uses; see that file's own doc comment on `FakeApi`. */
+type FakeApi = {
+  document: KladosApi['document'] & { read: (path: string) => Promise<ArrayBuffer> }
+}
+
+let nextRequestId = 1
+
+function fakeParse(bytes: ArrayBuffer, options: ParseClientOptions): Promise<ParseClientResult> {
+  if (options.signal?.aborted) {
+    return Promise.reject(new DOMException('Parse aborted', 'AbortError'))
+  }
+  const response = runParseJob(
+    { type: 'parse', requestId: nextRequestId++, bytes, filename: options.filename },
+    (bytesConsumed) => options.onProgress?.(bytesConsumed)
+  )
+  if (response.type === 'error') return Promise.reject(new Error(response.message))
+  return Promise.resolve(rehydrateParseResult(response))
+}
+
+function utf8(s: string): ArrayBuffer {
+  return new TextEncoder().encode(s).buffer as ArrayBuffer
+}
+
+/** M5-PLAN.md H12 — same registry-backed test double `documentSession.test.ts`
+ * uses; see that file's own doc comment on `fakeParseFromUrl`. */
+const fakeReadTokenBytes = new Map<string, ArrayBuffer>()
+let fakeReadTokenCounter = 0
+
+async function fakeParseFromUrl(
+  url: string,
+  options: ParseClientOptions
+): Promise<ParseClientResult> {
+  // See `documentSession.test.ts`'s own copy of this function for why the
+  // token has to be unwrapped from the URL first.
+  const token = new URL(url).hostname
+  const bytes = fakeReadTokenBytes.get(token)
+  if (bytes === undefined) {
+    throw new Error(`fakeParseFromUrl: no bytes registered for token ${token} (url ${url})`)
+  }
+  fakeReadTokenBytes.delete(token)
+  return fakeParse(bytes, options)
+}
+
+function fakeApi(overrides: Partial<FakeApi['document']> = {}): FakeApi {
+  const read = overrides.read ?? vi.fn().mockResolvedValue(utf8('{"a":1}'))
+  return {
+    document: {
+      openDialog: vi.fn().mockResolvedValue(null),
+      stat: vi.fn().mockResolvedValue({ size: 100, readOnly: false }),
+      read,
+      mintReadToken: vi.fn().mockImplementation(async (path: string) => {
+        const bytes = await read(path)
+        const token = `fake-token-${fakeReadTokenCounter++}`
+        fakeReadTokenBytes.set(token, bytes)
+        return token
+      }),
+      getPathForFile: vi.fn().mockReturnValue(''),
+      write: vi.fn().mockResolvedValue(undefined),
+      saveAsDialog: vi.fn().mockResolvedValue(null),
+      watch: vi.fn().mockResolvedValue(undefined),
+      unwatch: vi.fn().mockResolvedValue(undefined),
+      onExternalChange: vi.fn().mockReturnValue(() => {}),
+      ...overrides
+    }
+  }
+}
+
+function createSession(deps: Partial<DocumentSessionDeps> = {}): DocumentSession {
+  return createDocumentSession({
+    parse: fakeParse,
+    parseFromUrl: fakeParseFromUrl,
+    api: fakeApi(),
+    ...deps
+  })
+}
+
+/** Waits long enough for a real (near-zero-delay) reparse timer plus the
+ * fake parse's own microtask chain to land — same helper documentSession's
+ * own tests use. M5-PLAN.md H2d: a splice's own graft now runs through
+ * `runChunkedJob`, which always yields via at least one more real
+ * `setTimeout(0)` beyond the debounce timer itself, even for a graft that
+ * finishes in its first slice — accounted for in the default margin below. */
+async function flushReparse(ms = 50): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+describe('createSearchStore (G4)', () => {
+  it('starts empty with no document open', () => {
+    const session = createSession()
+    const store = createSearchStore(session)
+    expect(store.getSnapshot()).toEqual({
+      starts: new Int32Array(0),
+      ends: new Int32Array(0),
+      complete: true,
+      provisional: false,
+      stale: false
+    })
+    store.dispose()
+  })
+
+  it('finds matches in the open document', async () => {
+    const api = fakeApi({ read: vi.fn().mockResolvedValue(utf8('{"a":"cat","b":"cats"}')) })
+    const sessionWithApi = createDocumentSession({
+      parse: fakeParse,
+      parseFromUrl: fakeParseFromUrl,
+      api
+    })
+    await sessionWithApi.openPath('C:/docs/data.json')
+    const store = createSearchStore(sessionWithApi)
+
+    store.search({ text: 'cat', mode: 'text', options: { caseSensitive: true, regex: false } })
+    await flushReparse()
+
+    const result = store.getSnapshot()
+    expect(result.complete).toBe(true)
+    expect(result.starts.length).toBe(2)
+    store.dispose()
+  })
+
+  it('survives a selection change (nothing here reacts to selection at all)', async () => {
+    const api = fakeApi({ read: vi.fn().mockResolvedValue(utf8('{"a":"cat"}')) })
+    const session = createDocumentSession({ parse: fakeParse, parseFromUrl: fakeParseFromUrl, api })
+    await session.openPath('C:/docs/data.json')
+    const store = createSearchStore(session)
+    store.search({ text: 'cat', mode: 'text', options: { caseSensitive: true, regex: false } })
+    await flushReparse()
+    const before = store.getSnapshot()
+
+    session.setSelectedNode(0)
+
+    expect(store.getSnapshot()).toBe(before)
+    store.dispose()
+  })
+
+  it('an edit marks the result stale before the debounced reparse lands, then clears it', async () => {
+    const api = fakeApi({ read: vi.fn().mockResolvedValue(utf8('{"a":"cat"}')) })
+    const session = createDocumentSession({
+      parse: fakeParse,
+      parseFromUrl: fakeParseFromUrl,
+      api,
+      reparseDelayMs: 30
+    })
+    await session.openPath('C:/docs/data.json')
+    const store = createSearchStore(session)
+    store.search({ text: 'cat', mode: 'text', options: { caseSensitive: true, regex: false } })
+    await flushReparse()
+    expect(store.getSnapshot().stale).toBe(false)
+
+    session.applyEdit({ start: 2, end: 3, text: 'x' }) // "a" -> "x", still has "cat"
+
+    // Stale immediately — before the debounced reparse has had time to run.
+    expect(store.getSnapshot().stale).toBe(true)
+
+    await flushReparse(90)
+    // Once the reparse lands and the store re-runs the same query, it's
+    // fresh again (matching the still-present "cat").
+    expect(store.getSnapshot().stale).toBe(false)
+    expect(store.getSnapshot().complete).toBe(true)
+    store.dispose()
+  })
+
+  it("opening a different document on the same session clears the previous document's search", async () => {
+    const api = fakeApi({
+      read: vi
+        .fn()
+        .mockImplementation((path: string) =>
+          Promise.resolve(path.includes('a.json') ? utf8('{"a":"cat"}') : utf8('{"b":"dog"}'))
+        )
+    })
+    const session = createDocumentSession({ parse: fakeParse, parseFromUrl: fakeParseFromUrl, api })
+    await session.openPath('C:/docs/a.json')
+    const store = createSearchStore(session)
+    store.search({ text: 'cat', mode: 'text', options: { caseSensitive: true, regex: false } })
+    await flushReparse()
+    expect(store.getSnapshot().starts.length).toBeGreaterThan(0)
+
+    await session.openPath('C:/docs/b.json')
+
+    // The previous document's query and result are both gone — §11.4:
+    // search is per document, not per app.
+    expect(store.getQuery()).toBeNull()
+    expect(store.getSnapshot()).toEqual({
+      starts: new Int32Array(0),
+      ends: new Int32Array(0),
+      complete: true,
+      provisional: false,
+      stale: false
+    })
+    store.dispose()
+  })
+
+  it('clearing an empty-text query removes the result without leaving a job running', async () => {
+    const api = fakeApi({ read: vi.fn().mockResolvedValue(utf8('{"a":"cat"}')) })
+    const session = createDocumentSession({ parse: fakeParse, parseFromUrl: fakeParseFromUrl, api })
+    await session.openPath('C:/docs/data.json')
+    const store = createSearchStore(session)
+    store.search({ text: 'cat', mode: 'text', options: { caseSensitive: true, regex: false } })
+    await flushReparse()
+    expect(store.getSnapshot().starts.length).toBeGreaterThan(0)
+
+    store.search({ text: '', mode: 'text', options: { caseSensitive: true, regex: false } })
+    expect(store.getSnapshot().starts.length).toBe(0)
+    expect(store.getQuery()).toBeNull()
+    store.dispose()
+  })
+
+  it('a second search a tick later supersedes the first — only its results land', async () => {
+    const api = fakeApi({
+      read: vi.fn().mockResolvedValue(utf8('{"a":"cat","b":"dog","c":"catfish"}'))
+    })
+    const session = createDocumentSession({ parse: fakeParse, parseFromUrl: fakeParseFromUrl, api })
+    await session.openPath('C:/docs/data.json')
+    const store = createSearchStore(session)
+
+    store.search({ text: 'cat', mode: 'text', options: { caseSensitive: true, regex: false } })
+    store.search({ text: 'dog', mode: 'text', options: { caseSensitive: true, regex: false } })
+    await flushReparse()
+
+    const result = store.getSnapshot()
+    expect(result.starts.length).toBe(1) // only "dog"
+    store.dispose()
+  })
+
+  // R88 (`R86-find-as-query-surface.md` §4) retired `setDirectResult` and
+  // `getDirectResultOrigin` — the palette hands off to Find by prefilling a
+  // `mode: 'path'` query instead of publishing a snapshot. What those tests
+  // asserted about supersession and clearing still has to be true of a
+  // path *query* (`CLAUDE.md`'s own "convert, don't drop" for this
+  // conversion) — see the `path mode (R86)` describe block below, which
+  // covers finding matches, re-running on an edit instead of going
+  // permanently stale, and clearing/superseding a diagnostic. The one
+  // assertion that doesn't already have a path-mode equivalent there —
+  // that a fresh query of either mode supersedes whatever came before —
+  // gets its own case here.
+  it('a fresh search() of either mode supersedes a path query already in flight', async () => {
+    const api = fakeApi({
+      read: vi.fn().mockResolvedValue(utf8('<cars><car id="c-1"><price>100</price></car></cars>'))
+    })
+    const session = createDocumentSession({ parse: fakeParse, parseFromUrl: fakeParseFromUrl, api })
+    await session.openPath('C:/docs/cars.xml')
+    const store = createSearchStore(session)
+
+    store.search({ text: 'cars/car', mode: 'path', options: { caseSensitive: true, regex: false } })
+    store.search({ text: '100', mode: 'text', options: { caseSensitive: true, regex: false } })
+    await flushReparse()
+
+    // Only the text search's own result lands — a stale path result never
+    // gets a chance to publish over it.
+    expect(store.getQuery()).toEqual({
+      text: '100',
+      mode: 'text',
+      options: { caseSensitive: true, regex: false }
+    })
+    expect(store.getSnapshot().starts.length).toBe(1)
+    store.dispose()
+  })
+
+  // R86 (`R86-find-as-query-surface.md` §2): path joins text as a second
+  // `SearchQuery` mode — re-runnable through the same `activeQuery`
+  // machinery a text search already uses, which is the whole reason it
+  // exists (a `setDirectResult` snapshot can never re-run against a new
+  // store; a `search({ mode: 'path' })` query does, for free).
+  describe('path mode (R86)', () => {
+    const CARS_XML =
+      '<cars><car id="c-1"><price>100</price></car><car id="c-2"><price>200</price></car></cars>'
+
+    it('finds matches in the open document, the same shape a text search does', async () => {
+      const api = fakeApi({ read: vi.fn().mockResolvedValue(utf8(CARS_XML)) })
+      const session = createDocumentSession({
+        parse: fakeParse,
+        parseFromUrl: fakeParseFromUrl,
+        api
+      })
+      await session.openPath('C:/docs/cars.xml')
+      const store = createSearchStore(session)
+
+      store.search({
+        text: 'cars//price',
+        mode: 'path',
+        options: { caseSensitive: false, regex: false }
+      })
+      await flushReparse()
+
+      const result = store.getSnapshot()
+      expect(result.complete).toBe(true)
+      expect(result.starts.length).toBe(2)
+      expect(store.getQuery()).toEqual({
+        text: 'cars//price',
+        mode: 'path',
+        options: { caseSensitive: false, regex: false }
+      })
+      store.dispose()
+    })
+
+    it('re-runs after an edit instead of going permanently stale', async () => {
+      const api = fakeApi({ read: vi.fn().mockResolvedValue(utf8(CARS_XML)) })
+      const session = createDocumentSession({
+        parse: fakeParse,
+        parseFromUrl: fakeParseFromUrl,
+        api,
+        reparseDelayMs: 30
+      })
+      await session.openPath('C:/docs/cars.xml')
+      const store = createSearchStore(session)
+      store.search({
+        text: 'cars/car',
+        mode: 'path',
+        options: { caseSensitive: false, regex: false }
+      })
+      await flushReparse()
+      expect(store.getSnapshot().starts.length).toBe(2)
+      expect(store.getSnapshot().stale).toBe(false)
+
+      // Adds a third <car> — an edit landing on a path result that used to
+      // be a `setDirectResult` snapshot (never re-run, marked stale forever).
+      session.applyEdit({
+        start: CARS_XML.indexOf('</cars>'),
+        end: CARS_XML.indexOf('</cars>'),
+        text: '<car id="c-3"><price>300</price></car>'
+      })
+      expect(store.getSnapshot().stale).toBe(true)
+
+      await flushReparse(90)
+      expect(store.getSnapshot().stale).toBe(false)
+      expect(store.getSnapshot().starts.length).toBe(3)
+      store.dispose()
+    })
+
+    it('a query that fails to parse sets a diagnostic and an empty, non-stale result', async () => {
+      const api = fakeApi({ read: vi.fn().mockResolvedValue(utf8(CARS_XML)) })
+      const session = createDocumentSession({
+        parse: fakeParse,
+        parseFromUrl: fakeParseFromUrl,
+        api
+      })
+      await session.openPath('C:/docs/cars.xml')
+      const store = createSearchStore(session)
+      expect(store.getPathDiagnostic()).toBeNull()
+
+      store.search({ text: 'cars/', mode: 'path', options: { caseSensitive: false, regex: false } })
+      await flushReparse()
+
+      expect(store.getPathDiagnostic()).not.toBeNull()
+      expect(store.getSnapshot()).toEqual({
+        starts: new Int32Array(0),
+        ends: new Int32Array(0),
+        complete: true,
+        provisional: false,
+        stale: false
+      })
+      store.dispose()
+    })
+
+    it('getPathDiagnostic is cleared by a fresh search, by clear(), and by opening a different document', async () => {
+      const api = fakeApi({
+        read: vi
+          .fn()
+          .mockImplementation((path: string) =>
+            Promise.resolve(path.includes('cars.xml') ? utf8(CARS_XML) : utf8('<a><b/></a>'))
+          )
+      })
+      const session = createDocumentSession({
+        parse: fakeParse,
+        parseFromUrl: fakeParseFromUrl,
+        api
+      })
+      await session.openPath('C:/docs/cars.xml')
+      const store = createSearchStore(session)
+
+      store.search({ text: 'cars/', mode: 'path', options: { caseSensitive: false, regex: false } })
+      await flushReparse()
+      expect(store.getPathDiagnostic()).not.toBeNull()
+
+      store.search({
+        text: 'cars/car',
+        mode: 'path',
+        options: { caseSensitive: false, regex: false }
+      })
+      await flushReparse()
+      expect(store.getPathDiagnostic()).toBeNull()
+
+      store.search({ text: 'cars/', mode: 'path', options: { caseSensitive: false, regex: false } })
+      await flushReparse()
+      expect(store.getPathDiagnostic()).not.toBeNull()
+      store.clear()
+      expect(store.getPathDiagnostic()).toBeNull()
+
+      store.search({ text: 'cars/', mode: 'path', options: { caseSensitive: false, regex: false } })
+      await flushReparse()
+      expect(store.getPathDiagnostic()).not.toBeNull()
+      await session.openPath('C:/docs/b.xml')
+      expect(store.getPathDiagnostic()).toBeNull()
+      store.dispose()
+    })
+  })
+})
