@@ -1,7 +1,7 @@
 {
   "name": "klados",
   "version": "1.0.0",
-  "description": "A viewer and editor for node-based data formats — XML, JSON and TOML, with YAML in progress.",
+  "description": "A desktop viewer and source-level editor for hierarchical data files — XML, JSON, TOML and CSV.",
   "license": "MIT",
   "main": "./out/main/index.js",
   "scripts": {

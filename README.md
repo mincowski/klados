@@ -1,103 +1,209 @@
 # Klados
 
-A viewer and editor for node-based data formats — XML, JSON, and later TOML and YAML.
+**A desktop viewer and source-level editor for hierarchical data files — XML, JSON, TOML and CSV.**
 
-Most tools of this kind either show you a tree or show you text. Klados shows you both,
-plus a third thing: when a node contains a list of similar children, their contents are
-collected into a **table**. A file with two thousand `<car>` elements becomes a grid with
-one row per car, which is usually what you actually wanted to look at.
+Most tools of this kind show you a tree, or show you text. Klados shows you both, plus a third
+thing: **when a node contains a list of similar children, their contents are collected into a
+table.** A file with two thousand `<car>` elements becomes a grid with one row per car, which is
+usually what you actually wanted to look at.
 
-Three synchronized views:
+Three panes, kept in sync:
 
-- **Tree** — the document structure
-- **Detail** — the selected node's contents, as tables; repeating children become a grid
-- **Raw** — the source text, unmodified
+- **Tree** — the document's structure
+- **Detail** — the selected node's contents as tables; repeating children become a grid you can
+  sort, filter, pin columns in, and export
+- **Raw** — the source text, exactly as it is on disk
 
-Editing happens in the Raw view only, which means saving a file never reformats it. Your
-comments, key order, quoting style and indentation are preserved byte-for-byte, because
-Klados writes back the bytes rather than regenerating them from a model.
+Editing happens in the Raw view only, and **saving never reformats your file.** Comments, key
+order, quoting style, indentation and line endings survive untouched, because Klados writes back
+the bytes it read rather than regenerating them from a model.
 
-Designed to stay usable on files in the hundreds of megabytes.
+Built to stay responsive on files in the hundreds of megabytes.
 
-## Status
+![Klados showing a 10 MB XML file as a tree, a table of its repeating children, and its source — light theme on the left, dark on the right](docs/screenshots/three-panes.png)
 
-**Pre-alpha — not yet usable.** Under active initial development. Nothing here is stable,
-including the things this README says are stable.
+## Download
 
-See [`docs/CONCEPT.md`](docs/CONCEPT.md) for the full design, and
-[`M0-PLAN.md`](M0-PLAN.md) for what is currently being built.
+Builds for Windows, macOS and Linux are on the
+[releases page](https://github.com/mincowski/klados/releases).
 
-## Development setup
+**The builds are not code-signed**, so each platform will warn you the first time:
+
+- **Windows** — SmartScreen shows "Windows protected your PC". Choose *More info* → *Run anyway*.
+- **macOS** — Gatekeeper refuses the first launch. Right-click the app → *Open*, then confirm.
+- **Linux** — mark the AppImage executable (`chmod +x`), or install the `.deb` as usual.
+
+Signing certificates cost money and Klados is free, so this is likely to stay true. If that
+trade-off doesn't suit you, [building from source](#development) takes about two minutes.
+
+## What it does today
+
+| Format | Opens |
+|---|---|
+| **XML** | `.xml`, and any file whose first byte is `<` |
+| **JSON** | `.json` |
+| **TOML** | `.toml` |
+| **CSV** | `.csv`, `.tsv`, `.tab` |
+
+- **Find**, with plain text or a **path query** — `cars//price`, `car[@id="c-001"]`, `car[3]`,
+  `car[price>100 and year<2000]`, `car[@id]`, `car[not(@id)]`, `*` for any name. The same syntax
+  works across every format.
+- **Replace**, including replace-all across very large documents.
+- **Tabs**, with session restore.
+- **Format and minify** as explicit commands, never automatically.
+- **Grid export** — copy a selection as CSV, TSV or Markdown.
+- **Light and dark themes**, zoom, and a command palette.
+
+## Keyboard
+
+**`Ctrl+Shift+P` opens the command palette, and every command in the application is reachable
+from it** — that is enforced by a test, not by discipline, so it is safe to rely on. `F1` opens a
+shortcuts reference.
+
+The handful worth memorising:
+
+| | |
+|---|---|
+| `Ctrl+O` | Open a file |
+| `Ctrl+F` / `Ctrl+H` | Find / Find with replace |
+| `F3` / `Shift+F3` | Next / previous match |
+| `Ctrl+1` `Ctrl+2` `Ctrl+3` | Focus the Tree, Detail or Raw pane |
+| `Alt+1` … `Alt+9` | Switch tabs |
+| `Ctrl+Shift+L` | Toggle light/dark |
+
+## Limits worth knowing before you rely on it
+
+Stated here rather than discovered later. The project keeps a fuller list in
+[`docs/TASKS.md`](docs/TASKS.md)'s *Owed* table.
+
+- **XML namespaces stop resolving after an edit** until the document is reopened. Resolution
+  works when a file is opened; the incremental reparse that runs while you type does not yet
+  carry the namespace state through.
+- **A namespace-prefixed path query** (`//inv:price`) matches on the prefix as written rather
+  than the resolved URI. It fails as "no matches", not as a wrong answer.
+- **A headerless CSV keeps only its first unnamed column.** Files with a header row — the
+  overwhelming majority — are unaffected.
+- **CSV memory scales with column count**, and it is the ceiling rather than file size: a
+  10-column, 2-million-row file (112 MB) uses about 378 MB. Very wide files are correspondingly
+  expensive.
+- **Switching to a tab holding a large minified document takes a couple of seconds.**
+
+## How this was built
+
+Klados was written by AI — Claude, working in Claude Code — under human supervision. Every round
+of work was planned, reviewed and accepted by a human maintainer, and the design, the decisions
+and the priorities are theirs; the great majority of the code, tests and documentation is
+machine-authored.
+
+This is disclosed because it is a reasonable thing to want to know before running an editor on
+your files. It is not a disclaimer about quality: the architectural invariants, the test suite,
+and a review pass on every task exist precisely so that supervision means something. Judge it the
+way you would judge any other project — by whether it does what it says on files you care about.
+
+If you want to see what that supervision looked like, [`docs/`](docs/README.md) is the working
+record: the design, every decision with the alternatives it rejected, and a list of the project's
+own unmet acceptance criteria.
+
+## Development
 
 ### Prerequisites
 
 - **Node.js 22 LTS or newer** — check with `node --version`
-- **npm** (bundled with Node) or **pnpm**, if you prefer it
+- **npm** (bundled with Node)
 - **Git**
 
-No other global tooling is required. Everything else installs locally.
+Nothing else needs to be installed globally.
 
 ### Getting started
 
 ```bash
-git clone https://github.com/<owner>/klados.git
+git clone https://github.com/mincowski/klados.git
 cd klados
 npm install
 npm run dev
 ```
 
-`npm run dev` starts Electron with hot reload for the renderer process. Editing files
-under `src/renderer/` updates the running app; changes to the main process restart it.
+`npm run dev` starts Electron with hot reload for the renderer. Editing files under
+`src/renderer/` updates the running app; changes to the main process restart it.
 
 ### Commands
 
 | Command | Purpose |
 |---|---|
-| `npm run dev` | run the app in development mode |
-| `npm run build` | produce a production build |
+| `npm run dev` | run in development |
+| `npm run build` | production build |
 | `npm run package` | build a distributable for the current platform |
-| `npm test` | run the test suite |
-| `npm run test:watch` | run tests in watch mode |
-| `npm run test:large` | include fixtures over 50 MB, normally skipped |
-| `npm run lint` | lint and check formatting |
-| `npm run typecheck` | run the TypeScript compiler without emitting |
+| `npm test` | the full suite — Node plus a real-Chromium browser project |
+| `npm run test:node` / `npm run test:watch` | the Node project only |
+| `npm run lint` | eslint, prettier and stylelint |
+| `npm run typecheck` | tsc, no emit |
 | `npm run inspect -- <file>` | parse a file from the command line and report on it |
 
-### Test fixtures
-
-Some tests need large generated files that are deliberately **not** committed. They live in
-`spike/fixtures/`, rebuilt with:
-
-```bash
-tsx spike/generate-fixtures.ts
-```
-
-Expect it to take a couple of minutes and a gigabyte of disk. Tests that require them skip
-cleanly if they are absent.
+`npm run test:large` runs the suite including fixtures over 50 MB. **It currently fails with a
+worker timeout** and takes around twenty minutes; it is not part of CI.
 
 ### Project layout
 
 ```
 src/
   core/        format-agnostic: buffer, node store, interning, row index
-  formats/     one module per format (xml, json, …)
+  formats/     one module per format (xml, json, toml, csv)
   worker/      parsing off the main thread
-  renderer/    UI
-  main/        Electron main process
+  renderer/    the UI
+  main/        the Electron main process
 test/
-docs/
+docs/          the engineering record — start at docs/README.md
 ```
 
-The important boundary is that **nothing above `formats/` knows which format produced a
-document.** See `src/core/types.ts` for the contract each format implements.
+The load-bearing boundary is that **nothing above `formats/` knows which format produced a
+document.** Format-specific behaviour is expressed through a capabilities record, never by testing
+a format id. See `src/core/types.ts` for the contract each format implements.
+
+### Test fixtures
+
+Some tests need large generated files that are deliberately not committed. Rebuild them with:
+
+```bash
+npm run fixtures:generate
+```
+
+Expect a couple of minutes and about a gigabyte of disk. Tests that need them skip cleanly when
+they are absent.
 
 ## Contributing
 
-Not yet accepting contributions — the architecture is still moving. Once it settles, this
-section will explain how.
+Pull requests are welcome.
+
+**Bug reports are the most useful thing you can send**, especially with a file that reproduces the
+problem. If the file cannot be shared, the format plus its approximate size and shape usually get
+most of the way there.
+
+**For a small fix** — a typo, a broken link, a clear one-file bug — just open a pull request.
+
+**For anything larger, open an issue first.** Not bureaucracy: this codebase has a few
+architectural rules that are load-bearing and not obvious from reading any single file, and a
+change that breaks one gets rejected for reasons that look arbitrary unless we have talked first.
+The main ones:
+
+- **The document is never converted to a JavaScript string.** JS strings are UTF-16, which doubles
+  a 200 MB file. Everything works on `Uint8Array`, decoding short slices on demand.
+- **There is no object per node.** Node data lives in parallel typed arrays; all spans are byte
+  offsets in `Int32Array`.
+- **Parsers are iterative, never recursive**, and never throw on malformed input — they emit a
+  diagnostic and carry on, because a partial tree beats an error screen.
+- **Editing happens only in the Raw view, and saving writes the byte buffer.** The document is
+  never regenerated from the model. This is what makes byte-identical saves possible, and most of
+  the rest of the design hangs off it.
+- **Nothing above `src/formats/` knows which format produced a document.** Format-specific
+  behaviour goes through a capabilities record, never a test against a format id.
+
+`npm test`, `npm run lint` and `npm run typecheck` all need to pass. The test suite runs in Node
+and in real Chromium, and takes a couple of minutes.
+
+**You do not need to follow the process in [`CLAUDE.md`](CLAUDE.md).** The `R` numbers, plan
+documents and status board described there are the maintainer's own working method — useful to read
+if you want to understand why something is the way it is, but not a requirement for a pull request.
 
 ## License
 
 MIT. See [`LICENSE`](LICENSE).
-
-Third-party notices are generated at build time into `THIRD-PARTY-NOTICES.txt`.
