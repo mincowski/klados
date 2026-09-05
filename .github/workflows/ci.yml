@@ -49,4 +49,18 @@ jobs:
       # installed before `npm test` (which now runs both projects, R48a).
       - run: npx playwright install --with-deps chromium
 
-      - run: npm test
+      # `test/mainElectron.test.ts` launches the *built* app through
+      # Playwright's `_electron`. Electron is a real GUI process and needs a
+      # display server; a headless Linux runner has none, so no window is ever
+      # created, `firstWindow()` never resolves, and the suite fails on a hook
+      # timeout rather than on anything it was trying to assert.
+      #
+      # Xvfb rather than skipping the test on CI: it is the only test that
+      # exercises the packaged application end to end, which makes it the one
+      # least worth dropping from the pipeline that packages it. The suite's
+      # own guard already skips it when `out/main/index.js` is absent, so this
+      # covers the other half of the same question — the binary exists, but
+      # there is nowhere to show it.
+      - run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      - run: xvfb-run -a npm test

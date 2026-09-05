@@ -129,7 +129,13 @@ describe('R134 — a namespace-free document parses measurably unchanged', () =>
     // resolution work leaked into the declaration-free fast path," not a
     // precise number CI hardware variance would make flaky.
     expect(namespaced).toBeLessThan(Math.max(plain * 2, plain + 20))
-  })
+    // Explicit timeout, not the 5 s default: this parses a 50,000-element
+    // document eight times (two warm-ups plus three timed runs per shape).
+    // The assertion above is a deliberately generous *ratio* — wall-clock
+    // time is not what it measures — so a default sized for ordinary unit
+    // tests turns a slower runner into a red build. It timed out on CI while
+    // passing locally.
+  }, 60_000)
 })
 
 describe('R135 — the rebinding fallback, pay-per-use', () => {
