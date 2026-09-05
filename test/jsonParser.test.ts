@@ -408,6 +408,13 @@ describe('jsonFormatModule.format — deep nesting does not overflow the stack (
   // (indentation grows with depth at every one of 20 000 levels), too slow
   // for a per-test structural comparison to be worth its own assertion —
   // the throw/no-throw question is what this depth exists to answer.
+  // Explicit timeout, not the 5 s default: the comment above is the reason —
+  // this formats hundreds of megabytes of indentation, twice. Measured at
+  // ~3.7 s in isolation on a fast machine, which cleared the default by a
+  // margin that parallel load ate, so it failed intermittently in a full run
+  // and would fail more often on a slower CI runner. The assertion is
+  // `not.toThrow()`; elapsed time is not what this test measures, and capping
+  // it near the observed cost tests the machine rather than the code.
   it('depth 20000 (past DEFAULT_MAX_DEPTH) does not throw, pretty or minified', () => {
     expect(() =>
       jsonFormatModule.format!(utf8(deepObjects(20_000)), { indent: '  ', newline: '\n' })
@@ -415,5 +422,5 @@ describe('jsonFormatModule.format — deep nesting does not overflow the stack (
     expect(() =>
       jsonFormatModule.format!(utf8(deepObjects(20_000)), { indent: '', newline: '\n' })
     ).not.toThrow()
-  })
+  }, 60_000)
 })
