@@ -286,13 +286,31 @@ assumed, because removing the only way to launch the application would be a bad 
 packaged app and reading `app.getName()`, which returns `klados` because the packaged manifest
 carries `name` and **no `productName`**. Cosmetic, and worth fixing before anyone has a profile.
 
-**The mechanism must be verified, not assumed.** Adding `productName: "Klados"` to
-`package.json` is the conventional fix, but electron-builder filters the packaged manifest and it
-is **not established that it propagates** — the current packaged `package.json` shows it does not
-appear from `electron-builder.yml`'s own `productName`. If it does not propagate, the explicit
-alternative is `app.setName('Klados')` in the main process **before** the first
-`app.getPath('userData')` call, which also fixes dev runs. Rebuild and re-read `app.getName()` to
-find out which; do not ship the declarative version on faith.
+**Verified rather than assumed, and the declarative fix works.** `productName: "Klados"` moved
+*into* `package.json` and *out of* `electron-builder.yml`. Measured on a rebuild: the field
+survives electron-builder's manifest filter, and the packaged app reports
+
+```
+app.getName()          -> "Klados"
+app.getPath('userData') -> %APPDATA%Klados
+```
+
+read back from the launched binary, not inferred. `app.setName()` was the fallback and is not
+needed.
+
+**One source of truth, not two.** `appInfo.js` resolves
+`config.productName || metadata.productName || metadata.name`, so the packager falls through to
+`package.json` and produces identical artifacts — verified by rebuilding after the removal and
+confirming the executable is still `Klados.exe`. Keeping it only in `electron-builder.yml` was the
+actual bug: that file is not shipped inside the app, so the packager saw `Klados` while the
+*runtime* never did and fell back to `name`. This is what Electron's own guidance describes —
+`name` short and lowercase, `productName` the capitalised display name, preferred by
+`app.getName()`.
+
+**A Windows footnote that matters for the next platform.** The on-disk directory is *still*
+`klados`: NTFS is case-insensitive, so Windows reused the existing folder rather than creating a
+new one. The change is genuinely invisible here — and would not have been on macOS or Linux, which
+is the whole argument for doing it before the first release.
 
 **Why before the first release, specifically.** On Windows the filesystem is case-insensitive, so
 `klados` and `Klados` are the same directory and the change costs nothing. On macOS and Linux they

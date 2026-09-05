@@ -1,5 +1,4 @@
 appId: com.klados.app
-productName: Klados
 directories:
   buildResources: assets/build
 files:
@@ -15,7 +14,13 @@ nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
-  createDesktopShortcut: always
+  # `false`, not the unset default. The policy has three values — NEVER,
+  # FRESH_INSTALL (unset) and ALWAYS — and this was `always`, the most
+  # intrusive: it recreates the icon on every update even after the user has
+  # deleted it. A viewer opened from a file association or the Start menu does
+  # not earn a permanent place on someone's desktop. The Start-menu entry is
+  # governed separately (`createStartMenuShortcut !== false`) and is unaffected.
+  createDesktopShortcut: false
 mac:
   entitlementsInherit: assets/build/entitlements.mac.plist
   extendInfo:
@@ -25,9 +30,11 @@ mac:
 dmg:
   artifactName: ${name}-${version}.${ext}
 linux:
+  # No `snap`: it needs snapcraft on the build machine, and a .snap that is not
+  # in the Snap Store cannot be installed without `--dangerous` — worse than
+  # shipping none at all. AppImage (portable, no install) plus .deb covers Linux.
   target:
     - AppImage
-    - snap
     - deb
   maintainer: klados
   category: Utility

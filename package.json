@@ -1,5 +1,6 @@
 {
   "name": "klados",
+  "productName": "Klados",
   "version": "1.0.0",
   "description": "A desktop viewer and source-level editor for hierarchical data files — XML, JSON, TOML and CSV.",
   "license": "MIT",

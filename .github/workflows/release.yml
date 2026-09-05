@@ -1,0 +1,100 @@
+name: Release
+
+# R141 (`docs/plans/R140-publication.md` §3). `ci.yml` deliberately excludes
+# packaging; this is the round it defers to.
+#
+# Tag-driven: pushing `v1.0.0` builds on all three platforms and uploads to a
+# **draft** release, which is electron-builder's own default and is kept on
+# purpose — three runners finish at different times, and a draft lets them
+# accumulate onto one release that a human publishes after looking at it.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+# electron-builder uploads the artifacts itself, which needs write access to
+# releases. Nothing else here writes to the repository.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    strategy:
+      # Never fail-fast: one platform's build failing should not cancel the
+      # other two, or a single flake costs a whole release round trip.
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            # NSIS installer. `win.target` is unset in electron-builder.yml, so
+            # this is electron-builder's default and there is no portable build
+            # — deliberate, see §3.
+            args: ''
+          - os: macos-latest
+            # `macos-latest` runners are arm64. Without naming both
+            # architectures the release would silently contain nothing an Intel
+            # Mac can run, and nobody would notice until someone complained.
+            args: '--x64 --arm64'
+          - os: ubuntu-latest
+            args: ''
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # The tag and `package.json` are *not* connected: electron-builder takes
+      # the version from package.json and GitHub takes the release name from the
+      # tag. A mismatch produces a release called v1.2.0 containing files named
+      # klados-1.1.0-*, which looks like a supply-chain problem and is merely a
+      # slip. Fail the job instead.
+      - name: Tag must match package.json version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::tag v$tag does not match package.json version $pkg"
+            exit 1
+          fi
+          echo "tag and package.json agree on $pkg"
+
+      # Gates before anything is published. A release built from code that does
+      # not typecheck or does not pass its own tests is worse than a late one.
+      - run: npm run typecheck
+      - run: npm run lint
+
+      - run: npx playwright install --with-deps chromium
+
+      # Linux only: `test/mainElectron.test.ts` launches the built app, and
+      # Electron needs a display server a headless runner does not have. Same
+      # reasoning as ci.yml.
+      - name: Install xvfb
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      - name: Test
+        shell: bash
+        run: |
+          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+            xvfb-run -a npm test
+          else
+            npm test
+          fi
+
+      - name: Build and publish
+        run: npm run package -- ${{ matrix.args }} --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Nothing is code-signed (no certificates, `notarize: false`), and the
+          # macOS runner would otherwise try to sign with whatever identity it
+          # finds in its keychain and fail confusingly. Being explicit turns
+          # that into an unsigned build, which is what the README documents.
+          CSC_IDENTITY_AUTO_DISCOVERY: false
