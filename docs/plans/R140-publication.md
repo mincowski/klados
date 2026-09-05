@@ -259,6 +259,47 @@ right-click → Open. **This belongs in the README's install section** (R142), p
 rather than an apology. Code signing is a paid certificate and its own round; do not attempt it
 here, and do not quietly leave users to discover it.
 
+### Two installer decisions, taken after building one locally
+
+`npm run package` was run before planning this, and the artifacts and paths below are **measured
+from the built installer and from the packaged app's own `app.getPath()`**, not read off the
+config. What it confirmed: Windows produces `klados-1.0.0-setup.exe` (169 MB) and **no portable
+build** — `target` is set only under `linux`, so Windows and macOS take the defaults — installing
+per-user to `%LOCALAPPDATA%ProgramsKlados` with `oneClick=true perMachine=false`. Both are
+kept deliberately: a portable Windows build is not wanted, and a one-click per-user install (no UAC,
+no options page) is the right default for a small free tool.
+
+**(e) No desktop shortcut.** `electron-builder.yml` currently sets
+`nsis.createDesktopShortcut: always`, and `always` is the **most intrusive of the three settings**,
+not a neutral one — `convertToDesktopShortcutCreationPolicy` maps it to `ALWAYS`, which recreates
+the icon **on every update even after the user has deleted it**. (The unset default is
+`FRESH_INSTALL`, first install only; `false` is `NEVER`.) Set it to **`false`**: a viewer people
+open from a file association or the Start menu does not earn a permanent place on the desktop.
+
+Safe to do because the Start-menu entry is independent and stays —
+`isCreateStartMenuShortcut: options.createStartMenuShortcut !== false`, so it is created unless
+explicitly disabled, and nothing here disables it. Verified in `app-builder-lib` rather than
+assumed, because removing the only way to launch the application would be a bad way to find out.
+
+**(f) `Klados` and `klados` should agree.** The install directory is `Klados` (from
+`productFilename`) while the settings directory is `%APPDATA%klados` — confirmed by launching the
+packaged app and reading `app.getName()`, which returns `klados` because the packaged manifest
+carries `name` and **no `productName`**. Cosmetic, and worth fixing before anyone has a profile.
+
+**The mechanism must be verified, not assumed.** Adding `productName: "Klados"` to
+`package.json` is the conventional fix, but electron-builder filters the packaged manifest and it
+is **not established that it propagates** — the current packaged `package.json` shows it does not
+appear from `electron-builder.yml`'s own `productName`. If it does not propagate, the explicit
+alternative is `app.setName('Klados')` in the main process **before** the first
+`app.getPath('userData')` call, which also fixes dev runs. Rebuild and re-read `app.getName()` to
+find out which; do not ship the declarative version on faith.
+
+**Why before the first release, specifically.** On Windows the filesystem is case-insensitive, so
+`klados` and `Klados` are the same directory and the change costs nothing. On macOS and Linux they
+are **different directories**, so making this change after people have installed would strand every
+setting they have — the same relocation R144 caused deliberately, but this time for a cosmetic
+reason and without warning. There are no installs yet; this is the free moment.
+
 ## 4. R142 — the README
 
 ### What is wrong with the current one, checked against the tree
@@ -468,7 +509,11 @@ makes preserving it more important after the reset, not less.
    doc-referenced hashes resolve. Asserted by cloning, not by assuming.
 4. Pushing to GitHub triggers `ci.yml` and it **passes** — the first time it has ever run
    (`docs/TASKS.md` Owed). If it fails, that is a finding to fix, not a workflow to disable.
-5. A `v1.0.0` tag produces a draft release carrying, at minimum: an NSIS installer, a `.dmg` for
+5. **The installed application creates no desktop shortcut, and does have a Start-menu entry** —
+   checked by installing the built artifact, not by reading the config.
+6. **`app.getName()` returns `Klados`** in the packaged app, so the settings directory matches the
+   install directory in case. Asserted by launching the built binary and reading the path back.
+7. A `v1.0.0` tag produces a draft release carrying, at minimum: an NSIS installer, a `.dmg` for
    **both** macOS architectures, an AppImage and a `.deb`.
 6. A version/tag mismatch fails the release job with a message naming both values, asserted by
    pushing a deliberately mismatched tag to a scratch branch once.
