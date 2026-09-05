@@ -90,10 +90,30 @@ function titleGlyphInkCenter(titleEl: HTMLElement): number {
  * `docs/TASKS.md`'s Owed table rather than fixed here — a per-font nudge is a
  * design decision, not a test change.
  */
+/**
+ * Width comparison, not `document.fonts.check()`. That API only reports on
+ * fonts declared through `@font-face`; for a locally installed system font it
+ * returns `true` unconditionally, so an earlier version of this guard was
+ * inert and the test still ran — and still failed — on CI.
+ *
+ * Rendering a string that exercises very different advance widths against
+ * `monospace`, then against `"<name>", monospace`, is the standard detection:
+ * if the width moves, the named face actually resolved; if it does not, the
+ * fallback rendered both times.
+ */
+function fontIsAvailable(name: string): boolean {
+  const ctx = document.createElement('canvas').getContext('2d')
+  if (ctx === null) return false
+  const probe = 'MMMMMMMMMWWWWWWWWWiiiiiiiii'
+  ctx.font = '72px monospace'
+  const fallbackWidth = ctx.measureText(probe).width
+  ctx.font = `72px "${name}", monospace`
+  return ctx.measureText(probe).width !== fallbackWidth
+}
+
 const CALIBRATED_FONT_PRESENT =
   typeof document !== 'undefined' &&
-  typeof document.fonts?.check === 'function' &&
-  document.fonts.check('16px "Segoe UI"')
+  (fontIsAvailable('Segoe UI') || fontIsAvailable('-apple-system'))
 
 describe.skipIf(!CALIBRATED_FONT_PRESENT)('title bar mark/title optical (ink) alignment', () => {
   it('the mark and the title text share an ink center, not just a box center', async () => {
