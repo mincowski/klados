@@ -19,23 +19,42 @@ permissions:
 
 jobs:
   release:
+    name: ${{ matrix.name }}
     strategy:
       # Never fail-fast: one platform's build failing should not cancel the
-      # other two, or a single flake costs a whole release round trip.
+      # others, or a single flake costs a whole release round trip.
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
+          - name: windows
+            os: windows-latest
             # NSIS installer. `win.target` is unset in electron-builder.yml, so
             # this is electron-builder's default and there is no portable build
-            # — deliberate, see §3.
+            # — deliberate, see §3 of the plan.
             args: ''
-          - os: macos-latest
-            # `macos-latest` runners are arm64. Without naming both
-            # architectures the release would silently contain nothing an Intel
-            # Mac can run, and nobody would notice until someone complained.
-            args: '--x64 --arm64'
-          - os: ubuntu-latest
+
+          # macOS is two jobs, one per architecture, rather than one job passing
+          # `--x64 --arm64`. The reason is naming: an `artifactName` pattern has
+          # no conditional, so it cannot say "arm64 → -mac, x64 → -mac-intel",
+          # and the two labels are what make the download obvious to someone who
+          # does not know what their Mac has inside it. Splitting lets each job
+          # override the pattern with `-c.dmg.artifactName`, which is verified
+          # to work.
+          #
+          # The single quotes matter: the value reaches bash before
+          # electron-builder, and ${name} unquoted expands to an empty shell
+          # variable.
+          - name: macos-apple-silicon
+            os: macos-latest
+            args: >-
+              --arm64 -c.dmg.artifactName='${name}-${version}-mac.${ext}'
+          - name: macos-intel
+            os: macos-latest
+            args: >-
+              --x64 -c.dmg.artifactName='${name}-${version}-mac-intel.${ext}'
+
+          - name: linux
+            os: ubuntu-latest
             args: ''
     runs-on: ${{ matrix.os }}
 

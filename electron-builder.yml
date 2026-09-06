@@ -12,6 +12,12 @@ win:
   executableName: Klados
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
+  # No .blockmap. A blockmap is a content-chunk index that lets
+  # `electron-updater` download only the changed blocks between versions — it
+  # describes an update mechanism this application does not have. Verified that
+  # turning it off leaves the installer untouched and simply stops emitting the
+  # sidecar.
+  differentialPackage: false
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   # `false`, not the unset default. The policy has three values — NEVER,
@@ -22,13 +28,32 @@ nsis:
   # governed separately (`createStartMenuShortcut !== false`) and is unaffected.
   createDesktopShortcut: false
 mac:
+  # dmg only. electron-builder's default macOS targets are dmg *and* zip, and
+  # the zip exists almost entirely for `electron-updater`, which cannot update
+  # from a dmg. This application has no auto-updater — `electron-updater` is not
+  # a dependency and nothing calls `autoUpdater` — so the zips were two assets
+  # serving nobody.
+  target:
+    - dmg
   entitlementsInherit: assets/build/entitlements.mac.plist
   extendInfo:
     - NSDocumentsFolderUsageDescription: Klados opens files from your Documents folder.
     - NSDownloadsFolderUsageDescription: Klados opens files from your Downloads folder.
   notarize: false
 dmg:
-  artifactName: ${name}-${version}.${ext}
+  # `${arch}` is not optional here, and leaving it out was a real bug: the
+  # release builds both architectures, both dmgs were named
+  # `klados-<version>.dmg`, and one silently overwrote the other — so the
+  # published release carried a single dmg of indeterminate architecture and
+  # half of macOS would have downloaded something that will not run. The zips
+  # were unaffected only because they use electron-builder's default pattern,
+  # which does include the arch; that asymmetry is what exposed it.
+  #
+  # The release workflow overrides this with friendlier, user-facing names
+  # (`-mac` / `-mac-intel`) via `-c.dmg.artifactName`, because a pattern cannot
+  # branch on architecture. This stays as the local default: unambiguous, and
+  # it works without the workflow's environment.
+  artifactName: ${name}-${version}-${arch}.${ext}
 linux:
   # No `snap`: it needs snapcraft on the build machine, and a .snap that is not
   # in the Snap Store cannot be installed without `--dangerous` — worse than
