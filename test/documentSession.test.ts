@@ -149,6 +149,45 @@ describe('createDocumentSession (D6)', () => {
   beforeEach(() => resetContextForTests())
   afterEach(() => resetContextForTests())
 
+  /** Waits for the session to stop changing, rather than for a fixed
+   * duration.
+   *
+   * This was `setTimeout(resolve, 40)` — a guess at how long a near-zero
+   * debounce timer plus the graft's own `setTimeout(0)` chain take
+   * (M5-PLAN.md H2d: a splice's graft runs through `runChunkedJob`, which
+   * yields at least one extra macrotask even when it finishes in its first
+   * slice). The guess held on a development machine and failed on a Windows
+   * CI runner, where the reparse had not landed yet and `storeChanges` read
+   * 0 instead of 1. It failed the v1.0.0 release build.
+   *
+   * A duration cannot be picked correctly here: too short flakes on a loaded
+   * runner, too long makes thirteen call sites slow. Quiescence is the real
+   * condition every one of them wants — settle, *then* assert — and it is
+   * also what keeps the "exactly one reparse" assertions meaningful, since a
+   * burst that wrongly produced three would still be quiet by the time this
+   * returns and the count would still catch it. */
+  async function flushReparse(session: { getSnapshot: () => unknown }): Promise<void> {
+    const QUIET_MS = 40 // the settle window the old fixed wait assumed
+    const POLL_MS = 5
+    const TIMEOUT_MS = 5000
+    const deadline = Date.now() + TIMEOUT_MS
+    let last = session.getSnapshot()
+    let quietFor = 0
+    while (quietFor < QUIET_MS) {
+      await new Promise((resolve) => setTimeout(resolve, POLL_MS))
+      const current = session.getSnapshot()
+      if (current === last) {
+        quietFor += POLL_MS
+      } else {
+        last = current
+        quietFor = 0
+      }
+      if (Date.now() > deadline) {
+        throw new Error(`flushReparse: session still changing after ${TIMEOUT_MS}ms`)
+      }
+    }
+  }
+
   it('starts empty', () => {
     const session = createDocumentSession()
     expect(session.getSnapshot()).toEqual({ phase: 'empty' })
@@ -737,18 +776,6 @@ describe('createDocumentSession (D6)', () => {
   })
 
   describe('debounced reparse (F3)', () => {
-    /** A near-zero `reparseDelayMs` fires almost immediately, but still
-     * asynchronously (via a real `setTimeout`) — this waits long enough for
-     * that timer plus the fake parse's own microtask chain to land.
-     * M5-PLAN.md H2d: a splice's own graft now runs through
-     * `runChunkedJob`, which yields via at least one more `setTimeout(0)`
-     * even for a graft trivially small enough to finish in its first slice
-     * — the wait must cover that extra macrotask too, not just the
-     * debounce timer itself. */
-    async function flushReparse(): Promise<void> {
-      await new Promise((resolve) => setTimeout(resolve, 40))
-    }
-
     it('a burst of edits produces exactly one reparse', async () => {
       let parseCalls = 0
       const countingParse: typeof fakeParse = (bytes, options) => {
@@ -782,7 +809,7 @@ describe('createDocumentSession (D6)', () => {
       session.applyEdit({ start: 5, end: 6, text: '3' })
       session.applyEdit({ start: 5, end: 6, text: '4' })
 
-      await flushReparse()
+      await flushReparse(session)
       // F10/D-036: this plain value edit now splices instead of reaching
       // the worker — `parseCalls` staying 0 is the proof, not a
       // regression. `storeChanges` is what actually verifies the burst
@@ -815,7 +842,7 @@ describe('createDocumentSession (D6)', () => {
 
       // Delete the closing brace — '{"a":1}' -> '{"a":1', malformed.
       session.applyEdit({ start: 6, end: 7, text: '' })
-      await flushReparse()
+      await flushReparse(session)
 
       const after = session.getSnapshot()
       if (after.phase !== 'ready') throw new Error('unreachable')
@@ -835,13 +862,13 @@ describe('createDocumentSession (D6)', () => {
       await session.openPath('C:/docs/data.json')
 
       session.applyEdit({ start: 6, end: 7, text: '' }) // '{"a":1' — broken
-      await flushReparse()
+      await flushReparse(session)
       const broken = session.getSnapshot()
       if (broken.phase !== 'ready') throw new Error('unreachable')
       expect(broken.document.pendingParseError).not.toBeNull()
 
       session.applyEdit({ start: 6, end: 6, text: '}' }) // repair it
-      await flushReparse()
+      await flushReparse(session)
 
       const fixed = session.getSnapshot()
       if (fixed.phase !== 'ready') throw new Error('unreachable')
@@ -861,7 +888,7 @@ describe('createDocumentSession (D6)', () => {
       session.setCaretOffset(5) // inside the value "1"
 
       session.applyEdit({ start: 5, end: 6, text: '99' }) // '{"a":1}' -> '{"a":99}'
-      await flushReparse()
+      await flushReparse(session)
 
       const state = session.getSnapshot()
       if (state.phase !== 'ready') throw new Error('unreachable')
@@ -893,7 +920,7 @@ describe('createDocumentSession (D6)', () => {
 
       // Edit it into a *different* still-malformed shape.
       session.applyEdit({ start: 5, end: 5, text: '1,"b":' })
-      await flushReparse()
+      await flushReparse(session)
 
       const after = session.getSnapshot()
       if (after.phase !== 'ready') throw new Error('unreachable')
@@ -931,7 +958,7 @@ describe('createDocumentSession (D6)', () => {
       // test/subtreeSplice.test.ts), forcing the fall-through to the full
       // reparse path this flaky fake is standing in for.
       session.applyEdit({ start: 6, end: 7, text: '' }) // '{"a":1}' -> '{"a":1'
-      await flushReparse()
+      await flushReparse(session)
 
       const after = session.getSnapshot()
       if (after.phase !== 'ready') throw new Error('unreachable')
@@ -991,14 +1018,6 @@ describe('createDocumentSession (D6)', () => {
   })
 
   describe('incremental reparse via subtree splicing (F10/D-036)', () => {
-    // M5-PLAN.md H2d: the graft now runs through `runChunkedJob`, which
-    // yields via at least one extra `setTimeout(0)` beyond the debounce
-    // timer itself — see the other `flushReparse` in this file for the
-    // same note.
-    async function flushReparse(): Promise<void> {
-      await new Promise((resolve) => setTimeout(resolve, 40))
-    }
-
     it('a plain value edit reparses via splice, never reaching the worker', async () => {
       let parseCalls = 0
       const countingParse: typeof fakeParse = (bytes, options) => {
@@ -1015,7 +1034,7 @@ describe('createDocumentSession (D6)', () => {
       parseCalls = 0
 
       session.applyEdit({ start: 5, end: 6, text: '99' }) // '{"a":1}' -> '{"a":99}'
-      await flushReparse()
+      await flushReparse(session)
 
       expect(parseCalls).toBe(0)
       const state = session.getSnapshot()
@@ -1034,7 +1053,7 @@ describe('createDocumentSession (D6)', () => {
       await session.openPath('C:/docs/data.json')
 
       session.applyEdit({ start: 22, end: 23, text: '99' }) // "d":3 -> "d":99
-      await flushReparse()
+      await flushReparse(session)
 
       const spliced = session.getSnapshot()
       if (spliced.phase !== 'ready') throw new Error('unreachable')
@@ -1085,7 +1104,7 @@ describe('createDocumentSession (D6)', () => {
       parseCalls = 0
 
       session.applyEdit({ start: 6, end: 7, text: '' }) // '{"a":1}' -> '{"a":1'
-      await flushReparse()
+      await flushReparse(session)
 
       expect(parseCalls).toBe(1) // the splice attempt refused; the full path ran once
       const state = session.getSnapshot()
@@ -1108,11 +1127,11 @@ describe('createDocumentSession (D6)', () => {
       })
       await session.openPath('C:/docs/data.json') // '{"a":1}'
       session.applyEdit({ start: 5, end: 6, text: '9' }) // splices — parseCalls stays 0
-      await flushReparse()
+      await flushReparse(session)
       parseCalls = 0
 
       session.undo()
-      await flushReparse()
+      await flushReparse(session)
 
       expect(parseCalls).toBe(1)
       const state = session.getSnapshot()
@@ -1141,7 +1160,7 @@ describe('createDocumentSession (D6)', () => {
       // "entirely before the tracked region" case.
       session.applyEdit({ start: 15, end: 20, text: '9' }) // "b":22222 -> "b":9
       session.applyEdit({ start: 5, end: 10, text: '8' }) // "a":11111 -> "a":8
-      await flushReparse()
+      await flushReparse(session)
 
       expect(parseCalls).toBe(0) // still handled entirely via splice
       const state = session.getSnapshot()

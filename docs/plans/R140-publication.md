@@ -275,6 +275,22 @@ Making `ci.yml` a three-OS matrix would move that discovery before the tag; it c
 times the CI minutes, which are free for a public repository. Recorded rather than done, because it
 changes what every push costs and that is a call for the maintainer.
 
+**(d1) A fixed sleep is not a wait, and this one blocked the release twice.**
+`documentSession.test.ts` flushed a debounced reparse with `setTimeout(resolve, 40)` — a guess at
+how long a near-zero debounce timer plus the graft's own `setTimeout(0)` chain take. It held on a
+development machine, was recorded as a local-only flake, and then failed the `v1.0.0` build on
+`windows-latest` with `storeChanges` reading 0 instead of 1.
+
+**Fixed by waiting for the condition instead of for a duration**: the helper now polls until the
+session's snapshot stops changing, with a 40 ms quiet window and a 5 s ceiling that throws rather
+than silently passing. No duration is correct here — too short flakes on a loaded runner, too long
+makes thirteen call sites slow — and quiescence is what every call site actually wanted. It also
+*keeps* the "exactly one reparse" assertions honest: a burst that wrongly produced three would still
+be quiet by the time the helper returns, and the count would still catch it.
+
+Two identical copies of the helper existed in different `describe` blocks; the fix is hoisted to one.
+Verified with five consecutive runs of the file and two full-suite runs, all green.
+
 **(d) Everything is unsigned, and that is a user-facing fact, not a footnote.** `notarize: false`,
 no certificates. Windows shows a SmartScreen warning; macOS refuses the first launch and needs
 right-click → Open. **This belongs in the README's install section** (R142), phrased as instructions
