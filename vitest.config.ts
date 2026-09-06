@@ -6,6 +6,39 @@ import react from '@vitejs/plugin-react'
 // browser project is new — real Chromium via Playwright, for component
 // tests that need real layout (scrollHeight, computed styles, rAF), which
 // jsdom/happy-dom cannot give CodeMirror or the virtualized grid/tree.
+
+// R141: raised from Vitest's 5 s default, which is sized for ordinary unit
+// tests and is wrong for this suite.
+//
+// This project deliberately contains heavy tests — parsers are invariant-
+// tested rather than example-tested (M0-PLAN B12), so a single case may format
+// a document nested 9,000 deep, or drive a predicate across 400,000
+// candidates. On a development machine those clear 5 s; on a CI runner they do
+// not. The first release build ran the suite on Windows and macOS for the
+// first time (`ci.yml` only ever ran ubuntu) and three of them failed at once
+// at 6.2 s, 6.8 s and 8.4 s.
+//
+// **This weakens no assertion.** None of those tests measures elapsed time —
+// they assert "does not throw", "re-parses to the same tree", "returns the
+// same set". Where this project does budget performance it does so explicitly
+// (`expect(elapsed).toBeLessThan(...)` in `namespaceResolution.test.ts` and
+// `pathPredicateBudget.test.ts`), so the timeout is a hang guard, not a
+// performance gate, and raising it cannot hide a regression those tests would
+// have caught.
+//
+// 30 s is ~3.5× the slowest observed run. Two genuinely extreme cases keep
+// their own larger per-test overrides.
+const TEST_TIMEOUT_MS = 30_000
+
+// `mainElectron.test.ts` launches the real built application in `beforeAll`.
+// Cold-starting Electron on a CI runner is well past the 10 s hook default.
+const HOOK_TIMEOUT_MS = 30_000
+
+// Set per project rather than once at the root: with `projects`, each entry
+// carries its own resolved config, so a root-level value is not something to
+// rely on inheriting.
+const timeouts = { testTimeout: TEST_TIMEOUT_MS, hookTimeout: HOOK_TIMEOUT_MS }
+
 export default defineConfig({
   test: {
     projects: [
@@ -13,7 +46,8 @@ export default defineConfig({
         test: {
           name: 'node',
           include: ['test/**/*.test.ts'],
-          passWithNoTests: true
+          passWithNoTests: true,
+          ...timeouts
         }
       },
       {
@@ -22,6 +56,7 @@ export default defineConfig({
           name: 'browser',
           include: ['test/**/*.test.tsx'],
           passWithNoTests: true,
+          ...timeouts,
           browser: {
             enabled: true,
             provider: 'playwright',

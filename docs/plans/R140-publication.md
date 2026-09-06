@@ -253,6 +253,28 @@ is not in the Snap Store is worse than no `.snap` at all — users cannot instal
 **(c) macOS ships two architectures or it ships one.** `macos-latest` is arm64; without explicit
 `--x64 --arm64` (or a universal build) the release has no build for Intel Macs, silently.
 
+**(d0) The release workflow is the first thing that ever ran this suite on Windows or macOS**,
+and that is a gap rather than a detail. `ci.yml` runs only `ubuntu-latest`, so the first `v1.0.0`
+tag failed on `windows-latest` with three simultaneous timeouts — `xmlFormat` depth-9000 at
+6.2 s, `jsonParser` depth-9000 at 6.8 s, and `pathQueryJob`'s 400,000-candidate suspension at
+8.4 s, all against Vitest's 5 s default.
+
+**Fixed in the config, not per test.** Two had already been patched individually and three more
+appeared the moment a new platform ran, which is the signature of a mis-sized default rather than
+of five bad tests: this project invariant-tests its parsers (M0-PLAN B12), so heavy cases are
+normal here. `vitest.config.ts` now sets `testTimeout` and `hookTimeout` to 30 s — ~3.5× the
+slowest observed — per project, since `projects` entries carry their own resolved config rather
+than inheriting a root value. **No assertion weakens**: none of those tests measures elapsed time,
+and where this project does budget performance it does so explicitly with
+`expect(elapsed).toBeLessThan(...)`, so the timeout is a hang guard rather than a performance gate.
+Verified by a throwaway 7-second test in each project, which the old default would have failed.
+
+**The ordering problem is the real lesson, and it is not fixed here.** Platform-specific failures
+are currently discovered by the release workflow, which runs *after* a version tag has been spent.
+Making `ci.yml` a three-OS matrix would move that discovery before the tag; it costs roughly three
+times the CI minutes, which are free for a public repository. Recorded rather than done, because it
+changes what every push costs and that is a call for the maintainer.
+
 **(d) Everything is unsigned, and that is a user-facing fact, not a footnote.** `notarize: false`,
 no certificates. Windows shows a SmartScreen warning; macOS refuses the first launch and needs
 right-click → Open. **This belongs in the README's install section** (R142), phrased as instructions
