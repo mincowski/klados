@@ -5,27 +5,64 @@ name: CI
 # gates on `npm run lint`, and that command only became meaningful once the
 # buried CRLF signal stopped hiding real errors under it.
 #
+# R151 (`docs/plans/R151-ci-matrix.md`): three platforms, not one. This ran
+# ubuntu-only while `release.yml` ran four jobs on a `v*` tag, and over the
+# published history **the two disagreed on all four commits where both ran**,
+# in both directions — green here said nothing about whether a release would
+# build, and red here said nothing about whether the code was broken. Both
+# release failures had the same cause: a test failing on a platform this
+# workflow never ran.
+#
 # Deliberately not in scope: release/packaging automation, signing or
-# notarization. Those belong to the publication round.
+# notarization. Those belong to `release.yml`.
 
 on:
   push:
     branches: [main]
   pull_request:
 
+# R151: without this, three pushes to a branch under review leave nine jobs
+# racing for the same answer. Only started mattering once work landed through
+# pull requests rather than straight onto `main`.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   ci:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+    name: ${{ matrix.os }}
+    strategy:
+      # One platform's failure must not cancel the evidence from the other
+      # two — the whole value here is seeing *which* platforms disagree.
+      fail-fast: false
+      matrix:
+        # macOS is one job, not two. `macos-latest` is arm64, and
+        # `release.yml`'s Intel job exists to produce a second *binary*, not
+        # to exercise different code; nothing in this suite is
+        # architecture-dependent.
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
 
-      - uses: actions/setup-node@v4
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
 
       - run: npm ci
 
+      # Everything from here to the test step runs identically on all three,
+      # with no `if:`, deliberately: an asymmetric matrix leaves steps that
+      # only ever execute on one OS, which is the exact shape of the problem
+      # R151 exists to close.
+      #
+      # The value of running `lint` on Windows is narrow but real, and worth
+      # naming precisely so nobody "optimizes" it away: `.gitattributes` sets
+      # `* text=auto eol=lf`, so a Windows checkout is already LF and Prettier
+      # sees what Linux sees. This run guards *that normalization* — which is
+      # R47's actual finding — rather than re-finding R47 itself.
       - run: npm run typecheck
 
       - run: npm run lint
@@ -61,6 +98,18 @@ jobs:
       # own guard already skips it when `out/main/index.js` is absent, so this
       # covers the other half of the same question — the binary exists, but
       # there is nowhere to show it.
-      - run: sudo apt-get update && sudo apt-get install -y xvfb
+      #
+      # Windows and macOS runners have a desktop session already, so this is
+      # one of exactly two Linux-only steps.
+      - name: Install xvfb
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb
 
-      - run: xvfb-run -a npm test
+      - name: Test
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            xvfb-run -a npm test
+          else
+            npm test
+          fi

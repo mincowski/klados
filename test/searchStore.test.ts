@@ -98,14 +98,84 @@ function createSession(deps: Partial<DocumentSessionDeps> = {}): DocumentSession
   })
 }
 
-/** Waits long enough for a real (near-zero-delay) reparse timer plus the
- * fake parse's own microtask chain to land — same helper documentSession's
- * own tests use. M5-PLAN.md H2d: a splice's own graft now runs through
- * `runChunkedJob`, which always yields via at least one more real
- * `setTimeout(0)` beyond the debounce timer itself, even for a graft that
- * finishes in its first slice — accounted for in the default margin below. */
-async function flushReparse(ms = 50): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, ms))
+/**
+ * R154 (`docs/plans/R151-ci-matrix.md` §4a): wait for the store to stop
+ * changing, not for a fixed number of milliseconds.
+ *
+ * This was `setTimeout(resolve, ms)` with a default of 50 and two call sites
+ * passing 90. The R151 matrix ran the suite on a Windows runner for the first
+ * time and line 348 failed — `expected true to be false`, the `stale` flag
+ * still set because the 30 ms debounced reparse had not landed inside 90 ms
+ * under load. Nothing about the assertion was wrong; the wait was.
+ *
+ * Third instance of this exact defect: `documentSession.test.ts` (fixed during
+ * the release round after it broke a release build) and `tabStrip.test.tsx`
+ * (R152) were the first two.
+ *
+ * **Quiescence alone is wrong for the post-edit sites, and finding out why
+ * turned up a product behaviour worth knowing.** After `applyEdit` the store
+ * goes `stale` synchronously and then nothing moves until the debounced
+ * reparse lands, so a pure "stopped changing" wait returns before the work has
+ * started — stable and not-yet-started look identical from outside. Waiting for
+ * `stale` to clear *and then* settle is no better, because the flag does not
+ * stay clear: measured through the real store and a real session, the edit
+ * marks it stale at +1 ms, the reparse lands and the re-run clears it at
+ * +48 ms, and at +205 ms a further notification arrives with the store
+ * unchanged and `dirty` still true, which re-marks it stale **permanently**.
+ * That is a product defect rather than a test artifact — see `docs/TASKS.md`'s
+ * Owed table — and the old 90 ms sleep happened to read inside the window
+ * without anyone noticing it was a window.
+ *
+ * So the two post-edit sites use `awaitReparsed`, which waits for exactly the
+ * transition the assertion after it is about and returns at once. Everything
+ * else uses `flushReparse`, where quiescence is the right question.
+ *
+ * The quiet window is 50 ms — the old default, comfortably above the 30 ms
+ * `reparseDelayMs` these tests configure. Both throw on timeout rather than
+ * returning, so a genuinely stuck store fails loudly instead of silently
+ * asserting against a snapshot that never arrived.
+ */
+type SearchSnapshotLike = { stale: boolean; complete: boolean }
+
+const POLL_MS = 5
+const TIMEOUT_MS = 5000
+
+async function flushReparse(store: { getSnapshot: () => SearchSnapshotLike }): Promise<void> {
+  const QUIET_MS = 50
+  const deadline = Date.now() + TIMEOUT_MS
+  let last = store.getSnapshot()
+  let quietFor = 0
+  while (quietFor < QUIET_MS) {
+    if (Date.now() > deadline) {
+      throw new Error(`flushReparse: store still changing after ${TIMEOUT_MS}ms`)
+    }
+    await new Promise((resolve) => setTimeout(resolve, POLL_MS))
+    const current = store.getSnapshot()
+    if (current === last) {
+      quietFor += POLL_MS
+    } else {
+      last = current
+      quietFor = 0
+    }
+  }
+}
+
+/**
+ * Waits for the debounced reparse to land *and* the re-run to finish. Both
+ * flags are needed: `stale` clears when the re-run **starts**, while `complete`
+ * only flips when it has produced its matches, so waiting on `stale` alone
+ * returns mid-flight against an incomplete result.
+ */
+async function awaitReparsed(store: { getSnapshot: () => SearchSnapshotLike }): Promise<void> {
+  const deadline = Date.now() + TIMEOUT_MS
+  for (;;) {
+    const snapshot = store.getSnapshot()
+    if (!snapshot.stale && snapshot.complete) return
+    if (Date.now() > deadline) {
+      throw new Error(`awaitReparsed: not complete-and-fresh after ${TIMEOUT_MS}ms`)
+    }
+    await new Promise((resolve) => setTimeout(resolve, POLL_MS))
+  }
 }
 
 describe('createSearchStore (G4)', () => {
@@ -133,7 +203,7 @@ describe('createSearchStore (G4)', () => {
     const store = createSearchStore(sessionWithApi)
 
     store.search({ text: 'cat', mode: 'text', options: { caseSensitive: true, regex: false } })
-    await flushReparse()
+    await flushReparse(store)
 
     const result = store.getSnapshot()
     expect(result.complete).toBe(true)
@@ -147,7 +217,7 @@ describe('createSearchStore (G4)', () => {
     await session.openPath('C:/docs/data.json')
     const store = createSearchStore(session)
     store.search({ text: 'cat', mode: 'text', options: { caseSensitive: true, regex: false } })
-    await flushReparse()
+    await flushReparse(store)
     const before = store.getSnapshot()
 
     session.setSelectedNode(0)
@@ -167,7 +237,7 @@ describe('createSearchStore (G4)', () => {
     await session.openPath('C:/docs/data.json')
     const store = createSearchStore(session)
     store.search({ text: 'cat', mode: 'text', options: { caseSensitive: true, regex: false } })
-    await flushReparse()
+    await flushReparse(store)
     expect(store.getSnapshot().stale).toBe(false)
 
     session.applyEdit({ start: 2, end: 3, text: 'x' }) // "a" -> "x", still has "cat"
@@ -175,7 +245,7 @@ describe('createSearchStore (G4)', () => {
     // Stale immediately — before the debounced reparse has had time to run.
     expect(store.getSnapshot().stale).toBe(true)
 
-    await flushReparse(90)
+    await awaitReparsed(store)
     // Once the reparse lands and the store re-runs the same query, it's
     // fresh again (matching the still-present "cat").
     expect(store.getSnapshot().stale).toBe(false)
@@ -195,7 +265,7 @@ describe('createSearchStore (G4)', () => {
     await session.openPath('C:/docs/a.json')
     const store = createSearchStore(session)
     store.search({ text: 'cat', mode: 'text', options: { caseSensitive: true, regex: false } })
-    await flushReparse()
+    await flushReparse(store)
     expect(store.getSnapshot().starts.length).toBeGreaterThan(0)
 
     await session.openPath('C:/docs/b.json')
@@ -219,7 +289,7 @@ describe('createSearchStore (G4)', () => {
     await session.openPath('C:/docs/data.json')
     const store = createSearchStore(session)
     store.search({ text: 'cat', mode: 'text', options: { caseSensitive: true, regex: false } })
-    await flushReparse()
+    await flushReparse(store)
     expect(store.getSnapshot().starts.length).toBeGreaterThan(0)
 
     store.search({ text: '', mode: 'text', options: { caseSensitive: true, regex: false } })
@@ -238,7 +308,7 @@ describe('createSearchStore (G4)', () => {
 
     store.search({ text: 'cat', mode: 'text', options: { caseSensitive: true, regex: false } })
     store.search({ text: 'dog', mode: 'text', options: { caseSensitive: true, regex: false } })
-    await flushReparse()
+    await flushReparse(store)
 
     const result = store.getSnapshot()
     expect(result.starts.length).toBe(1) // only "dog"
@@ -266,7 +336,7 @@ describe('createSearchStore (G4)', () => {
 
     store.search({ text: 'cars/car', mode: 'path', options: { caseSensitive: true, regex: false } })
     store.search({ text: '100', mode: 'text', options: { caseSensitive: true, regex: false } })
-    await flushReparse()
+    await flushReparse(store)
 
     // Only the text search's own result lands — a stale path result never
     // gets a chance to publish over it.
@@ -303,7 +373,7 @@ describe('createSearchStore (G4)', () => {
         mode: 'path',
         options: { caseSensitive: false, regex: false }
       })
-      await flushReparse()
+      await flushReparse(store)
 
       const result = store.getSnapshot()
       expect(result.complete).toBe(true)
@@ -331,7 +401,7 @@ describe('createSearchStore (G4)', () => {
         mode: 'path',
         options: { caseSensitive: false, regex: false }
       })
-      await flushReparse()
+      await flushReparse(store)
       expect(store.getSnapshot().starts.length).toBe(2)
       expect(store.getSnapshot().stale).toBe(false)
 
@@ -344,7 +414,7 @@ describe('createSearchStore (G4)', () => {
       })
       expect(store.getSnapshot().stale).toBe(true)
 
-      await flushReparse(90)
+      await awaitReparsed(store)
       expect(store.getSnapshot().stale).toBe(false)
       expect(store.getSnapshot().starts.length).toBe(3)
       store.dispose()
@@ -362,7 +432,7 @@ describe('createSearchStore (G4)', () => {
       expect(store.getPathDiagnostic()).toBeNull()
 
       store.search({ text: 'cars/', mode: 'path', options: { caseSensitive: false, regex: false } })
-      await flushReparse()
+      await flushReparse(store)
 
       expect(store.getPathDiagnostic()).not.toBeNull()
       expect(store.getSnapshot()).toEqual({
@@ -392,7 +462,7 @@ describe('createSearchStore (G4)', () => {
       const store = createSearchStore(session)
 
       store.search({ text: 'cars/', mode: 'path', options: { caseSensitive: false, regex: false } })
-      await flushReparse()
+      await flushReparse(store)
       expect(store.getPathDiagnostic()).not.toBeNull()
 
       store.search({
@@ -400,17 +470,17 @@ describe('createSearchStore (G4)', () => {
         mode: 'path',
         options: { caseSensitive: false, regex: false }
       })
-      await flushReparse()
+      await flushReparse(store)
       expect(store.getPathDiagnostic()).toBeNull()
 
       store.search({ text: 'cars/', mode: 'path', options: { caseSensitive: false, regex: false } })
-      await flushReparse()
+      await flushReparse(store)
       expect(store.getPathDiagnostic()).not.toBeNull()
       store.clear()
       expect(store.getPathDiagnostic()).toBeNull()
 
       store.search({ text: 'cars/', mode: 'path', options: { caseSensitive: false, regex: false } })
-      await flushReparse()
+      await flushReparse(store)
       expect(store.getPathDiagnostic()).not.toBeNull()
       await session.openPath('C:/docs/b.xml')
       expect(store.getPathDiagnostic()).toBeNull()

@@ -1353,8 +1353,23 @@ describe('createDocumentSession (D6)', () => {
     /** Same reasoning as `flushReparse` above, but also long enough for the
      * (separately debounced) undo-burst timer plus the immediate reparse
      * `undo`/`redo` themselves trigger. */
-    async function flush(): Promise<void> {
-      await new Promise((resolve) => setTimeout(resolve, 30))
+    /**
+     * R154 (`docs/plans/R151-ci-matrix.md` §4a): delegates to the
+     * quiescence-based `flushReparse` above instead of sleeping 30 ms.
+     *
+     * The release round replaced this file's *other* fixed-sleep helper after
+     * one broke a release build, and left this one — a third helper, scoped to
+     * this describe block — untouched, so 44 call sites kept waiting a fixed
+     * 30 ms for a 5 ms undo debounce plus a 5 ms reparse debounce plus the
+     * work itself. It failed under full-suite load on
+     * "a restore-triggered reparse that comes back incomplete does not leak
+     * its restore request into a later, unrelated edit".
+     *
+     * Fourth instance of this defect in the project, and the second in this
+     * file.
+     */
+    async function flush(session: { getSnapshot: () => unknown }): Promise<void> {
+      await flushReparse(session)
     }
 
     it('type, undo, redo returns byte-identical text and the same selection', async () => {
@@ -1371,7 +1386,7 @@ describe('createDocumentSession (D6)', () => {
 
       session.applyEdit({ start: 5, end: 6, text: '99' }) // '{"a":1}' -> '{"a":99}'
       session.setCaretOffset(7) // where the editor would leave the caret after typing "99"
-      await flush()
+      await flush(session)
 
       const edited = session.getSnapshot()
       if (edited.phase !== 'ready') throw new Error('unreachable')
@@ -1380,7 +1395,7 @@ describe('createDocumentSession (D6)', () => {
       expect(edited.selection.caretOffset).toBe(7)
 
       session.undo()
-      await flush()
+      await flush(session)
       const undone = session.getSnapshot()
       if (undone.phase !== 'ready') throw new Error('unreachable')
       expect(new TextDecoder().decode(undone.document.sourceBuffer.bytes)).toBe('{"a":1}')
@@ -1388,7 +1403,7 @@ describe('createDocumentSession (D6)', () => {
       expect(undone.selection.caretOffset).toBe(5)
 
       session.redo()
-      await flush()
+      await flush(session)
       const redone = session.getSnapshot()
       if (redone.phase !== 'ready') throw new Error('unreachable')
       expect(new TextDecoder().decode(redone.document.sourceBuffer.bytes)).toBe('{"a":99}')
@@ -1404,14 +1419,14 @@ describe('createDocumentSession (D6)', () => {
       session.applyEdit({ start: 5, end: 6, text: '2' })
       session.applyEdit({ start: 5, end: 6, text: '3' })
       session.applyEdit({ start: 5, end: 6, text: '4' })
-      await flush()
+      await flush(session)
 
       const beforeUndo = session.getSnapshot()
       if (beforeUndo.phase !== 'ready') throw new Error('unreachable')
       expect(new TextDecoder().decode(beforeUndo.document.sourceBuffer.bytes)).toBe('{"a":4}')
 
       session.undo()
-      await flush()
+      await flush(session)
       const afterUndo = session.getSnapshot()
       if (afterUndo.phase !== 'ready') throw new Error('unreachable')
       // One undo unwinds the whole burst back to the original text — not
@@ -1459,12 +1474,12 @@ describe('createDocumentSession (D6)', () => {
       expect(getContext().canRedo).toBe(false)
 
       session.applyEdit({ start: 5, end: 6, text: '2' })
-      await flush()
+      await flush(session)
       expect(getContext().canUndo).toBe(true)
       expect(getContext().canRedo).toBe(false)
 
       session.undo()
-      await flush()
+      await flush(session)
       expect(getContext().canUndo).toBe(false)
       expect(getContext().canRedo).toBe(true)
     })
@@ -1473,7 +1488,7 @@ describe('createDocumentSession (D6)', () => {
       const session = createSession({ reparseDelayMs: 5, undoDelayMs: 5 })
       await session.openPath('C:/docs/data.json')
       session.applyEdit({ start: 5, end: 6, text: '2' })
-      await flush()
+      await flush(session)
       expect(getContext().canUndo).toBe(true)
 
       await session.openPath('C:/docs/other.json')
@@ -1502,7 +1517,7 @@ describe('createDocumentSession (D6)', () => {
       // One entry whose forward patch *breaks* the document (removing the
       // closing brace) and whose inverse repairs it.
       session.applyEdit({ start: 6, end: 7, text: '' }) // '{"a":1}' -> '{"a":1'
-      await flush()
+      await flush(session)
 
       // undo (repairs it — complete) then redo (re-breaks it — incomplete)
       // is what gets a *restore-triggered* reparse to land on the
@@ -1510,9 +1525,9 @@ describe('createDocumentSession (D6)', () => {
       // `pendingSelectionRestore` right before producing an incomplete
       // result, which is exactly the leak scenario.
       session.undo()
-      await flush()
+      await flush(session)
       session.redo()
-      await flush()
+      await flush(session)
 
       const broken = session.getSnapshot()
       if (broken.phase !== 'ready') throw new Error('unreachable')
@@ -1528,7 +1543,7 @@ describe('createDocumentSession (D6)', () => {
       session.setSelectedNode(propertyA)
       session.setCaretOffset(6)
       session.applyEdit({ start: 6, end: 6, text: '}' }) // '{"a":1' -> '{"a":1}'
-      await flush()
+      await flush(session)
 
       const refixed = session.getSnapshot()
       if (refixed.phase !== 'ready') throw new Error('unreachable')
@@ -1543,7 +1558,7 @@ describe('createDocumentSession (D6)', () => {
       const session = createSession({ reparseDelayMs: 5, undoDelayMs: 5 })
       await session.openPath('C:/docs/data.json') // '{"a":1}'
       session.applyEdit({ start: 5, end: 6, text: '2' })
-      await flush()
+      await flush(session)
 
       const beforeClear = session.getSnapshot()
       if (beforeClear.phase !== 'ready') throw new Error('unreachable')
@@ -1562,7 +1577,7 @@ describe('createDocumentSession (D6)', () => {
 
       // Undo is now genuinely a no-op.
       session.undo()
-      await flush()
+      await flush(session)
       const afterUndo = session.getSnapshot()
       if (afterUndo.phase !== 'ready') throw new Error('unreachable')
       expect(new TextDecoder().decode(afterUndo.document.sourceBuffer.bytes)).toBe('{"a":2}')
@@ -1868,8 +1883,12 @@ describe('createDocumentSession (D6)', () => {
   })
 
   describe('Transforms — Format/Minify Document (M5-PLAN.md H4/H5/H7)', () => {
-    async function flush(): Promise<void> {
-      await new Promise((resolve) => setTimeout(resolve, 40))
+    async function flush(session: { getSnapshot: () => unknown }): Promise<void> {
+      // R154: delegates to the quiescence-based `flushReparse` at the top of
+      // this file. See the copy in `undo/redo (F6)` for the full account —
+      // this file had *five* of these, one per describe block, and the release
+      // round replaced only one of them.
+      await flushReparse(session)
     }
 
     it('format runs immediately on a small document, reparses, and pushes exactly one undo entry', async () => {
@@ -1882,7 +1901,7 @@ describe('createDocumentSession (D6)', () => {
       await session.openPath('C:/docs/data.json')
 
       session.requestTransform('format')
-      await flush()
+      await flush(session)
 
       const state = session.getSnapshot()
       if (state.phase !== 'ready') throw new Error('unreachable')
@@ -1898,7 +1917,7 @@ describe('createDocumentSession (D6)', () => {
       // test can race a read of it, per the "read-only document" test's
       // own note below) by actually undoing and checking the result.
       session.undo()
-      await flush()
+      await flush(session)
       const undone = session.getSnapshot()
       if (undone.phase !== 'ready') throw new Error('unreachable')
       expect(new TextDecoder().decode(undone.document.sourceBuffer.bytes)).toBe('{"a":1,"b":2}')
@@ -1929,7 +1948,7 @@ describe('createDocumentSession (D6)', () => {
       expect(budgetBefore.undoEntryCount).toBe(0)
 
       session.requestTransform('format')
-      await flush()
+      await flush(session)
 
       const after = session.getSnapshot()
       if (after.phase !== 'ready') throw new Error('unreachable')
@@ -1956,7 +1975,7 @@ describe('createDocumentSession (D6)', () => {
       await session.openPath('C:/docs/data.json')
 
       session.requestTransform('minify')
-      await flush()
+      await flush(session)
 
       const state = session.getSnapshot()
       if (state.phase !== 'ready') throw new Error('unreachable')
@@ -1976,7 +1995,7 @@ describe('createDocumentSession (D6)', () => {
       await session.openPath('C:/docs/data.json')
 
       session.requestTransform('format')
-      await flush()
+      await flush(session)
 
       const state = session.getSnapshot()
       if (state.phase !== 'ready') throw new Error('unreachable')
@@ -2000,7 +2019,7 @@ describe('createDocumentSession (D6)', () => {
       await session.openPath('C:/docs/data.xml')
 
       session.requestTransform('format')
-      await flush()
+      await flush(session)
 
       const state = session.getSnapshot()
       if (state.phase !== 'ready') throw new Error('unreachable')
@@ -2031,7 +2050,7 @@ describe('createDocumentSession (D6)', () => {
       parseCalls = 0
 
       session.requestTransform('format')
-      await flush()
+      await flush(session)
 
       const state = session.getSnapshot()
       if (state.phase !== 'ready') throw new Error('unreachable')
@@ -2042,7 +2061,7 @@ describe('createDocumentSession (D6)', () => {
 
       // No undo entry was pushed — undo is a no-op.
       session.undo()
-      await flush()
+      await flush(session)
       const afterUndo = session.getSnapshot()
       if (afterUndo.phase !== 'ready') throw new Error('unreachable')
       expect(new TextDecoder().decode(afterUndo.document.sourceBuffer.bytes)).toBe(alreadyFormatted)
@@ -2064,7 +2083,7 @@ describe('createDocumentSession (D6)', () => {
       parseCalls = 0
 
       session.requestTransform('format')
-      await flush()
+      await flush(session)
 
       expect(parseCalls).toBe(1)
     })
@@ -2103,7 +2122,7 @@ describe('createDocumentSession (D6)', () => {
       session.requestTransform('format')
 
       session.confirmTransformAnyway()
-      await flush()
+      await flush(session)
 
       const state = session.getSnapshot()
       if (state.phase !== 'ready') throw new Error('unreachable')
@@ -2117,7 +2136,7 @@ describe('createDocumentSession (D6)', () => {
       // see the "read-only document" test's own note on why that's fragile
       // here).
       session.undo()
-      await flush()
+      await flush(session)
       const afterUndo = session.getSnapshot()
       if (afterUndo.phase !== 'ready') throw new Error('unreachable')
       expect(new TextDecoder().decode(afterUndo.document.sourceBuffer.bytes)).toBe(formatted)
@@ -2135,7 +2154,7 @@ describe('createDocumentSession (D6)', () => {
       session.requestTransform('format')
 
       session.cancelTransform()
-      await flush()
+      await flush(session)
 
       const state = session.getSnapshot()
       if (state.phase !== 'ready') throw new Error('unreachable')
@@ -2172,7 +2191,7 @@ describe('createDocumentSession (D6)', () => {
       await session.openPath('C:/docs/data.json')
 
       session.requestTransform('format')
-      await flush()
+      await flush(session)
 
       const state = session.getSnapshot()
       if (state.phase !== 'ready') throw new Error('unreachable')
@@ -2184,7 +2203,7 @@ describe('createDocumentSession (D6)', () => {
 
       // But it must not be undoable — the result grew past the threshold.
       session.undo()
-      await flush()
+      await flush(session)
       const afterUndo = session.getSnapshot()
       if (afterUndo.phase !== 'ready') throw new Error('unreachable')
       expect(new TextDecoder().decode(afterUndo.document.sourceBuffer.bytes)).toBe(formatted)
@@ -2192,8 +2211,12 @@ describe('createDocumentSession (D6)', () => {
   })
 
   describe('Replace All (R90)', () => {
-    async function flush(): Promise<void> {
-      await new Promise((resolve) => setTimeout(resolve, 40))
+    async function flush(session: { getSnapshot: () => unknown }): Promise<void> {
+      // R154: delegates to the quiescence-based `flushReparse` at the top of
+      // this file. See the copy in `undo/redo (F6)` for the full account —
+      // this file had *five* of these, one per describe block, and the release
+      // round replaced only one of them.
+      await flushReparse(session)
     }
 
     it('refuses with no document open', () => {
@@ -2358,7 +2381,7 @@ describe('createDocumentSession (D6)', () => {
       // starts` is always in.
       const outcome = session.applyReplaceAll(allOffsets(content, 'cat'), 'dog')
       expect(outcome).toEqual({ ok: true, replacedCount: 3, undoable: true })
-      await flush()
+      await flush(session)
 
       const state = session.getSnapshot()
       if (state.phase !== 'ready') throw new Error('unreachable')
@@ -2368,7 +2391,7 @@ describe('createDocumentSession (D6)', () => {
       expect(state.document.dirty).toBe(true)
 
       session.undo()
-      await flush()
+      await flush(session)
       const undone = session.getSnapshot()
       if (undone.phase !== 'ready') throw new Error('unreachable')
       expect(new TextDecoder().decode(undone.document.sourceBuffer.bytes)).toBe(content)
@@ -2391,7 +2414,7 @@ describe('createDocumentSession (D6)', () => {
       // every match's original offset valid.
       const outcome = session.applyReplaceAll(allOffsets(content, 'cat'), 'elephant')
       expect(outcome.ok).toBe(true)
-      await flush()
+      await flush(session)
 
       const state = session.getSnapshot()
       if (state.phase !== 'ready') throw new Error('unreachable')
@@ -2424,7 +2447,7 @@ describe('createDocumentSession (D6)', () => {
       const longReplacement = 'x'.repeat(200)
       const outcome = session.applyReplaceAll(allOffsets(content, 'cat'), longReplacement)
       expect(outcome).toEqual({ ok: true, replacedCount: 1, undoable: false })
-      await flush()
+      await flush(session)
 
       const state = session.getSnapshot()
       if (state.phase !== 'ready') throw new Error('unreachable')
@@ -2437,7 +2460,7 @@ describe('createDocumentSession (D6)', () => {
       // singleton (this file's own note on why: a still-settling async
       // chain from an unrelated test can race a bare read of it).
       session.undo()
-      await flush()
+      await flush(session)
       const afterUndo = session.getSnapshot()
       if (afterUndo.phase !== 'ready') throw new Error('unreachable')
       expect(new TextDecoder().decode(afterUndo.document.sourceBuffer.bytes)).toBe(
@@ -2470,7 +2493,7 @@ describe('createDocumentSession (D6)', () => {
 
         const outcome = session.applyReplaceAll(allOffsets(content, needle), replacementText)
         expect(outcome.ok).toBe(true)
-        await flush()
+        await flush(session)
 
         const replaced = session.getSnapshot()
         if (replaced.phase !== 'ready') throw new Error('unreachable')
@@ -2478,19 +2501,19 @@ describe('createDocumentSession (D6)', () => {
         expect(replacedBytes).toBe(content.split(needle).join(replacementText))
 
         session.undo()
-        await flush()
+        await flush(session)
         const undone = session.getSnapshot()
         if (undone.phase !== 'ready') throw new Error('unreachable')
         expect(new TextDecoder().decode(undone.document.sourceBuffer.bytes)).toBe(content)
 
         session.redo()
-        await flush()
+        await flush(session)
         const redone = session.getSnapshot()
         if (redone.phase !== 'ready') throw new Error('unreachable')
         expect(new TextDecoder().decode(redone.document.sourceBuffer.bytes)).toBe(replacedBytes)
 
         session.undo()
-        await flush()
+        await flush(session)
         const undoneAgain = session.getSnapshot()
         if (undoneAgain.phase !== 'ready') throw new Error('unreachable')
         expect(new TextDecoder().decode(undoneAgain.document.sourceBuffer.bytes)).toBe(content)
@@ -2499,8 +2522,12 @@ describe('createDocumentSession (D6)', () => {
   })
 
   describe('the minified-file banner and "Format minified files on open" (M5-PLAN.md H8)', () => {
-    async function flush(): Promise<void> {
-      await new Promise((resolve) => setTimeout(resolve, 40))
+    async function flush(session: { getSnapshot: () => unknown }): Promise<void> {
+      // R154: delegates to the quiescence-based `flushReparse` at the top of
+      // this file. See the copy in `undo/redo (F6)` for the full account —
+      // this file had *five* of these, one per describe block, and the release
+      // round replaced only one of them.
+      await flushReparse(session)
     }
 
     function fakeStorage(): Storage {
@@ -2532,7 +2559,7 @@ describe('createDocumentSession (D6)', () => {
         api: fakeApi({ read: vi.fn().mockResolvedValue(utf8(minified)) })
       })
       await session.openPath('C:/docs/data.json')
-      await flush()
+      await flush(session)
 
       const state = session.getSnapshot()
       if (state.phase !== 'ready') throw new Error('unreachable')
@@ -2552,7 +2579,7 @@ describe('createDocumentSession (D6)', () => {
         api: fakeApi({ read: vi.fn().mockResolvedValue(utf8(minified)) })
       })
       await session.openPath('C:/docs/data.json')
-      await flush()
+      await flush(session)
 
       const state = session.getSnapshot()
       if (state.phase !== 'ready') throw new Error('unreachable')
@@ -2642,7 +2669,7 @@ describe('createDocumentSession (D6)', () => {
         api: fakeApi({ read: vi.fn().mockResolvedValue(utf8(pretty)) })
       })
       await session.openPath('C:/docs/data.json')
-      await flush()
+      await flush(session)
 
       const state = session.getSnapshot()
       if (state.phase !== 'ready') throw new Error('unreachable')
@@ -2681,8 +2708,12 @@ describe('createDocumentSession (D6)', () => {
   })
 
   describe('external modification (F8)', () => {
-    async function flush(): Promise<void> {
-      await new Promise((resolve) => setTimeout(resolve, 30))
+    async function flush(session: { getSnapshot: () => unknown }): Promise<void> {
+      // R154: delegates to the quiescence-based `flushReparse` at the top of
+      // this file. See the copy in `undo/redo (F6)` for the full account —
+      // this file had *five* of these, one per describe block, and the release
+      // round replaced only one of them.
+      await flushReparse(session)
     }
 
     // R52: main now keys watch registrations per session (`watchKey`), and
@@ -2748,7 +2779,7 @@ describe('createDocumentSession (D6)', () => {
       session.setSelectedNode(propertyA)
 
       triggerChange()
-      await flush()
+      await flush(session)
 
       const state = session.getSnapshot()
       if (state.phase !== 'ready') throw new Error('unreachable')
@@ -2772,7 +2803,7 @@ describe('createDocumentSession (D6)', () => {
       session.applyEdit({ start: 5, end: 6, text: '9' })
 
       triggerChange()
-      await flush()
+      await flush(session)
 
       const state = session.getSnapshot()
       if (state.phase !== 'ready') throw new Error('unreachable')
@@ -2824,7 +2855,7 @@ describe('createDocumentSession (D6)', () => {
       })
       await session.openPath('C:/docs/data.json')
       session.applyEdit({ start: 5, end: 6, text: '2' })
-      await flush()
+      await flush(session)
       expect(getContext().canUndo).toBe(true)
 
       await session.reloadAndDiscard()
@@ -2844,7 +2875,7 @@ describe('createDocumentSession (D6)', () => {
       await session.openPath('C:/docs/data.json')
       session.applyEdit({ start: 5, end: 6, text: '9' })
       triggerChange()
-      await flush()
+      await flush(session)
 
       session.keepMine()
 

@@ -53,17 +53,47 @@ describe.skipIf(!builtAppAvailable)('the built app via _electron (R51, R58)', ()
     app = await electron.launch({ args: [mainEntry] })
     page = await app.firstWindow()
     await page.waitForLoadState('load')
-  })
+    // R154 (`docs/plans/R151-ci-matrix.md` §4a): 120 s, overriding
+    // `vitest.config.ts`'s 30 s hook default for this hook alone rather than
+    // raising it for every hook in the suite — this is the only one that
+    // cold-starts a real GUI application.
+    //
+    // Found by the R151 matrix on its first run, and it is a *new* fact rather
+    // than a regression: this suite had never executed anywhere but Linux.
+    // `release.yml` runs `npm test` before `npm run package`, so `out/` does
+    // not exist there and the `builtAppAvailable` guard above skips the whole
+    // describe — which is why four green release jobs on Windows and macOS
+    // said nothing about it. `ci.yml` builds first, so the matrix is the first
+    // thing ever to launch Electron on a macOS runner, and 30 s was not enough.
+  }, 120_000)
 
   afterAll(async () => {
     // The close-interception test below may already have closed the app's
     // only window, which quits the process on its own (non-macOS) — guard
     // against double-closing an already-exited app.
-    try {
-      await app.close()
-    } catch {
-      // already gone
-    }
+    //
+    // R154 (`docs/plans/R151-ci-matrix.md` §4a): the "(non-macOS)" in that
+    // sentence is load-bearing, and on macOS this hook hung until it hit the
+    // 30 s hook timeout. It is **not** a bug in the app: `main/index.ts`'s
+    // `window-all-closed` handler calls `app.quit()` only when
+    // `process.platform !== 'darwin'`, which is the platform convention that a
+    // Mac application stays running when its last window closes. Playwright's
+    // `close()` waits for the process to exit, so on a macOS runner it waits
+    // for something that is deliberately never going to happen.
+    //
+    // Bound it and kill the process instead. This is teardown — nothing after
+    // it needs a graceful shutdown — and killing is what the platform's own
+    // behaviour leaves as the only way to end the run.
+    const CLOSE_BUDGET_MS = 10_000
+    const closed = app.close().then(
+      () => true,
+      () => true // already gone; either way there is nothing left to wait for
+    )
+    const exited = await Promise.race([
+      closed,
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), CLOSE_BUDGET_MS))
+    ])
+    if (!exited) app.process().kill()
   })
 
   it('starts at zoom factor 1 on a fresh file:// load, not the unexplained 1.25 (R58/R59)', async () => {
