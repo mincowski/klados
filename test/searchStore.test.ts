@@ -253,6 +253,55 @@ describe('createSearchStore (G4)', () => {
     store.dispose()
   })
 
+  /**
+   * R156 (`docs/plans/R156-search-stale-flag.md`). The re-run after an edit
+   * cleared `stale`, and then the *next* session notification put it straight
+   * back — permanently, since nothing else changes the store until the next
+   * edit. The result on screen was correct and labelled otherwise.
+   *
+   * The cause was `searchStore.ts` testing `document.dirty` where its own
+   * comment says "the buffer has [moved]": `dirty` means *unsaved*, true from
+   * the first keystroke until the next save, so it stays true long after the
+   * reparse it was standing in for has landed.
+   *
+   * **This asserts the mechanism, not a duration.** R154 found the defect by
+   * watching the flag for 205 ms, but a test that waits for a specific moment
+   * is the same mistake that hid it — every test in this file waited 50 or
+   * 90 ms and asserted inside the window where the flag was briefly correct.
+   * A selection change is a notification that provably does not touch the
+   * buffer, so it isolates the exact confusion: identity must not move.
+   */
+  it('a notification that is not a buffer change does not re-stale a fresh result', async () => {
+    const api = fakeApi({ read: vi.fn().mockResolvedValue(utf8('{"a":"cat"}')) })
+    const session = createDocumentSession({
+      parse: fakeParse,
+      parseFromUrl: fakeParseFromUrl,
+      api,
+      reparseDelayMs: 30
+    })
+    await session.openPath('C:/docs/data.json')
+    const store = createSearchStore(session)
+    store.search({ text: 'cat', mode: 'text', options: { caseSensitive: true, regex: false } })
+    await flushReparse(store)
+
+    // Edit, then let the debounced reparse land and the query re-run. The
+    // document stays dirty from here on — it is never saved.
+    session.applyEdit({ start: 2, end: 3, text: 'x' }) // "a" -> "x", still has "cat"
+    await awaitReparsed(store)
+    const fresh = store.getSnapshot()
+    expect(fresh.stale).toBe(false)
+    expect(fresh.complete).toBe(true)
+
+    // A selection change: a real notification, and one that cannot have moved
+    // a byte. Before R156 this re-entered the "buffer moved" branch on the
+    // strength of `dirty` alone and produced a new, stale snapshot.
+    session.setCaretOffset(7)
+    expect(store.getSnapshot()).toBe(fresh)
+    expect(store.getSnapshot().stale).toBe(false)
+
+    store.dispose()
+  })
+
   it("opening a different document on the same session clears the previous document's search", async () => {
     const api = fakeApi({
       read: vi

@@ -16,6 +16,37 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R156 — a Find result marked stale after it had been recomputed · built
+
+One word — `searchStore.ts` testing `document.dirty` where its own comment says *the buffer has
+moved*. `dirty` means **unsaved**: true from the first keystroke until the next save, so it long
+outlives the reparse it was standing in for, and every later notification re-marked a result that
+had already been recomputed. Measured at R154: stale at +1 ms, correctly cleared at +48 ms when the
+re-run landed, wrongly re-marked at +205 ms, permanent from there.
+
+`reparsePending` is the same sentence as a field — true from the moment `sourceBuffer` is replaced
+until `applyReparseResult` commits a store built from it — and it exists because M5's H8 banner and
+H9 memory budget hit this trap first. `searchStore` was the third such consumer and the only one to
+reach for the wrong flag. Confirmed rather than assumed: all four buffer-mutating paths set it.
+`transformInProgress` is deliberately excluded — it covers the window before a Transform swaps the
+buffer, where the result still does match, so marking stale there would be this same defect briefer.
+
+**The test asserts the mechanism, not a duration, and that is the lesson.** R154 caught this by
+watching the flag for 205 ms, but a test that waits for a particular moment repeats the mistake that
+hid it — every test in the file waited 50 or 90 ms and asserted inside the window where the flag was
+briefly correct. Instead: after the edit and its re-run, issue a notification that provably cannot
+have moved a byte (`setCaretOffset`) and assert snapshot *identity*. Deterministic, instant, and
+verified to fail first on the real defect.
+
+The round also had to correct itself. Its own plan said the Find count would display as stale while
+being correct; it would not, because **nothing in `src/` reads `SearchResult.stale`** — R126 removed
+the `(stale)` suffix from the Find bar and left no other reader. Found by grepping for consumers
+before writing the results rather than after, which is the only reason it is a correction and not a
+shipped false claim. The defect is real but smaller than advertised: a public field holding the
+wrong answer under a correct name, and one spurious re-render per edit cycle.
+
+With it fixed, R151–R154 owes nothing and stops being `built-caveat`.
+
 ## R155 — spikes leave a document, not a directory · built
 
 Enabling Dependabot produced 25 open alerts, and **19 of them came from one completed M0a spike** —

@@ -1,13 +1,14 @@
 # R156 — a Find result marked stale after it has been recomputed
 
-<!-- status: open -->
+<!-- status: built -->
 
-**Open.** Register: `docs/TASKS.md`. Carried in the Owed table since R154, which found it and
-deliberately did not fix it.
+**Built.** Register: `docs/TASKS.md`. Results in §6. Was carried in the Owed table from R154,
+which found it and deliberately did not fix it; that row is now removed.
 
 `searchStore` marks a Find result `stale` when the buffer moves under it, clears the flag when the
 reparse lands and the query re-runs — and then marks it stale again, permanently, on the next
-session notification. The result the user is looking at is correct and labelled otherwise.
+session notification, and stays that way until the next edit. **Not user-visible** — §1 records why
+the plan was wrong about that — but a public field holding the wrong answer under a correct name.
 
 ---
 
@@ -44,9 +45,24 @@ Measured through the real `searchStore` and a real `documentSession` (only the t
 
 and it stays that way, because nothing else will change the store until the next edit.
 
-**User-visible effect:** after any edit, the Find count and match highlighting are marked stale
-while being correct, until the user edits again or saves. Cosmetic, but it is the indicator whose
-entire job is to say whether the number can be trusted.
+**Correction, made while implementing: this is not user-visible.** The plan as first written said
+the Find count would show as stale while being correct. It would not — **`SearchResult.stale` has
+no readers in `src/` at all.** R126 removed the `(stale)` suffix from the Find bar (`FindBar.tsx`
+§"the exact reservation"), on the grounds that the label moved every control sideways and the
+moment the count is genuinely unknown it already says "Searching…". Nothing has read the flag
+since.
+
+What the defect actually costs, then:
+
+- **The flag is wrong**, on a public field of `SearchResult` whose name says otherwise. The next
+  consumer to read it — and the field exists to be read — inherits the bug rather than finds it.
+- **One spurious `setResult` per edit cycle.** It calls `notify()`, so every Find subscriber
+  (`FindBar`, the Raw decorations) re-renders with identical match data. Once, not continuously:
+  the guard's own `!result.stale` stops it repeating.
+
+That is a smaller defect than the plan claimed, and worth fixing anyway — a correctly-named field
+holding the wrong answer is the kind of thing this project keeps paying for later, and R154 only
+found it because a test happened to watch the flag continuously.
 
 ## 2. Why it went unseen
 
@@ -79,10 +95,15 @@ result is marked stale as before; a buffer change that *has* been parsed arrives
 `document.store !== lastStore` branch, which re-runs the query properly; and the `+205 ms`
 notification finds `reparsePending` false and leaves the result alone.
 
-**Not yet verified.** This is read from the code, not run. R156 must confirm it against the real
-session before claiming it, and check that no case wants the current behaviour — in particular
-whether a Transform (`transformInProgress`, which covers the window *before* `sourceBuffer` swaps)
-needs including, since `reparsePending` by its own definition does not cover that part.
+**Confirmed on implementation.** `reparsePending: true` is set by all four buffer-mutating paths
+— `applyEdit`, `applyUndoEntry`, `applyTransform` and `applyReplaceAll` — and cleared only by
+`applyReparseResult` and `reloadFromDisk`, so it covers every route by which the buffer can move.
+
+**`transformInProgress` is deliberately excluded**, and this is the §3 question settled. It does
+cover an extra window that `reparsePending` does not: from the moment `applyTransform` starts until
+`sourceBuffer` is actually swapped. But in that window the displayed result still matches the
+buffer, and `stale` means "may not match the current buffer" — marking it there would be this same
+defect over again, merely briefer.
 
 ## 4. What this round owes
 
@@ -98,3 +119,41 @@ needs including, since `reparsePending` by its own definition does not cover tha
 Widening `dirty` itself, or adding a buffer generation counter to `OpenDocument`. `reparsePending`
 already answers this question and has two other consumers depending on its current meaning; a new
 field would need to justify itself against a field that already exists.
+
+---
+
+## 6. Results
+
+**Built**, as one word plus the reasoning around it: `document.dirty` → `document.reparsePending`.
+All four items of §4 done. `searchStore.ts`'s module header is corrected too — it opened by saying
+the result is marked stale "the moment the document goes dirty", which was an accurate description
+of the bug.
+
+**The test asserts the mechanism, not a duration, and that is the point.** R154 found this by
+watching the flag for 205 ms, but a test that waits for a particular moment repeats the mistake that
+hid it: every test in this file waited 50 or 90 ms and asserted inside the window where the flag was
+briefly correct. Instead, after the edit and its re-run, the test issues **a session notification
+that provably cannot have moved a byte** — `setCaretOffset` — and asserts snapshot *identity*:
+
+```ts
+session.setCaretOffset(7)
+expect(store.getSnapshot()).toBe(fresh)
+```
+
+Deterministic, instant, and it isolates the exact confusion the defect was made of. Verified to fail
+first, on the real defect: `expected { starts: Int32Array[ 6 ], …(4) } to be { … }` — a new object
+where identity should have held.
+
+**A correction the round had to make about itself.** §1 records it: the plan claimed the Find count
+would display as stale, and it would not, because **nothing in `src/` reads `SearchResult.stale`** —
+R126 removed the `(stale)` suffix from the Find bar and left no other reader. Found by grepping for
+consumers before writing the Results section rather than after, which is the only reason it is a
+correction and not a shipped false claim. The defect is real but smaller: a wrong value on a public
+field, and one spurious re-render per edit cycle.
+
+**Review pass, per `CLAUDE.md`.** Read as `git diff`. Two findings, both fixed before commit: the
+stale module header above, and the plan's own user-visibility claim. Nothing else — the change
+touches one condition, and the surrounding branches were traced rather than assumed (§3).
+
+Verification: the new test fails before and passes after; `searchStore.test.ts` 13/13; full suite
+1833 pass, 0 fail; typecheck and lint clean.
