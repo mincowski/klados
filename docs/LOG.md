@@ -63,12 +63,32 @@ Vitest's `retry` was rejected for both; it would have greened them in one line a
 missing wait entirely.
 
 R154 was allocated after the fact, because the matrix's first run failed on two of its three
-platforms and both causes had been latent since before the project had CI. On macOS,
-`mainElectron.test.ts` timed out cold-starting Electron: the plan's claim that the suite had already
-passed on three platforms was true of the suite and **false of that test**, which guards itself on
-`out/main/index.js` and skips when the built app is absent — and `release.yml` tests *before* it
-packages, so that describe block had never executed off Linux in its life. On Windows,
-`searchStore.test.ts` failed on a fixed sleep: the third instance of that defect in three rounds.
+platforms and both causes had been latent since before the project had CI. The plan's claim that the
+suite had already passed on three platforms was true of the suite and **false of
+`mainElectron.test.ts`**, which guards itself on `out/main/index.js` and skips when the built app is
+absent — and `release.yml` tests *before* it packages, so that describe block had never executed off
+Linux in its life. On Windows, `searchStore.test.ts` failed on a fixed sleep: the third instance of
+that defect in three rounds.
+
+A fourth instance then turned up locally, in the file the release round had already fixed.
+`documentSession.test.ts` failed under full-suite load (ten isolated runs pass — the fixed-sleep
+signature) and turned out to contain **five more** of these helpers, one per describe block, because
+the pattern is copy-paste per `describe` rather than one shared utility. R140 fixed one wait out of
+six in a file it had opened for exactly this reason. All five now delegate to the single quiescence
+helper, across 44 call sites — and the conversion reproduced R140's own mistake, a global rewrite
+catching call sites belonging to helpers that still took no arguments, which `tsc` reported rather
+than leaving wrong-arity calls in tests nobody reruns.
+
+macOS then failed **twice, in two hooks, for unrelated reasons** — and the second one is the better
+story. Cold-starting Electron exceeded 30 s, fixed with a 120 s timeout on that hook alone. The next
+run failed at 30 s again, in `afterAll`, where the existing comment had named the cause years before
+anyone noticed it applied: *"which quits the process on its own (non-macOS)"*. `main/index.ts` calls
+`app.quit()` on `window-all-closed` only when the platform is not darwin, because a Mac application
+is meant to stay running when its last window closes — so Playwright's `close()`, which waits for
+the process to exit, waits for something deliberately designed never to happen. Correct product
+behaviour, a gap in the harness; the teardown now bounds the close and kills the process. The first
+macOS fix was right and still left the platform red, which is the round's own argument turned on
+itself.
 
 The Windows fix took three attempts, and the wrong ones are the useful part. Quiescence — R140's
 approach — fails here, because after an edit the store goes stale synchronously and then nothing

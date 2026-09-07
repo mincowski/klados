@@ -94,8 +94,8 @@ were green. This round moves a check that already passes; it does not go looking
 > existing and skips with a warning when it does not. `release.yml` runs `npm test` *before*
 > `npm run package`, so `out/` is absent there and that describe block **never executed in any
 > release run**. `ci.yml` runs `npx electron-vite build` first, so it does. The matrix was therefore
-> the first thing ever to cold-start Electron on a macOS runner, and it timed out — the hook, not
-> an assertion. See §7.
+> the first thing ever to run that suite on a Mac, and it failed twice there — once launching
+> Electron and once shutting it down, neither an assertion. See §4a.
 
 ---
 
@@ -160,15 +160,33 @@ Allocated after the fact, because the round's own instrument immediately produce
 project, and **neither is a regression** — they are pre-existing conditions that no pipeline had
 ever been in a position to observe.
 
-**macOS: `mainElectron.test.ts` timed out in `beforeAll` at 30 s.** §2's claim that the suite had
-already passed on three platforms was true of the suite and false of this test. It guards itself on
-`out/main/index.js` and skips with a warning when the built app is absent — and `release.yml` runs
-`npm test` *before* `npm run package`, so `out/` does not exist there and the whole describe block
-**never executed in any release run**. `ci.yml` runs `npx electron-vite build` first, so it does.
-The matrix was the first thing ever to cold-start Electron on a macOS runner, and 30 s was not
-enough. Fixed with a 120 s timeout on that hook alone rather than by raising `vitest.config.ts`'s
-global `hookTimeout`: it is the only hook in the suite that launches a real GUI application, and
-weakening the hang guard for the other 152 files to accommodate it would be the wrong trade.
+**macOS: `mainElectron.test.ts` failed twice, in two different hooks, for two unrelated reasons.**
+§2's claim that the suite had already passed on three platforms was true of the suite and false of
+this test. It guards itself on `out/main/index.js` and skips with a warning when the built app is
+absent — and `release.yml` runs `npm test` *before* `npm run package`, so `out/` does not exist
+there and the whole describe block **never executed in any release run**. `ci.yml` runs
+`npx electron-vite build` first, so it does. The matrix was the first thing ever to run this suite
+on a Mac, and it found two things at once.
+
+**First, the launch.** `beforeAll` cold-starts Electron and 30 s was not enough. Fixed with a 120 s
+timeout on that hook alone rather than by raising `vitest.config.ts`'s global `hookTimeout`: it is
+the only hook in the suite that launches a real GUI application, and weakening the hang guard for
+the other 152 files to accommodate it would be the wrong trade.
+
+**Then, the teardown — and this one is not a timeout to be raised.** With the launch fixed, the run
+failed again at 30 s, and the reported line had moved from `beforeAll` to `afterAll`. **The comment
+already sitting in that hook named the cause, and nobody had noticed it applied**: *"which quits the
+process on its own (non-macOS)"*. `main/index.ts`'s `window-all-closed` handler calls `app.quit()`
+only when `process.platform !== 'darwin'`, because a Mac application is meant to stay running when
+its last window closes. Playwright's `close()` waits for the process to exit, so on macOS it waits
+for something deliberately designed never to happen. **That is correct product behaviour and a gap
+in the harness, not the reverse** — raising the timeout would only have made the hang longer. The
+teardown now bounds `close()` at 10 s and kills the process if it is still alive, which is what the
+platform's own convention leaves as the only way to end the run.
+
+Worth stating because it is the round's own argument turned on itself: **the first macOS fix was
+right and still left the platform red**, and only running it again on a Mac showed why. That is the
+difference between a pipeline that covers a platform and one that does not.
 
 **Windows: `searchStore.test.ts` failed on a fixed sleep** — `expected true to be false`, the
 `stale` flag still set because a 30 ms debounced reparse had not landed inside the 90 ms the test
@@ -190,6 +208,25 @@ different wrong model of what the test was waiting for:
 
 The 14 sites that wait for a *search* to land keep quiescence, which is the right question there;
 the two that wait for a *reparse* got `awaitReparsed`.
+
+**And then a fourth instance, in the file that was supposed to have been fixed.** Verifying the
+macOS teardown locally, the full suite failed on `documentSession.test.ts` — *"a restore-triggered
+reparse that comes back incomplete does not leak its restore request into a later, unrelated
+edit"*. Ten isolated runs of that file pass; it fails only under full-suite load, which is the
+fixed-sleep signature exactly.
+
+**That file contained five more of them.** The release round replaced one helper in it — the one
+that had broken a release build — and left the rest, because the pattern here is *per describe
+block*: `undo/redo (F6)`, `Transforms`, `Replace All (R90)`, the minified-file banner, and
+`external modification (F8)` each declared their own private `flush()`, four of them byte-identical
+at 40 ms and two at 30 ms. R140 fixed one wait out of six in a file it had already opened for this
+exact reason.
+
+All five now delegate to the single quiescence-based `flushReparse` at the top of the file, across
+44 call sites. **The conversion reproduced R140's own mistake and was caught by the compiler**: a
+global rewrite of `await flush()` hit call sites belonging to helpers that still took no arguments,
+and `tsc` reported ten of them rather than letting a wrong-arity call sit in a test nobody reruns.
+That is the argument for doing it as a typed change rather than a careful search.
 
 **The item owed — a product defect, reported rather than worked around.** Instrumenting attempt 2
 showed the flag does not stay clear. Measured through the real `searchStore` and a real
@@ -225,10 +262,13 @@ choosing the right signal is a decision this round has no business making inside
 8. `test/tabStrip.test.tsx` passes ten consecutive isolated local runs — the standard R140 applied
    to `flushReparse`, since a race that fails half the time on CI can easily pass once locally.
 9. **(R154)** `test/mainElectron.test.ts`'s launch hook carries its own timeout rather than
-   `vitest.config.ts`'s global `hookTimeout` being raised for every hook in the suite.
-10. **(R154)** No `setTimeout`-only wait remains in `test/searchStore.test.ts`; the two post-reparse
-    sites wait on the condition their following assertion is about. Ten consecutive isolated runs
-    pass.
+   `vitest.config.ts`'s global `hookTimeout` being raised for every hook in the suite, and its
+   teardown bounds `close()` rather than waiting on a macOS process exit that by design never comes.
+10. **(R154)** No `setTimeout`-only wait remains in `test/searchStore.test.ts` or
+    `test/documentSession.test.ts` — the latter had five, one per describe block. The two
+    post-reparse sites in `searchStore` wait on the condition their following assertion is about.
+    Ten consecutive isolated runs of each pass, and the full suite passes twice in a row, since the
+    `documentSession` failure only appears under full-suite load.
 11. **(R154)** The `stale`-after-reparse behaviour is recorded in `docs/TASKS.md`'s Owed table with
     its measured timeline, and is **not** fixed in this round.
 
