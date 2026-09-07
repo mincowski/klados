@@ -16,6 +16,35 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R157 — CI packages the app, instead of only bundling it · built
+
+`ci.yml` ran `electron-vite build`, which is a bundler: it produces `out/` and stops. It never
+invoked electron-builder, so **nothing on a pull request had ever executed a line of the packaging
+toolchain.**
+
+Found the hard way rather than by audit. Dependabot opened two security PRs — `fast-uri` under
+`ajv`, `@xmldom/xmldom` under `plist`, both beneath `app-builder-lib` — and both went green on all
+three platforms. The natural reading, that 1,834 passing tests made the bumps safe, was wrong: the
+suite cannot reach either package. Green meant *the dependency tree still installs*. The only thing
+that exercised them was `release.yml`'s `npm run package`, on a tag — after a version had been
+committed to, which is exactly the ordering R151 exists to correct.
+
+`--dir` is the boundary: config validation through ajv, asar and file copy, the Windows executable
+rename, macOS `Info.plist` through plist — with both prompting packages verified reachable by
+reading `node_modules` rather than inferred from the dependency tree — while skipping NSIS, dmg,
+AppImage and fpm. Full packaging was rejected with its reason stated: installer configuration only
+changes in deliberate release rounds that run the real thing anyway, and the failure modes differ
+in kind, a toolchain regression breaking every target where an installer-naming defect breaks one
+filename. It would not have caught R141's dmg collision, which the asset-list check already did.
+
+Measured at 123 s locally, producing `Klados.exe` — so the executable rename is real rather than
+merely configured. Caching the Electron download is deliberately left out: it would cut most of
+that, but a cache key is a correctness surface of its own and there is no point tuning a step
+before its true cost has been seen once.
+
+One uncertainty flagged rather than assumed: Windows logged `signing with signtool.exe` locally and
+exited 0, but a local machine and a runner need not share a signing environment.
+
 ## R156 — a Find result marked stale after it had been recomputed · built
 
 One word — `searchStore.ts` testing `document.dirty` where its own comment says *the buffer has

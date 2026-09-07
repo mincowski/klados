@@ -81,6 +81,33 @@ jobs:
       # report a type error under a step labelled "build".
       - run: npx electron-vite build
 
+      # R157 (`docs/plans/R157-package-check.md`): `electron-vite build` is a
+      # bundler run and stops there — it never invokes electron-builder, so
+      # until now **nothing on a pull request executed a single line of the
+      # packaging toolchain.** That was not theoretical: two Dependabot bumps
+      # (`fast-uri` under `ajv`, `@xmldom/xmldom` under `plist`, both beneath
+      # `app-builder-lib`) went green on all three platforms while the suite
+      # could not reach either package. Green meant "the dependency tree still
+      # installs", and was read as more.
+      #
+      # `--dir` produces the unpacked application and stops before the
+      # installer targets. That is the deliberate boundary: it runs config
+      # validation through ajv, the asar/file-copy stage, the Windows
+      # executable rename and macOS's Info.plist generation through plist — so
+      # it does reach both packages above — while skipping NSIS, dmg, AppImage
+      # and fpm. It would not have caught R141's dmg filename collision, and
+      # §4 of the plan says why buying that costs more than it returns.
+      #
+      # No `GH_TOKEN` and no `--publish`: this builds and throws the result
+      # away. `CSC_IDENTITY_AUTO_DISCOVERY: false` for the same reason
+      # `release.yml` sets it — the macOS runner would otherwise try to sign
+      # the app bundle with whatever identity it finds in its keychain and fail
+      # confusingly, when unsigned is what this project ships.
+      - name: Package (unpacked)
+        run: npx electron-builder --dir
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
       # The browser project (`vitest.config.ts`) drives real Chromium via
       # Playwright — needs the browser binary and its OS-level deps
       # installed before `npm test` (which now runs both projects, R48a).
