@@ -100,7 +100,7 @@ so a reader of an old commit message can still find out what `R41` was.
 | **R140–R144** | built ⚠ | `docs/plans/R140-publication.md` |
 | **R145–R150** | built ⚠ | `docs/plans/R145-csv.md` |
 | **R143** | built ⚠ | `docs/plans/R143-yaml.md` |
-| **R151–R153** | **OPEN** | `docs/plans/R151-ci-matrix.md` |
+| **R151–R153** | built | `docs/plans/R151-ci-matrix.md` |
 
 ### Pre-`R` milestones
 

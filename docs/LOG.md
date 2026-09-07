@@ -16,6 +16,52 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R151–R153 — CI on every platform it ships to · built
+
+The first round to land through a pull request, and the round that makes gating on one worth
+anything.
+
+The case came out of measuring rather than arguing. `ci.yml` ran `ubuntu-latest` alone;
+`release.yml` ran four jobs but only on a `v*` tag. Comparing every run of both across the published
+history: **they disagreed on all four commits where both ran, in both directions.** Green CI carried
+no information about whether a release would build, and red CI carried none about whether the code
+was broken. Both release failures had one cause — a test failing on a platform CI never ran — and
+each cost a deleted draft release and a moved tag to discover.
+
+R151 is the matrix: `ubuntu-latest`/`windows-latest`/`macos-latest`, `fail-fast: false`, with
+exactly two Linux-only steps (the xvfb install and the `xvfb-run` wrapper) keyed on `runner.os`.
+Everything else runs unconditionally on all three, deliberately — an asymmetric matrix leaves steps
+that only ever execute on one OS, which is the shape of the problem being closed. macOS is one job:
+`macos-latest` is arm64, and Release's Intel job exists to produce a second *binary*, not to
+exercise different code. A `concurrency` group was added, which only starts mattering once branches
+exist. `actions/checkout` and `actions/setup-node` went from `@v4` (deprecated Node 20, warning on
+every run) to `@v7` in both workflows, after reading the actual v5/v6/v7 breaking changes rather
+than assuming them — all of them are about fork-checkout policy or *automatic* cache detection,
+neither of which this project uses.
+
+Risk was low and measured rather than hoped: Release's Test step is unconditional, so the full suite
+had already run green on Windows, on macOS twice and on Ubuntu at `1133cb4`. The round moves a check
+that already passes.
+
+R152 and R153 are the two test defects that made CI red at HEAD, and they were the reason the round
+was three tasks instead of one. **A gate that fails half the time for reasons unrelated to your
+change teaches you to merge past it**, and a check you merge past is not a gate.
+
+R152 is not a flake. `tabStrip.test.tsx` defines `waitForOverflowButtons()`, and every
+`.tab-strip-scroll-btn` query in the file waited on it except one — the one that failed, twice in
+the last four runs, with `expected +0 to be 3`: zero buttons, meaning the layout pass and
+`ResizeObserver` callback had not happened yet. Its `describe` block was added after the helper and
+never picked it up. The same lesson as R140's `flushReparse` correction, two rounds running. One
+assumption in the plan needed checking and held: the helper waits for *any* button while the
+assertion wants *three*, which is only sound because all three are gated on the same
+`overflow.overflowing` boolean in one render, so they mount atomically.
+
+R153 raised a performance ratio from 2× to 3× after CI measured 2.024 — over by 1.2%. That is the
+move that hides real regressions, so it is justified by what a regression looks like rather than by
+the run being close: per-node namespace work on a 150,000-node document costs a multiple, not 2%.
+Vitest's `retry` was rejected for both; it would have greened them in one line and hidden R152's
+missing wait entirely.
+
 ## R140–R142 — publication: a fresh history, tagged releases, a README for users · built ⚠ (one item owed)
 
 The application went public as `mincowski/klados` at `v1.0.0`, with binaries for Windows, both

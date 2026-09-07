@@ -323,6 +323,14 @@ describe('TabStrip icons and scroll feel (R38)', () => {
 
   it('the three overflow buttons and + render an <svg>, not a text node', async () => {
     await openManyTabs(10)
+    // R152 (`docs/plans/R151-ci-matrix.md` §3): this was the one query of
+    // `.tab-strip-scroll-btn` in the file that did not wait first, and it
+    // failed 2 of the last 4 CI runs with `expected +0 to be 3` — zero
+    // buttons, meaning the overflow measurement (a layout pass plus a
+    // `ResizeObserver` callback) had not happened yet, not that it produced
+    // a wrong answer. `openManyTabs` does not wait for that; this describe
+    // block was added after the helper and never picked it up.
+    await waitForOverflowButtons()
 
     const scrollButtons = container.querySelectorAll<HTMLButtonElement>('.tab-strip-scroll-btn')
     expect(scrollButtons.length).toBe(3) // left chevron, right chevron, menu chevron

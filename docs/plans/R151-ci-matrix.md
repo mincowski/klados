@@ -1,8 +1,8 @@
 # R151–R153 — CI on every platform it ships to
 
-<!-- status: open -->
+<!-- status: built -->
 
-**Open.** Register: `docs/TASKS.md`. Three tasks, one branch, one pull request: **R151** the
+**Built.** Register: `docs/TASKS.md`. Results in §7. Three tasks, one branch, one pull request: **R151** the
 three-OS matrix, **R152** a missing wait in `tabStrip.test.tsx`, **R153** a performance ratio that
 CI measured at 2.02× against a 2× ceiling.
 
@@ -166,3 +166,57 @@ one is the opposite of what a gate is for.
   nothing to compare against until the matrix exists and Windows and macOS have baselines.
 - **Intel macOS in CI** — see §2.
 - **`release.yml`'s platform list**, which is already correct; only its action versions change.
+
+---
+
+## 7. Results
+
+**Built.** Also the first round to land under `CLAUDE.md`'s branch-and-pull-request agreement, which
+was written in the same branch — `r151-ci-matrix`, two commits, squash-merged.
+
+**R151 — as planned, with one deviation taken deliberately.** `ci.yml` runs a three-entry matrix
+(`ubuntu-latest`, `windows-latest`, `macos-latest`), `fail-fast: false`, `name: ${{ matrix.os }}`,
+and a `concurrency` group on `github.ref` with `cancel-in-progress`. Exactly two steps are
+Linux-only — the xvfb install and the `xvfb-run` wrapper — both keyed on `runner.os`, matching the
+pattern `release.yml` already proves on Windows. Everything else runs unconditionally on all three.
+
+The deviation: both actions went to **`@v7`, not the `@v5` §2 named as a floor**, after reading the
+breaking changes rather than assuming them. `checkout@v6` moved credentials to a separate file and
+`v7` blocks fork checkouts under `pull_request_target`/`workflow_run` — neither mechanism is used
+here. `setup-node`'s v5, v6 and v7 breaks are all about *automatic* package-manager cache detection,
+which this workflow overrides with an explicit `cache: npm`; v7 additionally migrated to ESM
+internally. Both workflow files were bumped. Both parse under `js-yaml`.
+
+**R152 — the plan made an assumption that needed checking, and it held.**
+`waitForOverflowButtons()` waits for `length !== 0`, while the assertion it now guards wants
+`length === 3`. The fix is therefore only correct if the three buttons can never appear separately.
+Verified in `TabStrip.tsx` rather than assumed: all three are gated on the **same**
+`overflow.overflowing` boolean within one render (lines 310, 329, 343), so they mount atomically and
+no intermediate state of one or two exists. Waiting for any is sufficient for three.
+
+Ten consecutive isolated runs of `tabStrip.test.tsx`: **10/10 pass, 15 tests each**. That is the
+acceptance standard rather than proof the race is closed — the test never failed locally, only on
+CI, which is the whole of §3's argument.
+
+**R153.** The ratio is 3×, with §4's reasoning in the comment rather than a bare number change. The
+guarded case measures 2.2 s locally.
+
+**Review pass, per `CLAUDE.md` — three things checked mechanically rather than by eye**, since all
+three are exactly the kind that reads correct and is not:
+
+1. Both workflow files parse, and the parsed matrix is the intended one (`js-yaml`, not inspection).
+2. **Every** `.tab-strip-scroll-btn` query in `tabStrip.test.tsx` now has a preceding
+   `waitForOverflowButtons()` — enumerated by script, not read. The two that do not are the helper's
+   own polling loop (line 201) and the deliberate negative assertion that nothing has appeared yet
+   (line 216).
+3. `typecheck` and `lint` clean; `lint` sits at its pre-existing 3 warnings against a
+   `--max-warnings 3` ceiling, unchanged by this round.
+
+**One thing noted and not fixed.** `cancel-in-progress` applies to `main` as well as to branches, so
+two merges landing in quick succession leave the first `main` run showing *cancelled* rather than a
+result. Harmless today; it would matter if `main` runs were ever used as release evidence, which
+they are not — `release.yml` re-runs the whole suite itself.
+
+**What this round cannot verify locally, by construction.** Criteria 3 and 5 — three green jobs, and
+no Node-20 deprecation warning — are properties of the pull request's own run and of nothing else.
+That is not a gap in the verification; it is the round's entire point.

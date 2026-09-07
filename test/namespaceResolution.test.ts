@@ -128,7 +128,23 @@ describe('R134 — a namespace-free document parses measurably unchanged', () =>
     // Generous ratio, not a tight budget — the point is "no per-node
     // resolution work leaked into the declaration-free fast path," not a
     // precise number CI hardware variance would make flaky.
-    expect(namespaced).toBeLessThan(Math.max(plain * 2, plain + 20))
+    //
+    // R153 (`docs/plans/R151-ci-matrix.md` §4): 2× was not generous enough.
+    // CI measured 2.024 — `expected 650.3867979999995 to be less than
+    // 642.3825140000008`, i.e. over by 1.2% — on a contended shared runner.
+    // R141 raised the *timeout* wrapped around this test, in
+    // `vitest.config.ts`, and never revisited the *ratio* inside it.
+    //
+    // Raising a performance ceiling is exactly the move that hides a real
+    // regression, so the justification is what a regression looks like, not
+    // that the run was close: per-node namespace work on a 150,000-node
+    // document costs a *multiple*, not 2%. 3× still fails loudly for the
+    // defect this guards and stops failing for runner noise. The additive
+    // arm is unchanged — it only governs the small-input case.
+    //
+    // Rejected: Vitest's `retry`. It would have greened this and R152 in one
+    // line, and it would have hidden R152's missing wait completely.
+    expect(namespaced).toBeLessThan(Math.max(plain * 3, plain + 20))
     // Explicit timeout, not the 5 s default: this parses a 50,000-element
     // document eight times (two warm-ups plus three timed runs per shape).
     // The assertion above is a deliberately generous *ratio* — wall-clock
