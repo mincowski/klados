@@ -1,10 +1,16 @@
 # Generated fixtures — ~1 GB, deterministic, rebuilt by generate-fixtures.ts
 fixtures/
 
-# Harness dependencies and Vite build output
+# Dependencies and build output of anything run in here
 node_modules/
-codemirror-harness/dist/
+dist/
 
-# NOTE: codemirror-harness/out/ is deliberately NOT ignored. It holds the raw
-# measurement JSON behind RESULTS.md — the evidence for D-030 and D-031 — and is
-# ~100 KB. An earlier version of this file excluded it.
+# R155: a spike's own manifest must never be committed again. The deleted
+# codemirror-harness/package-lock.json pinned an Electron the app stopped using
+# long ago and generated 19 of the repository's 25 Dependabot alerts — permanent
+# noise nobody would ever fix, burying the six real ones. Spikes now run on a
+# branch and merge only their document, so a manifest here has nothing to do.
+package.json
+package-lock.json
+*/package.json
+*/package-lock.json

@@ -54,6 +54,7 @@ Read the relevant section before implementing — do not work from this file alo
 | `docs/PLANNING.md` | how a plan earns its claims — render visual decisions, verify mechanisms, state the cost | **before writing any plan document** (its bookkeeping is `TASKS.md`'s job; this is its content) |
 | `src/core/types.ts` | the format module contract | anything touching parsing |
 | `docs/LOG.md` | what was built when, newest first | archaeology — "why is this like this?" |
+| `docs/spikes/` | spike results — the whole artifact a spike leaves behind, its code being gone | before re-investigating something that may already have been measured |
 
 ### Topic documents
 
@@ -169,6 +170,44 @@ message and decision referring to them keeps that id. `M5c-PLAN.md`'s J1 is J1 p
 The `R` sequence starts after M5c and runs forward from there; the two schemes coexist rather
 than one being migrated into the other, because renaming settled history would invalidate
 every cross-reference in `docs/` for no gain.
+
+## Spikes — the document is the artifact, the code is not
+
+**A spike runs on its own branch, and the only thing that merges to `main` is a document in
+`docs/spikes/`.** The apparatus is throwaway by definition; it does not come with it.
+
+That document is the entire deliverable, so it is written to be read years later by someone
+who cannot run the code. It should be **long**. It carries:
+
+- **the question**, in the form that makes the answer a decision rather than a number
+- **the environment** — machine, OS, runtime versions, and anything that makes a figure a
+  lower or upper bound (a 60 Hz display puts a 16.7 ms floor under every latency in
+  `docs/spikes/M0a-codemirror-and-parsers.md`, and not saying so would make every one of
+  them a lie)
+- **the method, and why that method** — that spike used Electron rather than a browser page
+  *because a browser cannot report renderer RSS*, which is the sort of thing nobody
+  reconstructs from the code
+- **every number**, not just the ones the conclusion rests on
+- **the mistakes made getting there.** This is the part that justifies the rule: the code
+  contains the fix, only the document can contain the error. That spike's three
+  harness bugs — a fractional byte offset that made CodeMirror throw off an async pass,
+  a stale `scrollTop` after a document swap — are worth more than the harness was.
+
+**Why not just keep the code.** R155 is the cautionary case rather than a hypothetical.
+A completed M0a harness sat in the repository for the project's whole life, and its
+`package-lock.json` pinned an Electron the app had long since moved past — producing **19 of
+the repository's 25 Dependabot alerts**, permanently, burying the six real ones. That is
+R47's finding in a new place: four real lint errors under 5,363 CRLF warnings is how a tool
+gets switched off, and nobody was ever going to update a dead spike's lockfile.
+
+**Re-runnable measurement tooling is not a spike.** Benches that later rounds re-run live in
+`spike/` (see its `README.md`) and stay. The test is whether anyone will run it again.
+
+**Historical documents keep their old paths.** A results document citing
+`spike/codemirror-harness/` describes what was true when it was written, exactly as
+pre-R144 documents keep saying "NodePad". Only *live* documents get repointed —
+`docs/README.md`, `docs/TASKS.md`'s board, and `DECISIONS.md`, which is read before changing
+an approach rather than as a record of one.
 
 ## Conventions
 

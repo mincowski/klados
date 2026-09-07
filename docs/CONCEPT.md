@@ -1422,7 +1422,7 @@ Parser-heavy projects fail in spans, so testing is a named part of the design:
 
 **M0a — Spike (days, not weeks) — complete**
 Benchmarked CodeMirror 6 at 10–500 MB and a throwaway byte-scanning XML parser on the same
-files. Results in `spike/RESULTS.md`.
+files. Results in `docs/spikes/M0a-codemirror-and-parsers.md`.
 
 It changed the design in five places, which is what it was for: the Raw View is windowed
 rather than tiered (§8), node density is 5× what §3.2 assumed and forced the text rules

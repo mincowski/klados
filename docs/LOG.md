@@ -16,6 +16,52 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R155 — spikes leave a document, not a directory · built
+
+Enabling Dependabot produced 25 open alerts, and **19 of them came from one completed M0a spike** —
+a throwaway harness pinning `electron ^38.2.0` while the application's own lockfile already
+resolved 39.8.10, higher than any advisory asked for. Nothing affected the shipped binaries; the
+six real alerts are all build tooling, and the eight runtime dependencies are untouched.
+
+R47's finding in a new place, and worse. Four real lint errors under 5,363 CRLF warnings is how a
+tool gets switched off — but R47 had a fix waiting in `.gitattributes`, and nobody is ever going to
+update a dead spike's lockfile, so this noise was permanent by construction.
+
+The rule: a spike runs on its own branch and only its document merges, into `docs/spikes/`. That
+document is written for someone who cannot run the code, and carries the question, the environment,
+the method *and why that method*, every number, and the mistakes made getting there. The last is
+what makes deleting the code defensible rather than merely tidy — **the code contains the fix, only
+the document can contain the error.** M0a's three harness bugs, one of them a fractional byte
+offset that made CodeMirror throw off an internal async pass so the failure surfaced nowhere near
+its cause, are worth more than the harness was.
+
+Sufficiency was checked before anything was deleted, document against apparatus rather than judged
+by length: M0a's 905 lines carry the environment, the vsync floor that makes 16.7 ms a floor and
+not a latency, the editor configuration, A6's windowing primitives by name, and those three bugs
+root-caused; H11 names every scheme privilege flag and its run command; R31 names the seeded PRNG
+and seed behind its 1,757-edit result; D15's family is tabulated in full in `M1-RESULTS.md`, which
+is titled for it.
+
+One real gap was closed rather than argued away. The raw JSON held `min`/`max`, `readMs`,
+`docChars`, `lines` and RSS counters that no table carried — "no decision rested on them" being a
+claim about questions already asked — so all 24 files are transcribed verbatim into
+`docs/spikes/raw-measurements.md`: 2,691 scalar values in, 2,691 rows out, checked by count and by
+spot value.
+
+Kept: `generate-fixtures.ts` and five per-milestone benches, which are re-runnable tooling rather
+than spikes, now with a `spike/README.md` saying what each measures. The directory keeps its name
+because renaming would invalidate every historical path for no gain. `spike/.gitignore` now
+excludes `package*.json` at both levels so a stray `npm install` cannot recreate the problem.
+
+References follow R144's precedent, and measuring made the split cheap: of 28 mentions of deleted
+paths, only five sit in live documents. The other 23 keep pointing at paths that no longer exist,
+because they describe what was true when they were written.
+
+The review pass found one thing. The sweep would have deleted `d15-*.json`, which belongs to **M1**
+and D-030 rather than M0a — covered by `M1-RESULTS.md`, but checked rather than assumed, and
+grouped under its own heading in the transcription instead of being filed with the M0a data it
+happened to sit beside on disk.
+
 ## R151–R154 — CI on every platform it ships to · built ⚠ (one item owed)
 
 The first round to land through a pull request, and the round that makes gating on one worth

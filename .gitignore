@@ -7,8 +7,10 @@ node_modules/
 # Build output
 # ---------------------------------------------------------------------------
 # Anchored to the repository root on purpose: electron-vite writes to out/ and
-# electron-builder to dist/, but spike/codemirror-harness/out/ holds the M0a
-# measurement data and must stay. An unanchored `out/` would swallow it.
+# electron-builder to dist/, and an unanchored `out/` would also swallow any
+# nested one. The original reason was spike/codemirror-harness/out/, which R155
+# deleted after transcribing it to docs/spikes/raw-measurements.md — the
+# anchoring stays because it is right regardless, not because of that directory.
 /out/
 /dist/
 /release/
@@ -25,11 +27,15 @@ node_modules/
 test/fixtures/generated/
 
 # ---------------------------------------------------------------------------
-# M0a spike
+# spike/ — measurement tooling, not spikes
 # ---------------------------------------------------------------------------
-# spike/ is committed, not ignored: RESULTS.md is a decision record and the
-# harness sources are the evidence behind D-030 and D-031. spike/.gitignore
-# narrows what is excluded inside it (fixtures, node_modules, build output).
+# Committed, not ignored, but the reason changed at R155. It used to hold spike
+# apparatus whose sources were the evidence behind D-030/D-031; those documents
+# now live in docs/spikes/ and the apparatus is deleted. What remains is
+# re-runnable tooling — the fixture generator behind `npm run fixtures:generate`
+# and the per-milestone benches several results documents cite by name.
+# Spikes themselves now run on a branch and merge only their document; see
+# CLAUDE.md, "Spikes".
 
 # ---------------------------------------------------------------------------
 # Tooling and local state
