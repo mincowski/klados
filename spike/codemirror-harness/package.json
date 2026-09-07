@@ -14,7 +14,7 @@
     "codemirror": "^6.0.2"
   },
   "devDependencies": {
-    "electron": "^38.2.0",
+    "electron": "^39.8.10",
     "vite": "^7.1.5"
   }
 }
