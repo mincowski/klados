@@ -3,6 +3,15 @@
   "productName": "Klados",
   "version": "1.0.0",
   "description": "A desktop viewer and source-level editor for hierarchical data files — XML, JSON, TOML and CSV.",
+  "author": {
+    "name": "mincowski",
+    "email": "8300485+mincowski@users.noreply.github.com"
+  },
+  "homepage": "https://github.com/mincowski/klados",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mincowski/klados.git"
+  },
   "license": "MIT",
   "main": "./out/main/index.js",
   "scripts": {

@@ -11,6 +11,17 @@ files:
 win:
   executableName: Klados
 nsis:
+  # Pinned rather than derived. electron-builder computes this as UUID v5 of
+  # `appId` under its own namespace (`com.klados.app` yields exactly this
+  # value today) and names the Add/Remove Programs registry key after it.
+  # Package managers and updaters key installed state off that name, so
+  # changing `appId` later would silently orphan every existing install: no
+  # upgrade detection, no uninstall entry to match. Freezing the value makes
+  # the installed identity independent of the appId. **Never change it.**
+  guid: 318f6304-c1a1-5b48-8b0d-d9b77e332a6b
+  # Stable across versions by construction, and it needs to stay that way:
+  # once a release ships, the download URL is the handle anything downstream
+  # (a package definition, a script, a link in an issue) refers to.
   artifactName: ${name}-${version}-setup.${ext}
   # No .blockmap. A blockmap is a content-chunk index that lets
   # `electron-updater` download only the changed blocks between versions — it
@@ -61,7 +72,11 @@ linux:
   target:
     - AppImage
     - deb
-  maintainer: klados
+  # No `maintainer:` here on purpose. It used to read `klados`, which is not a
+  # well-formed Debian maintainer field — that field requires `Name <email>`,
+  # and the hardcode existed only because `package.json` had no `author` to
+  # fall back to. It does now, so `FpmTarget.js` derives
+  # `mincowski <8300485+mincowski@users.noreply.github.com>` instead.
   category: Utility
 appImage:
   artifactName: ${name}-${version}.${ext}
