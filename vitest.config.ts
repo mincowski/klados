@@ -32,6 +32,11 @@ const TEST_TIMEOUT_MS = 30_000
 
 // `mainElectron.test.ts` launches the real built application in `beforeAll`.
 // Cold-starting Electron on a CI runner is well past the 10 s hook default.
+//
+// R154: that hook now carries its own 120 s override, because a macOS runner
+// exceeds even this. The value here stays at 30 s deliberately — it is a hang
+// guard for the other 152 files, and the one hook that genuinely needs longer
+// should say so at the hook rather than buy it for everything.
 const HOOK_TIMEOUT_MS = 30_000
 
 // Set per project rather than once at the root: with `projects`, each entry

@@ -1,10 +1,13 @@
-# R151–R153 — CI on every platform it ships to
+# R151–R154 — CI on every platform it ships to
 
-<!-- status: built -->
+<!-- status: built-caveat -->
 
-**Built.** Register: `docs/TASKS.md`. Results in §7. Three tasks, one branch, one pull request: **R151** the
-three-OS matrix, **R152** a missing wait in `tabStrip.test.tsx`, **R153** a performance ratio that
-CI measured at 2.02× against a 2× ceiling.
+**Built, with one item owed** (a product defect found on the way, recorded in `docs/TASKS.md`'s
+Owed table and deliberately not fixed here). Register: `docs/TASKS.md`. Results in §7. Four tasks,
+one branch, one pull request: **R151** the three-OS matrix, **R152** a missing wait in
+`tabStrip.test.tsx`, **R153** a performance ratio that CI measured at 2.02× against a 2× ceiling,
+and **R154** — allocated after the matrix's first run — two more platform-only failures it found
+immediately.
 
 **The last two are not padding — they are what makes the first one worth having.** A merge gate
 that fails two runs in four for reasons unrelated to the change teaches you to merge past it, and
@@ -86,6 +89,14 @@ passed.** `release.yml`'s Test step is unconditional, so run #4 at `1133cb4` ran
 completion on `windows-latest`, on `macos-latest` twice, and on `ubuntu-latest`, and all four jobs
 were green. This round moves a check that already passes; it does not go looking for new failures.
 
+> **Correction, from the first run of the matrix itself — the paragraph above is true of the suite
+> and false of one test in it.** `test/mainElectron.test.ts` guards itself on `out/main/index.js`
+> existing and skips with a warning when it does not. `release.yml` runs `npm test` *before*
+> `npm run package`, so `out/` is absent there and that describe block **never executed in any
+> release run**. `ci.yml` runs `npx electron-vite build` first, so it does. The matrix was therefore
+> the first thing ever to cold-start Electron on a macOS runner, and it timed out — the hook, not
+> an assertion. See §7.
+
 ---
 
 ## 3. R152 — `tabStrip.test.tsx` is missing a wait
@@ -142,6 +153,63 @@ one is the opposite of what a gate is for.
 
 ---
 
+## 4a. R154 — what the matrix found on its very first run
+
+Allocated after the fact, because the round's own instrument immediately produced two failures that
+§2 had argued were unlikely. Both are platform-only, both had been invisible for the life of the
+project, and **neither is a regression** — they are pre-existing conditions that no pipeline had
+ever been in a position to observe.
+
+**macOS: `mainElectron.test.ts` timed out in `beforeAll` at 30 s.** §2's claim that the suite had
+already passed on three platforms was true of the suite and false of this test. It guards itself on
+`out/main/index.js` and skips with a warning when the built app is absent — and `release.yml` runs
+`npm test` *before* `npm run package`, so `out/` does not exist there and the whole describe block
+**never executed in any release run**. `ci.yml` runs `npx electron-vite build` first, so it does.
+The matrix was the first thing ever to cold-start Electron on a macOS runner, and 30 s was not
+enough. Fixed with a 120 s timeout on that hook alone rather than by raising `vitest.config.ts`'s
+global `hookTimeout`: it is the only hook in the suite that launches a real GUI application, and
+weakening the hang guard for the other 152 files to accommodate it would be the wrong trade.
+
+**Windows: `searchStore.test.ts` failed on a fixed sleep** — `expected true to be false`, the
+`stale` flag still set because a 30 ms debounced reparse had not landed inside the 90 ms the test
+waited. **Third instance of this exact defect**, after `documentSession.test.ts` (which broke a
+release build) and R152. Seventeen call sites of a `flushReparse(ms = 50)` that did nothing but
+`setTimeout`.
+
+**The fix took three attempts, and the failures are the interesting part**, because each one was a
+different wrong model of what the test was waiting for:
+
+1. **Quiescence** — wait for the snapshot to stop changing — is what R140 used, and it fails here.
+   After `applyEdit` the store goes stale synchronously and then *nothing moves* until the debounce
+   elapses, so 50 ms of "stability" is reached before the work has begun. **Stable and
+   not-yet-started are indistinguishable from outside.**
+2. **Quiescence plus `!stale`** fails too, and finding out why turned up the item now owed (below).
+3. **Waiting for `!stale && complete`** is correct, and needs both flags: `stale` clears when the
+   re-run *starts*, `complete` only when it has produced matches, so waiting on `stale` alone
+   returns mid-flight against an incomplete result.
+
+The 14 sites that wait for a *search* to land keep quiescence, which is the right question there;
+the two that wait for a *reparse* got `awaitReparsed`.
+
+**The item owed — a product defect, reported rather than worked around.** Instrumenting attempt 2
+showed the flag does not stay clear. Measured through the real `searchStore` and a real
+`documentSession` (only the transport is faked):
+
+| | |
+|---|---|
+| `+1 ms` | edit applied — store changed, result marked `stale` |
+| `+48 ms` | debounced reparse landed — store changed, re-run cleared `stale` |
+| `+205 ms` | a further notification, **store unchanged**, `dirty` still true → marked `stale` again |
+
+and it stays stale, because nothing else will change the store. The cause is `searchStore.ts`'s
+guard using `document.dirty` — *unsaved* — as a proxy for *the buffer moved since the search ran*.
+Those are different questions, and after a reparse the second is false while the first is still
+true. User-visible consequence: after an edit, the Find result is marked stale even though it has
+been recomputed and is correct, and stays marked until the next edit.
+
+Not fixed here. It is pre-existing, it is a product behaviour change rather than a test fix, and
+choosing the right signal is a decision this round has no business making inside a CI change.
+
 ## 5. Acceptance criteria
 
 1. `ci.yml` runs on `ubuntu-latest`, `windows-latest` and `macos-latest`, with `fail-fast: false`.
@@ -156,6 +224,13 @@ one is the opposite of what a gate is for.
    change.
 8. `test/tabStrip.test.tsx` passes ten consecutive isolated local runs — the standard R140 applied
    to `flushReparse`, since a race that fails half the time on CI can easily pass once locally.
+9. **(R154)** `test/mainElectron.test.ts`'s launch hook carries its own timeout rather than
+   `vitest.config.ts`'s global `hookTimeout` being raised for every hook in the suite.
+10. **(R154)** No `setTimeout`-only wait remains in `test/searchStore.test.ts`; the two post-reparse
+    sites wait on the condition their following assertion is about. Ten consecutive isolated runs
+    pass.
+11. **(R154)** The `stale`-after-reparse behaviour is recorded in `docs/TASKS.md`'s Owed table with
+    its measured timeline, and is **not** fixed in this round.
 
 ## 6. Deliberately not in scope
 
@@ -217,6 +292,16 @@ two merges landing in quick succession leave the first `main` run showing *cance
 result. Harmless today; it would matter if `main` runs were ever used as release evidence, which
 they are not — `release.yml` re-runs the whole suite itself.
 
-**What this round cannot verify locally, by construction.** Criteria 3 and 5 — three green jobs, and
-no Node-20 deprecation warning — are properties of the pull request's own run and of nothing else.
-That is not a gap in the verification; it is the round's entire point.
+**R154 — added after the fact, and the strongest evidence the round was worth doing.** The matrix's
+first run failed on two of its three platforms, for two causes that had been latent since before
+the project had CI at all: a macOS Electron cold start over 30 s in a suite that had never launched
+Electron anywhere but Linux, and a Windows failure on a fixed sleep in `searchStore.test.ts`. §4a
+records both, the three attempts the second one took, and the product defect the second attempt
+uncovered. Local verification of the fixes: **10/10 isolated runs** of `searchStore.test.ts`; the
+macOS timeout can only be verified on macOS, which the pull request's own run does.
+
+**What this round cannot verify locally, by construction.** Criteria 3, 5 and the macOS half of 9 —
+three green jobs, no Node-20 deprecation warning, and an Electron cold start that fits inside its
+new timeout — are properties of the pull request's own run and of nothing else. That is not a gap
+in the verification; it is the round's entire point, and the first run demonstrating it by failing
+twice is the point being made rather than an embarrassment to it.

@@ -53,7 +53,19 @@ describe.skipIf(!builtAppAvailable)('the built app via _electron (R51, R58)', ()
     app = await electron.launch({ args: [mainEntry] })
     page = await app.firstWindow()
     await page.waitForLoadState('load')
-  })
+    // R154 (`docs/plans/R151-ci-matrix.md` §4a): 120 s, overriding
+    // `vitest.config.ts`'s 30 s hook default for this hook alone rather than
+    // raising it for every hook in the suite — this is the only one that
+    // cold-starts a real GUI application.
+    //
+    // Found by the R151 matrix on its first run, and it is a *new* fact rather
+    // than a regression: this suite had never executed anywhere but Linux.
+    // `release.yml` runs `npm test` before `npm run package`, so `out/` does
+    // not exist there and the `builtAppAvailable` guard above skips the whole
+    // describe — which is why four green release jobs on Windows and macOS
+    // said nothing about it. `ci.yml` builds first, so the matrix is the first
+    // thing ever to launch Electron on a macOS runner, and 30 s was not enough.
+  }, 120_000)
 
   afterAll(async () => {
     // The close-interception test below may already have closed the app's

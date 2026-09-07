@@ -16,7 +16,7 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
-## R151–R153 — CI on every platform it ships to · built
+## R151–R154 — CI on every platform it ships to · built ⚠ (one item owed)
 
 The first round to land through a pull request, and the round that makes gating on one worth
 anything.
@@ -61,6 +61,27 @@ move that hides real regressions, so it is justified by what a regression looks 
 the run being close: per-node namespace work on a 150,000-node document costs a multiple, not 2%.
 Vitest's `retry` was rejected for both; it would have greened them in one line and hidden R152's
 missing wait entirely.
+
+R154 was allocated after the fact, because the matrix's first run failed on two of its three
+platforms and both causes had been latent since before the project had CI. On macOS,
+`mainElectron.test.ts` timed out cold-starting Electron: the plan's claim that the suite had already
+passed on three platforms was true of the suite and **false of that test**, which guards itself on
+`out/main/index.js` and skips when the built app is absent — and `release.yml` tests *before* it
+packages, so that describe block had never executed off Linux in its life. On Windows,
+`searchStore.test.ts` failed on a fixed sleep: the third instance of that defect in three rounds.
+
+The Windows fix took three attempts, and the wrong ones are the useful part. Quiescence — R140's
+approach — fails here, because after an edit the store goes stale synchronously and then nothing
+moves until the debounce elapses, so "stopped changing" is reached before the work starts: **stable
+and not-yet-started are indistinguishable from outside.** Waiting for `stale` to clear and then
+settle fails too, and instrumenting *that* is what surfaced a product defect: measured through the
+real store and session, the flag clears at +48 ms when the reparse lands and is re-marked at
++205 ms by a notification with the store unchanged and `dirty` still true — permanently, because
+nothing else will change the store. `searchStore.ts` uses `dirty` (*unsaved*) as a proxy for *the
+buffer moved since the search ran*, and after a reparse those disagree. Reported and carried in the
+Owed table rather than fixed: it is pre-existing, and picking the right signal is a product decision
+a CI round should not be making. The correct wait turned out to need both flags — `stale` clears
+when the re-run starts, `complete` only when it finishes.
 
 ## R140–R142 — publication: a fresh history, tagged releases, a README for users · built ⚠ (one item owed)
 
