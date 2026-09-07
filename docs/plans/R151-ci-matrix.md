@@ -1,9 +1,11 @@
 # R151–R154 — CI on every platform it ships to
 
-<!-- status: built-caveat -->
+<!-- status: built -->
 
-**Built, with one item owed** (a product defect found on the way, recorded in `docs/TASKS.md`'s
-Owed table and deliberately not fixed here). Register: `docs/TASKS.md`. Results in §7. Four tasks,
+**Built.** The product defect this round found and declined to fix — reported rather than worked
+around, per `CLAUDE.md` — was carried in the Owed table until **R156**
+(`docs/plans/R156-search-stale-flag.md`) fixed it; nothing is owed now. Register:
+`docs/TASKS.md`. Results in §7. Four tasks,
 one branch, one pull request: **R151** the three-OS matrix, **R152** a missing wait in
 `tabStrip.test.tsx`, **R153** a performance ratio that CI measured at 2.02× against a 2× ceiling,
 and **R154** — allocated after the matrix's first run — two more platform-only failures it found

@@ -16,9 +16,12 @@
  * that's *nearly* right is exactly the failure mode this project keeps
  * finding expensive (`M3-RESULTS.md`'s delta-list findings, D-010). The
  * re-run itself rides `documentSession.ts`'s own debounced reparse — no
- * second debounce timer here — but the moment the document goes dirty and
+ * second debounce timer here — but from the moment the buffer is replaced and
  * *before* that reparse lands, the current result is marked `stale`
- * immediately rather than left to look current while it silently isn't.
+ * immediately rather than left to look current while it silently isn't. The
+ * signal is `reparsePending`, and R156 is the round that stopped it being
+ * `dirty`: *unsaved* outlives the reparse by the whole editing session, so the
+ * flag went back on after every re-run and stayed on.
  */
 import {
   chooseFindPath,
@@ -323,7 +326,29 @@ export function createSearchStore(session: DocumentSession): SearchStore {
     // debounced reparse (and this store's own re-run) hasn't caught up.
     // Mark stale immediately rather than let a stale-but-plausible count
     // sit unmarked until the debounce elapses.
-    if (activeQuery !== null && document.dirty && result.complete && !result.stale) {
+    //
+    // R156 (`docs/plans/R156-search-stale-flag.md`): `reparsePending`, not
+    // `dirty`. The sentence above is the condition; `dirty` was not it.
+    // `dirty` means *unsaved* — true from the first edit after open until the
+    // next successful save — so it stays true long after the reparse it was
+    // standing in for has landed, and every later notification re-marked a
+    // result that had already been recomputed. Measured: stale at +1 ms,
+    // correctly cleared at +48 ms when the re-run finished, wrongly re-marked
+    // at +205 ms, and permanent from there, since nothing else changes the
+    // store until the next edit.
+    //
+    // `reparsePending` is exactly this question — true from the moment
+    // `sourceBuffer` is replaced until `applyReparseResult` commits a store
+    // built from it — and all four buffer-mutating paths set it (`applyEdit`,
+    // `applyUndoEntry`, `applyTransform`, `applyReplaceAll`). It exists
+    // because M5's H8 banner and H9 memory budget hit this same trap; this is
+    // the third consumer, and the only one that had reached for the wrong flag.
+    //
+    // `transformInProgress` is deliberately *not* included, though it covers
+    // the extra window before a Transform swaps the buffer. `stale` means "may
+    // not match the current buffer", and before the swap it still does match —
+    // marking it there would be this same defect again, just briefer.
+    if (activeQuery !== null && document.reparsePending && result.complete && !result.stale) {
       setResult({ ...result, stale: true })
     }
   })
