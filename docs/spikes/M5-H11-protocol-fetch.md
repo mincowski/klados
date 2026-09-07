@@ -1,5 +1,11 @@
 # H11 spike — read the document once, in the process that parses it
 
+> **Provenance.** This was `spike/h11-protocol-fetch/RESULTS.md`, written alongside a
+> standalone Electron harness in the same directory. R155
+> (`docs/plans/R155-spike-policy.md`) made the document the artifact and deleted the
+> harness. The scheme name below (`nodepad-spike`) predates the R144 rename and is left as
+> written. Its conclusion is **D-047**.
+
 **Question:** does `fetch()` on a custom protocol, called from a `Worker`, materialize the
 response body once (≈1× peak RSS) or twice (≈2×, via internal chunk accumulation before the
 final `arrayBuffer()`)? This is the single number M5-PLAN.md's H11 says decides go/no-go.

@@ -620,7 +620,8 @@ in the current fixture range approaches that.
 
 `M2-RESULTS.md`'s E10 and `M3-RESULTS.md`'s §2 both flagged the same gap: no harness exists
 that mounts real React components (Tree's virtualized rows, Grid's virtualized cells) under
-a real `requestAnimationFrame` loop — `spike/codemirror-harness` (M1 D15) drives a real
+a real `requestAnimationFrame` loop — the M1 D15 harness (deleted at R155; results in
+`docs/plans/M1-RESULTS.md`, raw output in `docs/spikes/raw-measurements.md`) drove a real
 CodeMirror `EditorView` this way, but nothing analogous exists for React component trees.
 M3-PLAN.md's own text called a third deferral "a decision rather than a consequence" and
 asked for an explicit choice, recorded here rather than left implicit a fourth time.
@@ -1249,8 +1250,8 @@ chunks and concatenate, which would reintroduce the very 2× spike this removes.
 peak RSS in the fetching process at 200 MB and 500 MB, with `Content-Length` set and
 without. A 1× peak is a go."
 
-**Spiked** (`spike/h11-protocol-fetch/`, a standalone Electron harness — see that directory's
-own `RESULTS.md` for the full table and methodology): a custom scheme served through
+**Spiked** (a standalone Electron harness, deleted at R155 — see
+`docs/spikes/M5-H11-protocol-fetch.md` for the full table and methodology): a custom scheme served through
 `protocol.handle` via a streamed `fs.ReadStream`, fetched from inside a genuine dedicated
 `Worker`, with `app.getAppMetrics()` reading the renderer process's own RSS before and after.
 **Result: ~1.00–1.03× at both 200 MB and 500 MB, identical with and without

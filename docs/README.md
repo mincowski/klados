@@ -75,6 +75,10 @@ rather than papered over.
 ## Also here
 
 [`screenshots/`](screenshots/) holds images referenced by the documents.
-[`../spike/`](../spike/) holds the measurement harnesses behind several decisions — notably the
-CodeMirror windowing experiments that D-030 and D-031 rest on. The raw result files are committed
-because a decision citing a number should let you check the number.
+[`spikes/`](spikes/) holds spike results — the document a spike leaves behind once its apparatus is
+gone (R155). `M0a-codemirror-and-parsers.md` is the CodeMirror windowing work D-030 and D-031 rest
+on, and `raw-measurements.md` transcribes every figure the harnesses wrote, because a decision
+citing a number should let you check the number.
+
+[`../spike/`](../spike/) is now only re-runnable measurement tooling — the fixture generator and the
+per-milestone benches. It is not where spikes live.

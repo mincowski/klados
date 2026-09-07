@@ -1,4 +1,13 @@
-# M0a — Spike results
+# M0a — Spike results: CodeMirror at scale, and parser throughput
+
+> **Provenance.** This was `spike/RESULTS.md`, written alongside a throwaway Electron
+> harness in `spike/codemirror-harness/`. R155 (`docs/plans/R155-spike-policy.md`) made
+> the document the artifact a spike leaves behind and deleted the apparatus; the raw JSON
+> the harness wrote is transcribed verbatim in
+> [`raw-measurements.md`](raw-measurements.md). **Historical documents still cite the old
+> paths and are deliberately not rewritten** — they describe what was true when they were
+> written. The fixture generator (`spike/generate-fixtures.ts`) is *not* deleted: it is
+> re-runnable tooling rather than spike apparatus, so the inputs below are still producible.
 
 Purpose: replace two assumptions with measurements (see `M0-PLAN.md` §M0a).
 
