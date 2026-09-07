@@ -1,8 +1,9 @@
-# R157 — CI packages the app, instead of only bundling it
+# R157–R158 — CI packages the app, instead of only bundling it
 
 <!-- status: built -->
 
-**Built.** Register: `docs/TASKS.md`. Results in §7.
+**Built.** Register: `docs/TASKS.md`. Results in §7, and §8 for **R158** — a render-count race the
+new step's own first run surfaced, allocated after the fact.
 
 One step: `npx electron-builder --dir` on all three platforms, after the existing bundler run.
 
@@ -122,3 +123,55 @@ verify locally are exactly the ones its own run exists to settle.
 environment variable, the step order was checked by parsing the workflow rather than by reading it,
 and both package reachability claims in §2 were verified against `node_modules` rather than
 reasoned from the dependency tree.
+
+**Measured on the pull request's own run, answering criteria 3–5:**
+
+| Platform | `Package (unpacked)` | Job total | Job before R157 |
+|---|---|---|---|
+| ubuntu-latest | **26 s** | 140 s | 119 s |
+| macos-latest | **32 s** | 161 s | 133 s |
+| windows-latest | **51 s** | 419 s | 360 s |
+
+**Far cheaper than the 123 s measured locally** — the runners are much newer hardware than the 2013
+desktop, and §4's "read it as an upper bound" was right. Wall clock is set by Windows either way and
+rises from ~6 to ~7 minutes. **That settles the caching question too: 26–51 s does not justify a
+cache key's correctness surface**, so §4's deferral becomes a decision.
+
+**§5's signing uncertainty is resolved: it is a no-op.** The Windows job packaged in 51 s and
+passed, so `signtool` with no certificate configured costs nothing and needs no suppression.
+
+**The step itself passed on all three platforms**, including macOS, whose job nevertheless failed —
+in the test step, on something else entirely. That is §8.
+
+---
+
+## 8. R158 — a render-count drain that waited for frames instead of for the renders
+
+Allocated after the fact, on the same principle R154 was: the round's own first run failed, and the
+PR has to be green.
+
+`test/documentPropsRenderCost.test.tsx` failed on macOS with `expected 11 to be 10` — one extra
+render in a ten-replacement typing burst. **Not caused by R157**, which touches no product or test
+code; the macOS job has existed since R151 and passed. But inserting a 32-second packaging step
+before the tests perturbs the timing, and a latent race is exactly the kind of thing that surfaces
+when timing shifts.
+
+**The defect is the same class this project keeps finding, for the fourth time.** `mountAndDrain`
+mounts the harness, waits, and resets the counters so the mount's own commits are not charged to the
+scenario. It waited via `paint`, which is two `requestAnimationFrame`s — **a duration wearing a
+frame's clothing.** And the helper's own comment already named why that is not enough:
+
+> Every pane commits once on mount (plus, for `raw`, **CodeMirror's own effect-driven setup**)
+
+Effect-driven, not frame-driven. It has no obligation to land inside two frames. When it lands
+outside them, its commit arrives after `resetStats` and is charged to the scenario — 11 instead
+of 10.
+
+**Fix:** drain until the total commit count across all panes stops moving (three quiet frames, 5 s
+timeout that throws), then reset. It asks the actual question — *has the mount finished
+committing?* — and costs two extra frames in the ordinary case where it already had.
+
+Same shape as R152's missing `waitForOverflowButtons`, R154's `searchStore`/`documentSession`
+sleeps, and R140's `flushReparse`: **wait for the condition, never for a duration.** The recurring
+tell is a helper whose own comment describes something asynchronous while its implementation waits
+a fixed amount of time.

@@ -16,7 +16,7 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
-## R157 — CI packages the app, instead of only bundling it · built
+## R157–R158 — CI packages the app, instead of only bundling it · built
 
 `ci.yml` ran `electron-vite build`, which is a bundler: it produces `out/` and stops. It never
 invoked electron-builder, so **nothing on a pull request had ever executed a line of the packaging
@@ -44,6 +44,28 @@ before its true cost has been seen once.
 
 One uncertainty flagged rather than assumed: Windows logged `signing with signtool.exe` locally and
 exited 0, but a local machine and a runner need not share a signing environment.
+
+The run answered everything. The step costs 26 s on ubuntu, 32 s on macOS, 51 s on Windows — far
+below the 123 s the 2013 desktop measured, so treating that as an upper bound was right. Wall clock
+goes from about six minutes to seven, set by Windows either way, and 26–51 s does not justify a
+cache key's correctness surface, so the deferred caching becomes a decision not to. Signing with no
+certificate is a no-op and needs no suppression.
+
+R158 was allocated after the fact, for the same reason R154 was: the step passed on all three
+platforms, but the macOS *job* failed in the test step on `documentPropsRenderCost.test.tsx` —
+`expected 11 to be 10`. Not caused by R157, which touches no product or test code; but inserting
+32 seconds before the tests perturbs timing, and a latent race is exactly what surfaces when timing
+shifts.
+
+**Fourth instance of the same class.** `mountAndDrain` drained the mount's own commits by waiting
+two `requestAnimationFrame`s — a duration wearing a frame's clothing — while its own comment
+already named the reason that cannot work: CodeMirror's setup is *effect-driven*, not frame-driven,
+and has no obligation to land inside them. When it lands late, its commit arrives after the counters
+are reset and is charged to the scenario. It now drains until the total commit count stops moving.
+
+The recurring tell is worth stating once, since this is the fourth: **a helper whose comment
+describes something asynchronous while its body waits a fixed amount of time.** R140's
+`flushReparse`, R152's missing `waitForOverflowButtons`, R154's two, and now this.
 
 ## R156 — a Find result marked stale after it had been recomputed · built
 
