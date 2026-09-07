@@ -208,6 +208,36 @@ every cross-reference in `docs/` for no gain.
 
   **If the review finds nothing, say so** in the topic document's results section. A silent review
   is indistinguishable from one that never happened.
+- **Every change reaches `main` through a pull request, squash-merged. `main` is never pushed to
+  directly.** The branch is `r<n>-<slug>`, named for the **lowest** `R` id it carries — the same
+  rule the plan document's filename follows, so a topic covering R151–R153 is one plan, one branch,
+  one pull request:
+
+  ```bash
+  git switch -c r151-ci-matrix
+  # ... work, review per R id, commit ...
+  gh pr create --fill && gh pr merge --squash --delete-branch
+  ```
+
+  **The reason is that CI runs before `main`, not after it.** Of the first ten commits on the
+  published history, five were fixes for problems the pipeline found *after* they had landed, and
+  three of those only when a `v*` tag started a release build — each costing a deleted draft release
+  and a moved tag. On a branch that costs nothing; on `main` every one of them is a commit saying
+  the project broke itself.
+
+  The review agreement above is unchanged and is not what the squash replaces: **review per `R` id,
+  before the branch's own commits**, and name every id in the squash message. Its stated purpose —
+  that each commit on `main` represents work someone looked at, with no "fix the bug I introduced
+  two commits ago" noise — is exactly what a squashed, reviewed branch delivers.
+
+  **No exception for documentation-only changes**, tempting as that is: `test/docsStatus.test.ts`
+  fails when a plan document's marker disagrees with `docs/TASKS.md`'s board, so a docs commit can
+  redden CI precisely like a code one.
+
+  **And no GitHub issue per task.** `docs/TASKS.md` is the single source of truth for status; an
+  issue tracker would be a second one, which is the four-places problem that rule already exists to
+  fix. The `R` id is the ticket, the plan document is its description, and the pull request is where
+  the discussion goes.
 - **When a round lands, put its story in `docs/LOG.md`** and add a row to `CLAUDE.md`'s status
   table — not a paragraph. A line joins `docs/FINDINGS.md` only if the work produced a trap that
   will bite someone working on something unrelated; most rounds produce none. This is the rule
