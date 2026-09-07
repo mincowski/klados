@@ -1,16 +1,71 @@
-# NodePad — build log
+# Klados — build log
 
 What was built, when, and what it turned out to cost. **Newest first.** Append-only: entries are
 never rewritten, only corrected in place with the correction visible.
 
 **Nobody reads this file end to end.** It is archaeology — the answer to "why is this like this?"
 and "did someone already try that?". For the small set of things worth knowing *before* touching
-anything, read `docs/FINDINGS.md` instead; for what's built right now, `CLAUDE.md`'s status table.
+anything, read `docs/FINDINGS.md` instead; for what's built right now, `docs/TASKS.md`'s board.
+
+**Entry titles are historical too.** An entry describing a round that was open when it was written
+keeps saying so; where a later round closed it, the correction is added in place and visible rather
+than the original being edited away.
 
 Moved out of `CLAUDE.md` by R32, which found that section had grown to 419 of that file's 615
 lines — read in full at the start of every session, and never once pruned.
 
 ---
+
+## R140–R142 — publication: a fresh history, tagged releases, a README for users · built ⚠ (one item owed)
+
+The application went public as `mincowski/klados` at `v1.0.0`, with binaries for Windows, both
+Macs and Linux.
+
+R140 reset the published history. The mechanism was an **orphan commit**, not `filter-repo` and not
+`rm -rf .git`: same published result, reversible until `gc`, and incapable of losing local config.
+`filter-repo` was rejected for a reason that is about content rather than mechanics — rewriting the
+author field leaves the commit messages, which were a dated development diary written for an
+audience of one. Publishing a fresh history is a different decision from rewriting an old one, and
+this was the first. The 377 pre-reset commits were bundled to `klados-prehistory.bundle` and
+verified restorable (22 of 22 doc-referenced hashes resolvable) *before* anything destructive ran;
+that bundle is now the only copy.
+
+The finding worth keeping: **grep the working tree, not just the log.** A contact address survived
+every commit-graph rewrite because it was file *content* — an `authors = [...]` line inside a
+Cargo-shaped TOML fixture. Addresses live in fixtures, changelogs, mailmaps and `package.json`
+author fields, and none of them care what happens to the commit graph.
+
+R141 is the tagged-release workflow. `electron-builder.yml` was already complete, so only the
+workflow was new — but four non-obvious failure modes each quietly produce a bad first release, and
+three of them were hit for real. The tag and `package.json` version are **not connected** —
+electron-builder names artifacts from one and GitHub names the release from the other — so the job
+asserts they match. `macos-latest` is arm64, so Intel Macs get nothing without an explicit second
+job; the two are named `-mac` and `-mac-intel` rather than by architecture, because that is what
+makes the download obvious to someone who does not know what is inside their Mac. Splitting them
+also required `-c.dmg.artifactName` per job, since an `artifactName` pattern has no conditional —
+and the round *before* that split shipped both architectures under one filename, a collision found
+only because the asset list looked wrong. `snap` was dropped (a `.snap` outside the Store needs
+`--dangerous`), as were the zips and blockmaps, taking the asset list from nine to five.
+Everything is unsigned, which is a README instruction rather than a footnote.
+
+Four release attempts were needed, and none of the failures was in product code: an `npm ci`
+lockfile that had been out of sync invisibly because `npm ci` had never run; three test timeouts on
+Windows and macOS, the first platforms other than Ubuntu to run the suite; the dmg name collision;
+and a fixed 40 ms sleep in `documentSession.test.ts` that lost its race on a Windows runner and was
+replaced with a quiescence wait. That last pair is what R151 exists to catch on a branch instead.
+
+R142 rewrote the README for people who will never read `docs/`. Six defects were found against the
+tree, two of them false claims: it still said *"Pre-alpha — not yet usable"*, `[M0-PLAN.md]` was a
+broken link, and *"Third-party notices are generated at build time"* was false — no script anywhere
+generated it. The AI-authorship note has **no standard clause** to adopt: no SPDX identifier, no OSI
+text, no established `AI-DISCLOSURE.md` convention. The wording written for it names what the human
+did rather than claiming "human oversight", and does not apologize.
+
+`CONCEPT.md` §13's first open question is closed. GitHub, npm and the trademark registers were all
+checked before the push — DPMA and EUIPO by hand in classes 9 and 42, since every register refuses
+programmatic queries — and no conflicting mark was found. Checking cost minutes; a collision found
+after a tagged release would have cost the repository URL, the release URLs, `appId`,
+`productName`, every screenshot and every external link.
 
 ## R145–R150 — CSV · built ⚠ (two items owed)
 
@@ -48,7 +103,7 @@ single-extra-field case, already a Warning, is unaffected), and a `columns × ro
 memory projection was not built — the existing generic file-size-based `confirmSize` gate already
 covers CSV today, measured close to the real multiplier.
 
-## R144 — NodePad becomes Klados · built ⚠ (R140–R142, the rest of the publication document, are not started)
+## R144 — NodePad becomes Klados · built ⚠ (R140–R142, the rest of the publication document, are not started — **since corrected: they landed, see the R140–R142 entry above**)
 
 `CONCEPT.md` §13's name-availability question finally got checked and NodePad failed it three ways
 (D-086): Google corrects the search to *Notepad*, `mskayyali/nodepad` is an active 1.1k-star

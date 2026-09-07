@@ -2,7 +2,10 @@
 
 <!-- status: built-caveat -->
 
-**R144 (§7, the rename) built — see §9's Results. R140–R142 are still open.** Register:
+**All four built — see §9's Results.** R144 (the rename) landed first and separately; R140–R142
+followed and put the application on GitHub as `mincowski/klados` at `v1.0.0`. One item is still
+owed, in `docs/TASKS.md`'s Owed table: `TitleBar.css`'s ink-alignment measurements were carried
+over from the old "N" glyph and never re-taken. Register:
 `docs/TASKS.md`. The round `ci.yml`'s own header comment defers to by name — *"Deliberately not in
 scope: release/packaging automation, signing or notarization. Those belong to the publication
 round."* Four tasks: reset the published history and scope the identity (R140), build and publish
@@ -594,9 +597,12 @@ makes preserving it more important after the reset, not less.
 14. The DPMA and EUIPO register searches for `Klados` in classes 9 and 42 have been **run by a
     human** and the outcome recorded in `CONCEPT.md` §13 either way (§6).
 
-## 9. Results — §7 (R144) only
+## 9. Results
 
-**Built.** R140–R142 are unstarted; this covers only the rename.
+**All four built.** §9a below covers R144 (the rename), which landed first and separately; §9b
+covers R140–R142, which followed.
+
+### 9a. R144 — the rename
 
 **7a, the mark.** The four SVGs (`mark.svg`, `mark-16.svg`, `icon.svg`, `icon-macos.svg`,
 `icon-flat.svg` — one more than §7a's table names, kept in sync since it shares the same path data)
@@ -672,5 +678,59 @@ or against an unmodified `git stash` of the tree — pre-existing environment fl
 parallel load, not something this round introduced.
 
 **Not done, and not silently dropped.** Criterion 14 (the DPMA/EUIPO manual register search) is a
-human step this session cannot perform and remains open. R140–R142 are untouched.
+human step this session cannot perform and remains open. R140–R142 are untouched. *[Both since
+closed — see §9b. The register search was run by a person and found nothing.]*
+
+**One line above is worth re-reading in light of R151–R153**, because it was right about the
+symptom and wrong about the cause. The "small, *different* set of failures … in
+`documentSession.test.ts` … `namespaceResolution.test.ts`", written off here as *"pre-existing
+environment flakiness under full parallel load, not something this round introduced"*, were three
+real defects: a fixed 40 ms sleep (fixed at R140's own release round), a missing
+`waitForOverflowButtons()` (R152) and a 2× performance ratio that a loaded runner exceeds (R153).
+Passing in isolation is what a race looks like, not what an environment problem looks like — and
+each one went on to fail a release build or a CI run afterwards.
+
+### 9b. R140–R142 — the publication itself
+
+**Built.** The application is public as `mincowski/klados` at `v1.0.0`, with binaries for Windows,
+both Macs and Linux.
+
+**R140, the history.** Reset via the orphan commit §2 chose, with the 377-commit prehistory bundled
+and verified restorable — 22 of 22 doc-referenced hashes resolvable — *before* anything destructive
+ran. That bundle is now the only copy of it. §2's own warning proved to be the load-bearing one:
+**grep the working tree, not just the log.** The contact address in `test/fixtures/toml/cargo-style.toml`
+is file *content*, not commit metadata, and would have survived every rewrite; it was replaced with
+`klados@example.com`. Published identity is `mincowski` /
+`8300485+mincowski@users.noreply.github.com`, set `--local` before the orphan commit existed, and
+the prior identity verified absent from the published tree.
+
+**R141, the releases.** Three of §3's four predicted failure modes were hit for real, plus one it
+did not predict. The tag-versus-`package.json` assertion earns its place. `macos-latest` is arm64,
+so the Intel job is mandatory — and the two are named `-mac` / `-mac-intel` rather than by
+architecture, because that is what a Mac owner can act on without knowing what is inside their
+machine. **The unpredicted one: a dmg filename collision.** `dmg.artifactName` lacked `${arch}`, so
+both architectures wrote the same filename; an `artifactName` pattern has no conditional, which is
+why macOS is two jobs each overriding `-c.dmg.artifactName` rather than one job passing both
+`--arm64 --x64`. It surfaced only because the asset list looked wrong — two zips, one dmg.
+
+Four attempts were needed and **none of the failures was in product code**: an `npm ci` lockfile
+that had been out of sync invisibly, because `npm ci` had never run; three test timeouts on Windows
+and macOS, the first platforms other than Ubuntu ever to run the suite; the collision; and the
+40 ms sleep. The middle two are why `docs/plans/R151-ci-matrix.md` exists.
+
+Assets went from nine to five — zips, blockmaps and `snap` all dropped. Everything is unsigned,
+documented in the README rather than footnoted.
+
+**R142, the README.** Written users-first, with all six §4 defects corrected including the two false
+claims. The AI-authorship note is bespoke because §5's search found nothing to adopt. Screenshot is
+a single image split down the centre, light on the left and dark on the right, at the maintainer's
+direction. Contributing accepts pull requests and names the five load-bearing architectural rules a
+contributor would otherwise trip over.
+
+**Criterion 14 is met.** The DPMA and EUIPO searches in classes 9 and 42 were run by a person and
+found no conflicting mark; `CONCEPT.md` §13 records the outcome.
+
+**Still owed**, and carried in `docs/TASKS.md`'s Owed table rather than dropped: `TitleBar.css`'s
+ink-alignment measurements still cite the old "N" glyph's pixel values, never re-taken against the
+running app after the mark changed.
 

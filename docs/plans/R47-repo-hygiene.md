@@ -1,8 +1,10 @@
 # R47–R50 — making the repo's own signals trustworthy
 
-<!-- status: built-caveat -->
+<!-- status: built -->
 
-**Built.** Register: `docs/TASKS.md`.
+**Built.** Register: `docs/TASKS.md`. R49's workflow had never actually run when this was
+written, which is why it carried a caveat; it has since run on every commit of the published
+history, and on three platforms since R151.
 
 Prompted by a pre-publication audit. None of this changes what the app does; all of it changes
 whether the repo can be believed — by CI, by a contributor, and by the next agent reading a results
