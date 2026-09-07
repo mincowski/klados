@@ -177,11 +177,49 @@ function resetStats(stats: Record<Pane, Stats>): void {
   }
 }
 
+/** Total commits recorded across every pane. */
+function totalRenders(stats: Record<Pane, Stats>): number {
+  return PANES.reduce((sum, pane) => sum + stats[pane].count, 0)
+}
+
 /** Every pane commits once on mount (plus, for `raw`, CodeMirror's own
  * effect-driven setup) — that's not the number under test, so it's drained
- * before each scenario starts recording. */
+ * before each scenario starts recording.
+ *
+ * R158 (`docs/plans/R157-package-check.md` §8): drain until the commits stop,
+ * not for two frames and a hope. `paint` waits two `requestAnimationFrame`s,
+ * which is a *duration* wearing a frame's clothing — and the comment above
+ * already names the reason it is not enough, since CodeMirror's setup is
+ * **effect-driven** rather than frame-driven and has no obligation to land
+ * inside them. When it lands late, its commit arrives after `resetStats` and
+ * is counted against the scenario: the macOS runner reported
+ * `expected 11 to be 10` on a ten-replacement burst.
+ *
+ * Waiting for the count to stop moving asks the actual question — "has the
+ * mount finished committing?" — and costs two extra frames when it already
+ * had. */
 async function mountAndDrain(stats: Record<Pane, Stats>): Promise<void> {
   await paint(<Harness document={baseDocument()} stats={stats} />)
+
+  const QUIET_FRAMES = 3
+  const TIMEOUT_MS = 5000
+  const deadline = Date.now() + TIMEOUT_MS
+  let last = totalRenders(stats)
+  let quiet = 0
+  while (quiet < QUIET_FRAMES) {
+    if (Date.now() > deadline) {
+      throw new Error(`mountAndDrain: panes still committing after ${TIMEOUT_MS}ms`)
+    }
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    const now = totalRenders(stats)
+    if (now === last) {
+      quiet += 1
+    } else {
+      last = now
+      quiet = 0
+    }
+  }
+
   resetStats(stats)
 }
 

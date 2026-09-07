@@ -16,6 +16,57 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R157–R158 — CI packages the app, instead of only bundling it · built
+
+`ci.yml` ran `electron-vite build`, which is a bundler: it produces `out/` and stops. It never
+invoked electron-builder, so **nothing on a pull request had ever executed a line of the packaging
+toolchain.**
+
+Found the hard way rather than by audit. Dependabot opened two security PRs — `fast-uri` under
+`ajv`, `@xmldom/xmldom` under `plist`, both beneath `app-builder-lib` — and both went green on all
+three platforms. The natural reading, that 1,834 passing tests made the bumps safe, was wrong: the
+suite cannot reach either package. Green meant *the dependency tree still installs*. The only thing
+that exercised them was `release.yml`'s `npm run package`, on a tag — after a version had been
+committed to, which is exactly the ordering R151 exists to correct.
+
+`--dir` is the boundary: config validation through ajv, asar and file copy, the Windows executable
+rename, macOS `Info.plist` through plist — with both prompting packages verified reachable by
+reading `node_modules` rather than inferred from the dependency tree — while skipping NSIS, dmg,
+AppImage and fpm. Full packaging was rejected with its reason stated: installer configuration only
+changes in deliberate release rounds that run the real thing anyway, and the failure modes differ
+in kind, a toolchain regression breaking every target where an installer-naming defect breaks one
+filename. It would not have caught R141's dmg collision, which the asset-list check already did.
+
+Measured at 123 s locally, producing `Klados.exe` — so the executable rename is real rather than
+merely configured. Caching the Electron download is deliberately left out: it would cut most of
+that, but a cache key is a correctness surface of its own and there is no point tuning a step
+before its true cost has been seen once.
+
+One uncertainty flagged rather than assumed: Windows logged `signing with signtool.exe` locally and
+exited 0, but a local machine and a runner need not share a signing environment.
+
+The run answered everything. The step costs 26 s on ubuntu, 32 s on macOS, 51 s on Windows — far
+below the 123 s the 2013 desktop measured, so treating that as an upper bound was right. Wall clock
+goes from about six minutes to seven, set by Windows either way, and 26–51 s does not justify a
+cache key's correctness surface, so the deferred caching becomes a decision not to. Signing with no
+certificate is a no-op and needs no suppression.
+
+R158 was allocated after the fact, for the same reason R154 was: the step passed on all three
+platforms, but the macOS *job* failed in the test step on `documentPropsRenderCost.test.tsx` —
+`expected 11 to be 10`. Not caused by R157, which touches no product or test code; but inserting
+32 seconds before the tests perturbs timing, and a latent race is exactly what surfaces when timing
+shifts.
+
+**Fourth instance of the same class.** `mountAndDrain` drained the mount's own commits by waiting
+two `requestAnimationFrame`s — a duration wearing a frame's clothing — while its own comment
+already named the reason that cannot work: CodeMirror's setup is *effect-driven*, not frame-driven,
+and has no obligation to land inside them. When it lands late, its commit arrives after the counters
+are reset and is charged to the scenario. It now drains until the total commit count stops moving.
+
+The recurring tell is worth stating once, since this is the fourth: **a helper whose comment
+describes something asynchronous while its body waits a fixed amount of time.** R140's
+`flushReparse`, R152's missing `waitForOverflowButtons`, R154's two, and now this.
+
 ## R156 — a Find result marked stale after it had been recomputed · built
 
 One word — `searchStore.ts` testing `document.dirty` where its own comment says *the buffer has
