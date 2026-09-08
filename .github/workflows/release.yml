@@ -117,3 +117,57 @@ jobs:
           # finds in its keychain and fail confusingly. Being explicit turns
           # that into an unsigned build, which is what the README documents.
           CSC_IDENTITY_AUTO_DISCOVERY: false
+
+  # R167 (`docs/plans/R164-release-security-hardening.md` §5) — publish a
+  # SHA-256 for every artifact.
+  #
+  # The builds are unsigned by design (no certificates, `notarize: false`,
+  # documented in the README) and there is no auto-updater, so the download *is*
+  # the whole trust decision. An unsigned artifact with no integrity signal at
+  # all gives a downloader nothing to check against a tampered mirror; a
+  # published hash costs nothing and gives them something.
+  #
+  # **One job over the assembled release, not a step on each runner.** The plan
+  # offered either; per-runner is three shells with three output formats
+  # (`sha256sum`, `shasum -a 256`, `Get-FileHash`) plus a fourth step to merge
+  # them, and it would hash what each runner *built* rather than what was
+  # actually *published* — which is the thing a downloader compares against.
+  # This reads the release back and hashes that.
+  checksums:
+    name: checksums
+    needs: release
+    # A tag is what creates the release these assets live on; a
+    # `workflow_dispatch` run has no release to read back or upload to.
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Hash every published asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # `gh` needs the repository when the workflow checks out nothing.
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p assets
+          # Draft releases are addressable by tag for anyone with write access,
+          # which is what `permissions: contents: write` above grants.
+          gh release download "$GITHUB_REF_NAME" --dir assets
+
+          cd assets
+          # Exclude the sums file itself so a re-run is idempotent rather than
+          # hashing its own previous output.
+          rm -f SHA256SUMS.txt
+          shopt -s nullglob
+          files=(*)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::no release assets found for $GITHUB_REF_NAME — nothing to hash"
+            exit 1
+          fi
+          # The standard `<hash>␣␣<filename>` format, so `sha256sum -c` and
+          # `Get-FileHash` comparison both work without anyone parsing anything.
+          sha256sum "${files[@]}" > SHA256SUMS.txt
+          echo "hashed ${#files[@]} assets:"
+          cat SHA256SUMS.txt
+
+          gh release upload "$GITHUB_REF_NAME" SHA256SUMS.txt --clobber
