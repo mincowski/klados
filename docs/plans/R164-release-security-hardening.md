@@ -443,17 +443,53 @@ Read as `git diff` per id. Beyond §8b, it found:
   denial logs.
 - The plan's "14 handlers" is 13 (§8a).
 
+### 8e. What the owed manual pass actually found
+
+The §9 items were run rather than left standing, and two of the three produced something.
+
+**A dragged link is not a file, and the empty path was never checked.** Dropping a link on the tab
+strip opened a new tab reading `ENOENT: no such file or directory, stat ''`. Chromium hands over a
+`File` object for some dragged content, and `webUtils.getPathForFile` answers `''` for anything not
+from the filesystem. **Inherited, not introduced** — `Layout.tsx` had the same two lines and the
+same missing check — but the reach changed: while the handler covered only `.layout`, a link
+dropped on the chrome never got that far. **Widening a guard exposed a latent defect behind it**,
+which is worth stating as its own small lesson. Fixed, with a test.
+
+**§2a.2 overstated the unguarded region, and the correction is in the app's favour.** The title bar
+is `-webkit-app-region: drag` except for its `no-drag` button islands, and an OS drag region is not
+a DOM drop target at all — Chromium hands it to the window manager, which is why dropping there
+shows a forbidden cursor and delivers no event. So the "roughly 64px of window chrome" was never
+uniformly a drop target: **the empty title bar could not have navigated**. What *was* genuinely
+reachable and unguarded is the tab strip and the title bar's own icon buttons, both of which the
+window-level guard now covers.
+
+**File watching is not broken, and the report that it was is why it now has real coverage.** The
+manual pass found neither watcher behaviour firing, which could plausibly have been this round's
+sender guard refusing `document:watch`. It was not: `mainElectron.test.ts` now drives the whole
+seam against the real app — watch a file from the page, change it from the test process, wait for
+the renderer to hear about it — and a second test covers the **atomic save** (write a temp file,
+rename it over) that editors actually perform, since that is a different event shape and not
+something to assume `fs.watch` handles. Both pass. The likeliest explanation for the manual result
+is the *instructions*: the watch check followed the Save As check, which retargets the tab, so the
+app was watching the new file while the original was being edited.
+
+**And R163's own lint rule caught two sleeps written in these new tests** — one round after it was
+built, against its author. Both were superstition: `await api.document.watch(...)` already resolves
+after `fs.watch` is registered, so a delay before changing the file guaranteed nothing the await
+had not. Deleted rather than named.
+
 ## 9. Owed
 
-- **R164 — manual confirmation on a real build** that dropping a *link* on the title bar no longer
-  navigates the window. Flagged as manual by §2e from the start: native drag-drop cannot be
-  dispatched from the harness. The navigation guard is tested at the decision level and the drop
-  guard at the event level; what stays unverified is the OS gesture that produces the event.
-- **R166 — the full manual lifecycle under `sandbox: true`.** Automated coverage reaches the
-  preload surface, an IPC round trip and the document read path (`stat`, `mintReadToken`). **Save,
-  Save As, file watching and an edit cycle are not exercised.** Nothing suggests they are broken
-  and the seam they share — the contextBridge — is proven, but §4 asked for the lifecycle and this
-  is not the whole of it.
+- **R164 — re-confirm the link drop after the empty-path fix.** The first manual pass (§8e) ran
+  it and the window did **not** navigate on any surface tried — the title bar, its icons, or the
+  tab strip — but it also surfaced the empty-path `stat` defect, so the check is worth repeating
+  against the fix rather than treated as passed. Still manual for §2e's original reason: native drag-drop
+  cannot be dispatched from the harness.
+- **R166 — the manual lifecycle under `sandbox: true`, now narrower.** Open, edit, Save and
+  Save As were **run by hand and all worked**; **file watching is now automated** in both shapes
+  (direct write and atomic rename-over), so it is no longer owed at all. What remains manual is
+  only the parts a harness cannot drive: the native file dialogs Save As opens, and confirming the
+  watcher-driven *notification* renders as a notification rather than merely arriving.
 - **R167 — its first genuine exercise is the `v1.x` tag.** The dry-run covers the hashing logic;
   `gh release download` against a real draft release cannot be rehearsed without making one.
 **Not owed, resolved:** `@electron-toolkit/preload` was left declared when R166 removed its only
