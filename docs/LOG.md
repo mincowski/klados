@@ -16,6 +16,72 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R164–R167 — security hardening before the first public release · built ⚠
+
+**Plan:** `docs/plans/R164-release-security-hardening.md`
+
+A security review of the whole Electron surface ahead of the first public release, planned in one
+session and implemented in another after a second review pass over the plan itself.
+
+**The parser layer needed nothing, and that is a finding rather than an absence.** XXE stays
+literal (DOCTYPE is an opaque token, no read attempted), a six-level entity chain goes in at 529 B
+and produces 3 nodes and 122 B of store, 200 000 nested elements stop at 10 001 nodes with one
+diagnostic in 13.9 ms. Re-run before implementation rather than re-read, because "no task" is the
+claim that scopes the whole round.
+
+**The exposure was entirely in the window/IPC layer.** Nothing constrained top-level navigation —
+no `will-navigate`, no `will-redirect`, no `web-contents-created` anywhere in `src/` — while the
+preload re-exposed `window.api` on whatever origin loaded next, and the IPC behind it mints read
+tokens for any path and writes any bytes to any path. One unexpected navigation turned the renderer
+into an arbitrary file read *and* write primitive for remote content. The token model's own header
+says the token is the whole security model; that premise held only while the renderer could not be
+navigated away, and nothing enforced it.
+
+**R164** closes it three ways under one rule: an app-level navigation guard, a sender check on all
+13 `ipcMain` registrations, and a window-level drop guard. The sender check was the review's
+addition — the plan reached `will-navigate` and stopped, while `event.sender` appeared six times in
+`main/` and every use was `BrowserWindow.fromWebContents` to find a window, never to establish an
+origin. **R165** allowlists `openExternal`'s schemes and denies every web permission. **R166**
+enables the renderer sandbox. **R167** publishes a `SHA256SUMS.txt` for every release artifact.
+
+**Three of the plan's assertions turned out to be false, and finding that is most of the round's
+value.**
+
+`sandbox: true` **broke the application outright**. The plan said `@electron-toolkit/preload` was
+"bundled by electron-vite at build time, not a runtime `require`". electron-vite externalizes
+declared dependencies, so the built preload still carried `require("@electron-toolkit/preload")`,
+and a sandboxed preload resolves only a handful of built-in Electron modules — the script failed to
+load and `window.api` was `undefined`. This is precisely what the plan's own "verify-then-enable"
+framing existed to catch, and the strongest argument in the round for that framing over "flip it".
+Fixed by *removing* `electronAPI` rather than bundling it: `window.electron` had no reader anywhere
+in `src/renderer` and never had.
+
+`klados-file://` is **not** "fetchable from any script in the renderer". `index.html`'s own CSP
+(`default-src 'self'`, no `connect-src`) refuses it from page context, while the parse worker's
+bundled script carries no CSP and is unaffected. A second control on the read primitive that
+neither the plan nor the review had noticed, now pinned by a test so that widening the CSP for an
+unrelated reason cannot remove it silently. It weakens nothing: a page the renderer is *navigated
+to* carries its own CSP or none, which was the point all along.
+
+And the permission deny was **not** tidying. With the handlers removed from a real build,
+`Notification.requestPermission()` returns `granted` — the default was a capability granted
+outright, not a prompt.
+
+**Every guard was verified by breaking it.** Loosening `isAppUrl` to "protocol is `file:`" reddens
+the local-file case. Pointing `setAppUrl` at a wrong URL reddens a new real-app IPC round trip with
+*Refused `keybindings:read` from an untrusted frame*, while both pre-existing real-app tests still
+pass — which is exactly why that test had to be written: **the sender guard is the one change in
+the round that can brick the application**, and no unit test of the predicate could have seen it,
+because the predicate would be entirely correct.
+
+Suite 1,837 → 1,857. Three things owed, none of them a failure: two manual confirmations the
+harness cannot make, and a workflow whose first real exercise is the tag. A fourth — the dependency
+R166 orphaned — was resolved inside the round rather than carried: `@electron-toolkit/preload`
+removed outright, since reducing dependencies is exactly R155's point and a dead one is a permanent
+Dependabot signal rather than a cosmetic problem.
+
+---
+
 ## R159–R163 — waits that measure a duration instead of a condition · built
 
 **Plan:** `docs/plans/R159-fixed-duration-waits.md`

@@ -32,7 +32,7 @@
  * mint (a dialog opened but never followed through, or a renderer that
  * crashed before fetching) doesn't linger.
  */
-import { dialog, ipcMain, protocol, BrowserWindow, app } from 'electron'
+import { dialog, protocol, BrowserWindow, app } from 'electron'
 import { basename } from 'path'
 import { stat } from 'fs/promises'
 import { watch as fsWatch } from 'fs'
@@ -40,6 +40,10 @@ import { randomUUID } from 'crypto'
 import type { DocumentStat, OpenDialogResult } from '../preload/api'
 import { createReadTokenRegistry } from '../core/readTokenRegistry'
 import { handleReadTokenRequest } from '../core/readTokenProtocol'
+// R164: every handler below goes through the sender guard rather than
+// `ipcMain` directly — see `trustedRenderer.ts` for why the navigation
+// guard and this one both exist.
+import { secureHandle } from './trustedRenderer'
 import { statDocument, writeDocument } from '../core/mainDocumentIO'
 import { createDocumentWatcherRegistry } from '../core/documentWatchers'
 
@@ -82,7 +86,7 @@ const READ_TOKEN_TTL_MS = 5 * 60 * 1000
 
 const readTokens = createReadTokenRegistry(READ_TOKEN_TTL_MS, Date.now, randomUUID)
 
-ipcMain.handle('document:mintReadToken', (_event, path: string): string => {
+secureHandle('document:mintReadToken', (_event, path: string): string => {
   return readTokens.mint(path)
 })
 
@@ -96,7 +100,7 @@ export function registerReadTokenProtocol(): void {
   protocol.handle(READ_TOKEN_SCHEME, (request) => handleReadTokenRequest(request, readTokens))
 }
 
-ipcMain.handle('document:openDialog', async (event): Promise<OpenDialogResult | null> => {
+secureHandle('document:openDialog', async (event): Promise<OpenDialogResult | null> => {
   const window = BrowserWindow.fromWebContents(event.sender)
   const options: Electron.OpenDialogOptions = {
     title: 'Open Document',
@@ -118,7 +122,7 @@ ipcMain.handle('document:openDialog', async (event): Promise<OpenDialogResult | 
   return { path, fileName: basename(path) }
 })
 
-ipcMain.handle('document:stat', async (_event, path: string): Promise<DocumentStat> => {
+secureHandle('document:stat', async (_event, path: string): Promise<DocumentStat> => {
   return statDocument(path)
 })
 
@@ -134,14 +138,11 @@ ipcMain.handle('document:stat', async (_event, path: string): Promise<DocumentSt
  * *is* the file's next contents, verbatim, with no transformation left to
  * apply on the way out.
  */
-ipcMain.handle(
-  'document:write',
-  async (_event, path: string, bytes: ArrayBuffer): Promise<void> => {
-    await writeDocument(path, bytes)
-  }
-)
+secureHandle('document:write', async (_event, path: string, bytes: ArrayBuffer): Promise<void> => {
+  await writeDocument(path, bytes)
+})
 
-ipcMain.handle(
+secureHandle(
   'document:saveAsDialog',
   async (event, defaultPath: string): Promise<OpenDialogResult | null> => {
     const window = BrowserWindow.fromWebContents(event.sender)
@@ -190,7 +191,7 @@ const watchers = createDocumentWatcherRegistry({
 // to know anything about `BrowserWindow`.
 const keySenderIds = new Map<string, number>()
 
-ipcMain.handle('document:watch', async (event, path: string, key: string): Promise<void> => {
+secureHandle('document:watch', async (event, path: string, key: string): Promise<void> => {
   const senderId = event.sender.id
   keySenderIds.set(key, senderId)
   await watchers.watch(key, path, (watchedKey) => {
@@ -199,7 +200,7 @@ ipcMain.handle('document:watch', async (event, path: string, key: string): Promi
   })
 })
 
-ipcMain.handle('document:unwatch', (_event, key: string): void => {
+secureHandle('document:unwatch', (_event, key: string): void => {
   keySenderIds.delete(key)
   watchers.unwatch(key)
 })
