@@ -16,6 +16,68 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R159–R163 — waits that measure a duration instead of a condition · built
+
+**Plan:** `docs/plans/R159-fixed-duration-waits.md`
+
+Four rounds had found the same defect once each — R140's `flushReparse` (which failed the v1.0.0
+release build), R152's missing `waitForOverflowButtons`, R154's two, R158's `mountAndDrain` — and
+each had fixed the one instance in front of it. Four is not a coincidence, so this round went
+looking.
+
+**`src/` was clean, and that is a finding rather than an absence.** All 13 production timer call
+sites are deliberate debounces, timeouts and yields; `src/main`, `src/core` and `src/preload`
+contain no timers at all. The population was entirely in `test/`: **58 fixed sleeps across 24
+files**, against 12 correct waits.
+
+**Three experiments, all reverted before anything was changed.** Halving every sleep failed 7 tests
+in 4 files — under 2× headroom, the margin R153 rejected at 2.024×. Zeroing every sleep still passed
+**1,817 of 1,834**, so most of them were holding nothing up. And then the one that justified the
+round: `focusIntoContent.test.tsx` waits 250 ms under the comment *"past rawCaretSync's debounce"*,
+and it passed at 125 ms — below the debounce — and at 0 ms. So `rawCaretSync`'s `DEBOUNCE_MS` was
+raised from 200 to 200_000, disabling the feature outright, and the browser project was run in full:
+**43 files, 239 tests, all green.** The suite had no coverage of it whatsoever.
+
+**That is the second harm this defect carries, and the reason nothing had ever found one.** A sleep
+that is too short does not only flake. Where the assertion is negative, or the state is unchanged
+either way, the awaited thing never happening produces exactly the expected result — the test goes
+green and never turns red, so no round goes looking. Every previously found instance was one that
+went red.
+
+**R159** put the wait vocabulary in one place (`test/support/wait.ts`), covering quiescence only —
+`vi.waitFor` already handles predicates and reimplementing it would have been the mistake the module
+exists to prevent. It absorbed the four hand-rolled loops and **five character-identical copies of a
+60 ms `openTab`**, two of which justified their number by citing the helper R154 had already
+replaced with a quiescence loop. **The fix had reached two files; the rationale had reached five** —
+which is how this defect survives being fixed.
+
+**R160** converted the waits that gate an assertion. **R161** drained the mount in
+`tabSwitchMeasurement.test.tsx`, `documentPropsRenderCost`'s twin, which R158 had not looked at: it
+would never have gone red, it would have inflated the R30 figure it prints as its own deliverable.
+**R162** covered `rawCaretSync` for real, with the mutation as the acceptance criterion rather than
+the assertion — at `200_000` the positive test dies and the two negative ones correctly survive —
+and named the bare `}, 150)` literals in `FindBar.tsx` and `Palette.tsx` that twelve test waits had
+been coupled to by nothing but a comment. **The entire product diff for the round is three constants
+gaining names and `export`.** **R163** added the eslint gate and named the survivors.
+
+**The numbers moved the right way.** Halving every remaining duration now fails 0 where it failed 7;
+zeroing them fails 0 where it failed 17. The suite went 41.56 s → 41.41 s *with three more tests*,
+because a 5 ms poll replacing a 250 ms sleep is also faster. And the 24-file scripted rewrite that
+produced the original experiment is now a one-line edit to `SETTLE_MS` — an argument for the naming
+half that the plan had not made.
+
+**The review pass found things, and the useful ones were wrong conditions rather than wrong code.**
+Waiting for the Find bar to stop reading "Searching…" is not waiting for the search: before the
+debounce fires the store still holds the previous result, so a fresh bar already reads "No matches"
+and the wait returns having waited for nothing — ten tests failed on it, R154's *stable and
+not-yet-started are indistinguishable from outside* in a new place. Re-searching text already in the
+box produces no store change at all. A malformed path query never reaches the search store, so two
+assertions one line apart want different waits — the duration they shared is what made them look
+interchangeable. And repainting inside a poll remounts the component, destroying the pending
+debounce and the typed value, so a wait can prevent the very thing it waits for.
+
+---
+
 ## R157–R158 — CI packages the app, instead of only bundling it · built
 
 `ci.yml` ran `electron-vite build`, which is a bundler: it produces `out/` and stops. It never

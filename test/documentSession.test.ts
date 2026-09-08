@@ -13,6 +13,12 @@ import {
   type ParseClientResult
 } from '../src/core/parseClient'
 import { runParseJob, runTransformJob } from '../src/worker/parse.worker'
+import { waitForQuiet } from './support/wait'
+
+/** R163: the window a cancelled 30 ms reparse gets to wrongly fire in.
+ * Named rather than written at the call site so it reads as the deliberate
+ * negative-assertion duration it is. */
+const STALE_REPARSE_WINDOW_MS = 50
 import type { TransformClientOptions } from '../src/core/transformClient'
 import { buildRowIndex, DEFAULT_MAX_ROW_BYTES } from '../src/core/rowIndex'
 import { jsonFormatModule } from '../src/formats/json/index'
@@ -166,26 +172,11 @@ describe('createDocumentSession (D6)', () => {
    * also what keeps the "exactly one reparse" assertions meaningful, since a
    * burst that wrongly produced three would still be quiet by the time this
    * returns and the count would still catch it. */
-  async function flushReparse(session: { getSnapshot: () => unknown }): Promise<void> {
-    const QUIET_MS = 40 // the settle window the old fixed wait assumed
-    const POLL_MS = 5
-    const TIMEOUT_MS = 5000
-    const deadline = Date.now() + TIMEOUT_MS
-    let last = session.getSnapshot()
-    let quietFor = 0
-    while (quietFor < QUIET_MS) {
-      await new Promise((resolve) => setTimeout(resolve, POLL_MS))
-      const current = session.getSnapshot()
-      if (current === last) {
-        quietFor += POLL_MS
-      } else {
-        last = current
-        quietFor = 0
-      }
-      if (Date.now() > deadline) {
-        throw new Error(`flushReparse: session still changing after ${TIMEOUT_MS}ms`)
-      }
-    }
+  function flushReparse(session: { getSnapshot: () => unknown }): Promise<void> {
+    // R159: the loop moved to `test/support/wait.ts`. The 40 ms quiet window —
+    // the settle time the old fixed wait assumed — stays here, because it is a
+    // fact about *this* file's `reparseDelayMs`, not about waiting in general.
+    return waitForQuiet(() => session.getSnapshot(), { quietMs: 40, label: 'flushReparse' })
   }
 
   it('starts empty', () => {
@@ -766,7 +757,12 @@ describe('createDocumentSession (D6)', () => {
       if (mid.phase !== 'ready') throw new Error('unreachable')
       expect(mid.document.pendingSpanDeltas.length).toBeGreaterThan(0)
 
-      await new Promise((resolve) => setTimeout(resolve, 60))
+      // R160 (`docs/plans/R159-fixed-duration-waits.md` §5): this was a bare
+      // 60 ms sleep gating the positive assertion below — in the very file
+      // whose helper R154 rewrote, and one of the seven sites that failed when
+      // the review halved every sleep. The helper was three lines up the file
+      // the whole time.
+      await flushReparse(session)
 
       const after = session.getSnapshot()
       if (after.phase !== 'ready') throw new Error('unreachable')
@@ -1007,7 +1003,11 @@ describe('createDocumentSession (D6)', () => {
       expect(parseFromUrlCalls).toBe(1) // just the second document's own open
       expect(parseCalls).toBe(0) // no full reparse ever ran for either document
 
-      await new Promise((resolve) => setTimeout(resolve, 50)) // past the original 30ms window
+      // R163: **a negative assertion, so a duration is the correct tool** and
+      // this is not `SETTLE_MS` wearing a different hat — the point is to give
+      // the cancelled 30 ms reparse a window in which to wrongly fire. There is
+      // no condition for a thing that must never happen.
+      await new Promise((resolve) => setTimeout(resolve, STALE_REPARSE_WINDOW_MS))
       expect(parseFromUrlCalls).toBe(1)
       expect(parseCalls).toBe(0) // still none — the stale reparse never ran
 
@@ -1186,7 +1186,10 @@ describe('createDocumentSession (D6)', () => {
       session.applyEdit({ start: 25, end: 30, text: '9' }) // "c":33333 -> "c":9  (later position first)
       session.applyEdit({ start: 15, end: 20, text: '8' }) // "b":22222 -> "b":8
       session.applyEdit({ start: 5, end: 10, text: '7' }) // "a":11111 -> "a":7 (earliest, last)
-      await new Promise((resolve) => setTimeout(resolve, 20))
+      // R163: the last inline sleep in this file gating a positive assertion —
+      // 20 ms against a 5 ms debounce plus a graft, which is the same 4×
+      // margin every other site in this round turned out not to have.
+      await flushReparse(session)
 
       const state = session.getSnapshot()
       if (state.phase !== 'ready') throw new Error('unreachable')

@@ -52,7 +52,7 @@ describe('createDocumentWatcherRegistry', () => {
     await registry.watch('tab-1', 'C:/docs/a.json', onChange)
     fs.mtimes.set('C:/docs/a.json', 200)
     fs.watchersFor.get('C:/docs/a.json')![0]!.fire()
-    await flushMicrotasks()
+    await drainTaskQueue()
 
     expect(onChange).toHaveBeenCalledWith('tab-1')
   })
@@ -65,7 +65,7 @@ describe('createDocumentWatcherRegistry', () => {
 
     await registry.watch('tab-1', 'C:/docs/a.json', onChange)
     fs.watchersFor.get('C:/docs/a.json')![0]!.fire() // mtime unchanged
-    await flushMicrotasks()
+    await drainTaskQueue()
 
     expect(onChange).not.toHaveBeenCalled()
   })
@@ -83,7 +83,7 @@ describe('createDocumentWatcherRegistry', () => {
 
     fs.mtimes.set('C:/docs/shared.json', 200)
     fs.watchersFor.get('C:/docs/shared.json')![0]!.fire()
-    await flushMicrotasks()
+    await drainTaskQueue()
 
     expect(onChangeA).toHaveBeenCalledWith('tab-1')
     expect(onChangeB).toHaveBeenCalledWith('tab-2')
@@ -104,7 +104,7 @@ describe('createDocumentWatcherRegistry', () => {
 
     fs.mtimes.set('C:/docs/shared.json', 200)
     fs.watchersFor.get('C:/docs/shared.json')![0]!.fire()
-    await flushMicrotasks()
+    await drainTaskQueue()
 
     expect(onChangeA).not.toHaveBeenCalled()
     expect(onChangeB).toHaveBeenCalledWith('tab-2')
@@ -138,7 +138,7 @@ describe('createDocumentWatcherRegistry', () => {
     fs.watchersFor.get('C:/docs/a.json')![0]!.fire()
     fs.mtimes.set('C:/docs/b.json', 200)
     fs.watchersFor.get('C:/docs/b.json')![0]!.fire()
-    await flushMicrotasks()
+    await drainTaskQueue()
 
     expect(onChange).toHaveBeenCalledTimes(1)
     expect(onChange).toHaveBeenCalledWith('tab-1')
@@ -194,13 +194,26 @@ describe('createDocumentWatcherRegistry', () => {
     // The old (closed) watcher's callback still fires late — must not
     // clobber the fresh entry's own baseline or spuriously notify tab-2.
     staleWatcher.fire()
-    await flushMicrotasks()
+    await drainTaskQueue()
 
     expect(onChange).not.toHaveBeenCalled()
   })
 })
 
-async function flushMicrotasks(): Promise<void> {
+/**
+ * R160 (`docs/plans/R159-fixed-duration-waits.md` §5): renamed from
+ * `flushMicrotasks`, which is what it was called and not what it did — the body
+ * is two *macrotask* hops. The behaviour was right and the name was wrong,
+ * which is this round's failure mode with the halves swapped.
+ *
+ * A macrotask boundary drains the whole microtask queue, and a watcher's
+ * `fire()` handler awaits a real `stat` before deciding, so two turns cover the
+ * registration and the decision. **It stays a drain rather than becoming a
+ * condition because half these assertions are negative** — `not.toHaveBeenCalled`
+ * has no condition to wait for, and giving the handler a bounded number of real
+ * turns to misbehave in is the correct tool for it.
+ */
+async function drainTaskQueue(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0))
   await new Promise((resolve) => setTimeout(resolve, 0))
 }

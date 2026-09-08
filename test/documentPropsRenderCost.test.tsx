@@ -35,6 +35,7 @@ import { RawContent } from '../src/renderer/components/Raw/Raw'
 import { ScrubberContent } from '../src/renderer/components/Scrubber/Scrubber'
 import { ReadyStatus } from '../src/renderer/components/StatusBar/StatusBar'
 import type { OpenDocument } from '../src/renderer/session/documentSession'
+import { waitForQuietFrames } from './support/wait'
 // Static, once per file — see `test/statusBar.test.tsx`'s own comment on
 // why command registration can't be reset-and-reimported per test; several
 // panes call `getCommand` and expect the registry populated.
@@ -200,26 +201,9 @@ function totalRenders(stats: Record<Pane, Stats>): number {
  * had. */
 async function mountAndDrain(stats: Record<Pane, Stats>): Promise<void> {
   await paint(<Harness document={baseDocument()} stats={stats} />)
-
-  const QUIET_FRAMES = 3
-  const TIMEOUT_MS = 5000
-  const deadline = Date.now() + TIMEOUT_MS
-  let last = totalRenders(stats)
-  let quiet = 0
-  while (quiet < QUIET_FRAMES) {
-    if (Date.now() > deadline) {
-      throw new Error(`mountAndDrain: panes still committing after ${TIMEOUT_MS}ms`)
-    }
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
-    const now = totalRenders(stats)
-    if (now === last) {
-      quiet += 1
-    } else {
-      last = now
-      quiet = 0
-    }
-  }
-
+  // R159: the loop moved to `test/support/wait.ts` — `tabSwitchMeasurement.
+  // test.tsx` needs the same drain for the same reason (R161).
+  await waitForQuietFrames(() => totalRenders(stats), { label: 'mountAndDrain' })
   resetStats(stats)
 }
 

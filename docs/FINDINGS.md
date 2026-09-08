@@ -140,10 +140,31 @@ description.
 
 ## Recurring mistakes this project actually makes
 
-**Measuring a component cleanly while leaving the pipeline around it unmeasured. Four instances so
+**Measuring a component cleanly while leaving the pipeline around it unmeasured. Five instances so
 far**: M0's row-index pre-scan claim, M2's `isNumericColumn` (1522 ms, absent from its own results
-table), the M3 splice timed without its index rebuilds, and M5c's J1 — the first where a *review
-fix* caused it rather than found it. Before quoting a figure, check what it excludes.
+table), the M3 splice timed without its index rebuilds, M5c's J1 — the first where a *review fix*
+caused it rather than found it — and R161's `tabSwitchMeasurement.test.tsx`, which zeroed its
+counters after two frames and so could charge CodeMirror's late mount commits to the switch it was
+measuring. Before quoting a figure, check what it excludes.
+
+**Wait for the condition, never for a duration — and a green test is not evidence the wait worked.**
+Six instances: R140, R152, R154 (two), R158, and the 58 sites R159–R163 converted. The tell is
+constant: **a helper whose comment describes something asynchronous while its body waits a fixed
+number of milliseconds.** The comment usually names the exact reason the duration cannot be right.
+
+The half worth knowing before touching anything unrelated is the *silent* one. A wait that is too
+short does not only go red. Where the assertion is negative, or the state is unchanged either way,
+the awaited thing never happening produces exactly the expected result — so the test passes, forever,
+without exercising what it claims. **`rawCaretSync` had no coverage at all**, behind a 250 ms sleep
+commented "past rawCaretSync's debounce"; raising that debounce to `200_000` left the entire browser
+project green (239 tests). If a test's value rests on something asynchronous having happened, the
+only way to know it does is to break that thing and watch the test fail.
+
+Two traps in writing the replacement, both hit in R160: **stable and not-yet-started are
+indistinguishable from outside**, so a condition must prove the work *ran* (a changed snapshot
+identity) before believing it *finished*; and **repainting inside a poll remounts the component**,
+destroying any pending debounce and typed input, so a wait can prevent the very thing it waits for.
+`test/support/wait.ts` holds the vocabulary and an eslint rule blocks new call-site durations.
 
 **Predicting a consequence is not evaluating it.** D-054's icon split named the exact side effect
 that broke it and dismissed it in the same sentence. If a plan says "this might mean X," that is a

@@ -25,8 +25,15 @@ export const programmaticSelection = Annotation.define<true>()
 /** Idle time before a caret move resolves to a selection — long enough
  * that fast keyboard/mouse repositioning (arrow-key repeats, a drag)
  * doesn't fire a resolution per intermediate position, short enough that
- * settling on a spot feels immediate. */
-const DEBOUNCE_MS = 200
+ * settling on a spot feels immediate.
+ *
+ * R162 (`docs/plans/R159-fixed-duration-waits.md` §7): exported, because it was
+ * module-private and every test that cared about it wrote its own guess instead
+ * — `focusIntoContent.test.tsx` waited 250 ms "past rawCaretSync's debounce",
+ * a 1.25× margin over a number it had no way to name, and passed at 125 ms
+ * because it was not really testing this at all. A test that must express a
+ * duration should import the number rather than copy it. */
+export const CARET_SYNC_DEBOUNCE_MS = 200
 
 /**
  * `getWindow` is called fresh at the moment the debounce timer fires, not
@@ -69,7 +76,7 @@ export function rawCaretSyncExtension(
         // their cursor).
         const store = getStore()
         selectNode(store, nodeContainingOffset(store, offset), { moveCaret: false })
-      }, DEBOUNCE_MS)
+      }, CARET_SYNC_DEBOUNCE_MS)
     },
     destroy() {
       disposed = true

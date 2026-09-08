@@ -27,7 +27,13 @@ import { runParseJob } from '../src/worker/parse.worker'
 import { resetContextForTests } from '../src/renderer/commands/context'
 import type { KladosApi } from '../src/preload/api'
 import type { DocumentSessionDeps } from '../src/renderer/session/documentSession'
-import { createTab, getSessionFor, resetTabsForTests } from '../src/renderer/session/tabs'
+import {
+  createTab,
+  getActiveSession,
+  getSessionFor,
+  resetTabsForTests
+} from '../src/renderer/session/tabs'
+import { POLL_MS, TIMEOUT_MS } from './support/wait'
 import { Raw } from '../src/renderer/components/Raw/Raw'
 import '../src/renderer/styles/tokens.css'
 import '../src/renderer/components/Raw/Raw.css'
@@ -136,8 +142,25 @@ async function openTab(text: string): Promise<void> {
   const tabId = createTab(depsFor(text))
   await getSessionFor(tabId)!.openPath('C:/docs/edit.xml')
   await paint()
-  await new Promise((resolve) => setTimeout(resolve, 60))
+  // R159 (`docs/plans/R159-fixed-duration-waits.md`): the session ready *and*
+  // CodeMirror mounted — a condition, not the 60 ms this file shared verbatim
+  // with four others.
+  await waitForEditorMounted()
   await paint()
+}
+
+async function waitForEditorMounted(): Promise<void> {
+  await vi.waitFor(
+    () => {
+      if (getActiveSession().getSnapshot().phase !== 'ready') {
+        throw new Error('waitForEditorMounted: session is not ready')
+      }
+      if (container.querySelector('.cm-content') === null) {
+        throw new Error('waitForEditorMounted: CodeMirror has not mounted')
+      }
+    },
+    { interval: POLL_MS, timeout: TIMEOUT_MS }
+  )
 }
 
 function editorViewIn(el: HTMLElement): EditorView {

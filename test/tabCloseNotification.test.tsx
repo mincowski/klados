@@ -22,6 +22,7 @@ import {
   getTabIds,
   resetTabsForTests
 } from '../src/renderer/session/tabs'
+import { POLL_MS, TIMEOUT_MS } from './support/wait'
 import { resetNotificationsForTests } from '../src/renderer/notifications/notificationStore'
 import { Notifications } from '../src/renderer/notifications/Notifications'
 import { TabStrip } from '../src/renderer/components/TabStrip/TabStrip'
@@ -193,8 +194,14 @@ describe('the dirty-close prompt, end to end (R26)', () => {
 
     const buttons = [...container.querySelectorAll<HTMLButtonElement>('.notification-action')]
     buttons.find((b) => b.textContent === 'Save')!.click()
-    // The save is async — wait for it to actually land rather than racing.
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    // R160 (`docs/plans/R159-fixed-duration-waits.md` §5): the comment here
+    // used to say "wait for it to actually land rather than racing" above one
+    // macrotask hop, which is a duration however short. The save landing *is*
+    // the condition, so wait for it.
+    await vi.waitFor(() => expect(api.document.write).toHaveBeenCalled(), {
+      interval: POLL_MS,
+      timeout: TIMEOUT_MS
+    })
     await paint()
 
     expect(api.document.write).toHaveBeenCalled()

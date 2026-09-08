@@ -13,6 +13,7 @@
  * all, so it could not catch this.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { SETTLE_MS } from './support/wait'
 import { userEvent } from '@vitest/browser/context'
 import { createRoot, type Root } from 'react-dom/client'
 import { resetTabsForTests } from '../src/renderer/session/tabs'
@@ -118,7 +119,7 @@ describe('R82 §1 — keyboard navigation wins over a stationary pointer', () =>
     // a genuine move changes the selection at all, proving the gate isn't
     // permanently latched by the earlier keyboard nav.
     await userEvent.hover(options[8]!)
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await new Promise((resolve) => setTimeout(resolve, SETTLE_MS))
     await paint(<Palette />)
     expect(container.querySelector('.palette-option-active')).not.toBe(afterKeyboard)
   })

@@ -16,6 +16,7 @@
  * once `openFind()` is called, and paste handling doesn't touch the session.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { SETTLE_MS } from './support/wait'
 import { createRoot, type Root } from 'react-dom/client'
 import { FindBar } from '../src/renderer/components/Find/FindBar'
 import {
@@ -52,7 +53,7 @@ async function paint(jsx: React.ReactNode): Promise<void> {
     root.render(jsx)
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
   })
-  await new Promise((resolve) => setTimeout(resolve, 50))
+  await new Promise((resolve) => setTimeout(resolve, SETTLE_MS))
 }
 
 /** Dispatches a synthetic `paste`, and returns whether the handler called
