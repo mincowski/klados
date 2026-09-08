@@ -176,6 +176,18 @@ Two things follow, and they are cheap:
    `mainElectron.test.ts` against the real build**, not in a component harness. That file is where
    this project's blind spot ends.
 
+**And that file was launching Electron against the developer's own profile.** `electron.launch`
+with no `--user-data-dir` inherits the app's normal `userData` path — the same one an installed
+Klados uses — so the suite shared `localStorage`, the recent-files list, persisted keybindings and
+the title-bar theme with whoever ran it. Since `main.tsx` calls `beginSessionRestore()` at module
+load, **the test app reopened their documents**: a run on the machine where this was found restored
+a 10 MB XML fixture and put a real file watcher on it, which is the only reason anyone noticed.
+Two problems in one — **a test whose outcome could depend on what someone last had open**, invisible
+on CI where the profile is always fresh, which is the worst place for that difference to hide; and
+**tests writing to a real user's state**. Fixed with a temp profile per run, which also made that
+file **three times faster** (13 s → 2.1 s), since the app no longer parses a 10 MB document on every
+launch. **Any future test that launches the real app needs the same switch.**
+
 **Measuring a component cleanly while leaving the pipeline around it unmeasured. Five instances so
 far**: M0's row-index pre-scan claim, M2's `isNumericColumn` (1522 ms, absent from its own results
 table), the M3 splice timed without its index rebuilds, M5c's J1 — the first where a *review fix*
