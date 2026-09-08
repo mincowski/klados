@@ -1,6 +1,7 @@
 /**
- * R164 (`docs/plans/R164-release-security-hardening.md` §2e) — the
- * predicate behind the navigation guard and the IPC sender check.
+ * R164–R165 (`docs/plans/R164-release-security-hardening.md` §2e, §3) — the
+ * predicates behind the navigation guard, the IPC sender check and the
+ * `openExternal` allowlist.
  *
  * **This file is the piece the plan requires to go red before the guard
  * exists.** The exploit chain it defends against cannot be reproduced here —
@@ -11,7 +12,7 @@
  * pinning the test to one trigger would test the wrong thing.
  */
 import { describe, expect, it } from 'vitest'
-import { isAppUrl } from '../src/core/mainSecurity'
+import { isAllowedExternalUrl, isAppUrl } from '../src/core/mainSecurity'
 
 const DEV_URL = 'http://localhost:5173'
 const PROD_URL = 'file:///C:/Program%20Files/Klados/resources/app.asar/out/renderer/index.html'
@@ -70,5 +71,34 @@ describe('R164 — isAppUrl fails closed', () => {
     // Two `data:` URLs both have origin "null"; a plain `origin ===` test would
     // call them the same page.
     expect(isAppUrl('data:text/html,<script>1</script>', 'data:text/html,x')).toBe(false)
+  })
+})
+
+/**
+ * R165 (`docs/plans/R164-release-security-hardening.md` §3) — the
+ * `openExternal` allowlist.
+ *
+ * `setWindowOpenHandler` handed **any** URL a new-window request carried
+ * straight to `shell.openExternal`, which gives the string to the OS handler.
+ * Unreachable today, and that is the argument for fixing it now rather than
+ * later: nothing depends on the looser behaviour, so the change costs nothing
+ * to make now and would cost a round to make later, under pressure, with a
+ * real link already in the UI.
+ */
+describe('R165 — isAllowedExternalUrl', () => {
+  it('forwards the schemes a link can legitimately be', () => {
+    expect(isAllowedExternalUrl('https://github.com/mincowski/klados')).toBe(true)
+    expect(isAllowedExternalUrl('http://example.com')).toBe(true)
+    expect(isAllowedExternalUrl('mailto:someone@example.com')).toBe(true)
+  })
+
+  it('drops anything the OS would action as something other than a page', () => {
+    expect(isAllowedExternalUrl('file:///C:/Windows/System32/calc.exe')).toBe(false)
+    expect(isAllowedExternalUrl('smb://attacker.example/share')).toBe(false)
+    expect(isAllowedExternalUrl('javascript:alert(1)')).toBe(false)
+    // The scheme behind Follina (CVE-2022-30190) — a concrete reminder that
+    // "some scheme the OS knows about" is not a small set.
+    expect(isAllowedExternalUrl('ms-msdt:/id')).toBe(false)
+    expect(isAllowedExternalUrl('not a url')).toBe(false)
   })
 })

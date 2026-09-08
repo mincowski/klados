@@ -55,3 +55,27 @@ export function isAppUrl(target: string, appUrl: string): boolean {
 
   return parsedTarget.origin === parsedApp.origin && parsedTarget.origin !== 'null'
 }
+
+/**
+ * Schemes `shell.openExternal` may be handed (R165).
+ *
+ * `openExternal` gives the string to the OS handler, so without this a `file:`,
+ * `smb:` or `ms-msdt:` URL arriving through `setWindowOpenHandler` would be
+ * actioned by the OS rather than opened as a page.
+ *
+ * **Unreachable today**, which is the argument for fixing it now rather than
+ * later: the renderer has no external links, no `window.open` and no
+ * `target="_blank"`, so nothing depends on the looser behaviour and the right
+ * answer is obvious. The moment someone adds a link — or a `window.open` slips
+ * past R164's guard — this becomes the thing standing between a URL and the
+ * shell.
+ */
+const EXTERNAL_SCHEMES: readonly string[] = ['http:', 'https:', 'mailto:']
+
+export function isAllowedExternalUrl(target: string): boolean {
+  try {
+    return EXTERNAL_SCHEMES.includes(new URL(target).protocol)
+  } catch {
+    return false
+  }
+}

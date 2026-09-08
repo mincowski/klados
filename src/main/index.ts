@@ -13,7 +13,7 @@ import icon from '../../assets/build/icons/256.png?asset'
 import iconIco from '../../assets/build/icon.ico?asset'
 import { registerReadTokenProtocol } from './documents'
 import { handleWindowClose, confirmQuit as confirmQuitFlow } from '../core/mainQuitFlow'
-import { isAppUrl } from '../core/mainSecurity'
+import { isAllowedExternalUrl, isAppUrl } from '../core/mainSecurity'
 import { getAppUrl, secureHandle, secureOn, setAppUrl } from './trustedRenderer'
 
 // R26 (`R24-tabs.md` §4) — the consolidated quit flow. Windows whose
@@ -187,7 +187,13 @@ async function createWindow(): Promise<void> {
   )
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
+    // R165: `openExternal` hands the string to the OS handler, so without a
+    // scheme check a `file:`, `smb:` or `ms-msdt:` URL arriving here would be
+    // actioned by the OS. Unreachable today — the renderer has no external
+    // links, no `window.open`, no `target="_blank"` — which is exactly why it
+    // is worth fixing while the right answer is obvious and nothing depends on
+    // the looser behaviour.
+    if (isAllowedExternalUrl(details.url)) void shell.openExternal(details.url)
     return { action: 'deny' }
   })
 
@@ -271,6 +277,12 @@ app.whenReady().then(() => {
     // anything the more interesting half — a permitted first hop that lands
     // somewhere else entirely.
     contents.on('will-redirect', (event, url) => deny(event, url))
+
+    // R165: Klados reads and writes local files and does nothing else. There is
+    // no permission it could legitimately need, so every request is refused
+    // outright rather than surfaced as a prompt the user has to interpret.
+    contents.session.setPermissionRequestHandler((_wc, _permission, callback) => callback(false))
+    contents.session.setPermissionCheckHandler(() => false)
   })
 
   void createWindow()
