@@ -13,6 +13,7 @@ import {
   type ParseClientResult
 } from '../src/core/parseClient'
 import { runParseJob, runTransformJob } from '../src/worker/parse.worker'
+import { waitForQuiet } from './support/wait'
 import type { TransformClientOptions } from '../src/core/transformClient'
 import { buildRowIndex, DEFAULT_MAX_ROW_BYTES } from '../src/core/rowIndex'
 import { jsonFormatModule } from '../src/formats/json/index'
@@ -166,26 +167,11 @@ describe('createDocumentSession (D6)', () => {
    * also what keeps the "exactly one reparse" assertions meaningful, since a
    * burst that wrongly produced three would still be quiet by the time this
    * returns and the count would still catch it. */
-  async function flushReparse(session: { getSnapshot: () => unknown }): Promise<void> {
-    const QUIET_MS = 40 // the settle window the old fixed wait assumed
-    const POLL_MS = 5
-    const TIMEOUT_MS = 5000
-    const deadline = Date.now() + TIMEOUT_MS
-    let last = session.getSnapshot()
-    let quietFor = 0
-    while (quietFor < QUIET_MS) {
-      await new Promise((resolve) => setTimeout(resolve, POLL_MS))
-      const current = session.getSnapshot()
-      if (current === last) {
-        quietFor += POLL_MS
-      } else {
-        last = current
-        quietFor = 0
-      }
-      if (Date.now() > deadline) {
-        throw new Error(`flushReparse: session still changing after ${TIMEOUT_MS}ms`)
-      }
-    }
+  function flushReparse(session: { getSnapshot: () => unknown }): Promise<void> {
+    // R159: the loop moved to `test/support/wait.ts`. The 40 ms quiet window —
+    // the settle time the old fixed wait assumed — stays here, because it is a
+    // fact about *this* file's `reparseDelayMs`, not about waiting in general.
+    return waitForQuiet(() => session.getSnapshot(), { quietMs: 40, label: 'flushReparse' })
   }
 
   it('starts empty', () => {

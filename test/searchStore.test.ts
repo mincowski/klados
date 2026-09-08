@@ -13,6 +13,7 @@ import {
   type ParseClientResult
 } from '../src/core/parseClient'
 import { runParseJob } from '../src/worker/parse.worker'
+import { POLL_MS, TIMEOUT_MS, waitForQuiet } from './support/wait'
 import type { KladosApi } from '../src/preload/api'
 import {
   createDocumentSession,
@@ -134,30 +135,17 @@ function createSession(deps: Partial<DocumentSessionDeps> = {}): DocumentSession
  * `reparseDelayMs` these tests configure. Both throw on timeout rather than
  * returning, so a genuinely stuck store fails loudly instead of silently
  * asserting against a snapshot that never arrived.
+ *
+ * R159: both now delegate to `test/support/wait.ts` rather than carrying their
+ * own copy of the loop. The reasoning above is why the two are *different*
+ * waits, which is the part worth keeping here; the mechanics belong in one
+ * place, because a per-file copy is exactly how this defect survived being
+ * fixed four times.
  */
 type SearchSnapshotLike = { stale: boolean; complete: boolean }
 
-const POLL_MS = 5
-const TIMEOUT_MS = 5000
-
-async function flushReparse(store: { getSnapshot: () => SearchSnapshotLike }): Promise<void> {
-  const QUIET_MS = 50
-  const deadline = Date.now() + TIMEOUT_MS
-  let last = store.getSnapshot()
-  let quietFor = 0
-  while (quietFor < QUIET_MS) {
-    if (Date.now() > deadline) {
-      throw new Error(`flushReparse: store still changing after ${TIMEOUT_MS}ms`)
-    }
-    await new Promise((resolve) => setTimeout(resolve, POLL_MS))
-    const current = store.getSnapshot()
-    if (current === last) {
-      quietFor += POLL_MS
-    } else {
-      last = current
-      quietFor = 0
-    }
-  }
+function flushReparse(store: { getSnapshot: () => SearchSnapshotLike }): Promise<void> {
+  return waitForQuiet(() => store.getSnapshot(), { label: 'flushReparse' })
 }
 
 /**
@@ -165,17 +153,20 @@ async function flushReparse(store: { getSnapshot: () => SearchSnapshotLike }): P
  * flags are needed: `stale` clears when the re-run **starts**, while `complete`
  * only flips when it has produced its matches, so waiting on `stale` alone
  * returns mid-flight against an incomplete result.
+ *
+ * A named condition, so `vi.waitFor` rather than quiescence — and it returns at
+ * once when the condition already holds, which quiescence cannot do.
  */
 async function awaitReparsed(store: { getSnapshot: () => SearchSnapshotLike }): Promise<void> {
-  const deadline = Date.now() + TIMEOUT_MS
-  for (;;) {
-    const snapshot = store.getSnapshot()
-    if (!snapshot.stale && snapshot.complete) return
-    if (Date.now() > deadline) {
-      throw new Error(`awaitReparsed: not complete-and-fresh after ${TIMEOUT_MS}ms`)
-    }
-    await new Promise((resolve) => setTimeout(resolve, POLL_MS))
-  }
+  await vi.waitFor(
+    () => {
+      const snapshot = store.getSnapshot()
+      if (snapshot.stale || !snapshot.complete) {
+        throw new Error('awaitReparsed: not complete-and-fresh yet')
+      }
+    },
+    { interval: POLL_MS, timeout: TIMEOUT_MS }
+  )
 }
 
 describe('createSearchStore (G4)', () => {

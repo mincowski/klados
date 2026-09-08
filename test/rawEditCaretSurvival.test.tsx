@@ -33,7 +33,13 @@ import { runParseJob } from '../src/worker/parse.worker'
 import { resetContextForTests } from '../src/renderer/commands/context'
 import type { KladosApi } from '../src/preload/api'
 import type { DocumentSessionDeps } from '../src/renderer/session/documentSession'
-import { createTab, getSessionFor, resetTabsForTests } from '../src/renderer/session/tabs'
+import {
+  createTab,
+  getActiveSession,
+  getSessionFor,
+  resetTabsForTests
+} from '../src/renderer/session/tabs'
+import { POLL_MS, TIMEOUT_MS, waitForQuiet } from './support/wait'
 import { Raw } from '../src/renderer/components/Raw/Raw'
 import '../src/renderer/styles/tokens.css'
 import '../src/renderer/components/Raw/Raw.css'
@@ -127,11 +133,16 @@ async function paint(): Promise<void> {
   })
 }
 
-/** Long enough for a near-zero `reparseDelayMs` timer plus the fake parse's
- * own microtask chain to land — `documentSession.test.ts`'s own
- * `flushReparse` uses the same 40ms figure for the same reason. */
+/** Waits for the debounced reparse to land, by watching the session rather
+ * than by sleeping.
+ *
+ * R159 (`docs/plans/R159-fixed-duration-waits.md`): this was 60 ms, justified
+ * by a comment citing `documentSession.test.ts`'s `flushReparse` as using "the
+ * same 40ms figure for the same reason" — a helper R154 had already replaced
+ * with a quiescence loop. **The fix reached two files; the rationale had
+ * already reached five.** */
 async function flushReparse(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 60))
+  await waitForQuiet(() => getActiveSession().getSnapshot(), { label: 'flushReparse' })
   await paint()
 }
 
@@ -139,13 +150,28 @@ async function openTab(text: string): Promise<void> {
   const tabId = createTab(depsFor(text, 20))
   await getSessionFor(tabId)!.openPath('C:/docs/edit.json')
   await paint()
-  // The mount effect creates the `EditorView` synchronously once the
-  // document reaches 'ready', but a larger document's own open pipeline can
-  // still be settling (React commit timing) beyond what two rAFs cover —
-  // an extra real tick before the first `.cm-content` lookup avoids a false
-  // "not mounted yet" read, same reasoning `flushReparse` uses below.
-  await new Promise((resolve) => setTimeout(resolve, 60))
+  // R159: the mount effect creates the `EditorView` synchronously once the
+  // document reaches 'ready', but the open pipeline can still be settling
+  // beyond what two rAFs cover. That is a condition, not a duration — wait for
+  // both halves of it and return the moment they hold.
+  await waitForEditorMounted()
   await paint()
+}
+
+/** The session is ready *and* CodeMirror is in the DOM. Both, because either
+ * alone is reachable while the other is not. */
+async function waitForEditorMounted(): Promise<void> {
+  await vi.waitFor(
+    () => {
+      if (getActiveSession().getSnapshot().phase !== 'ready') {
+        throw new Error('waitForEditorMounted: session is not ready')
+      }
+      if (container.querySelector('.cm-content') === null) {
+        throw new Error('waitForEditorMounted: CodeMirror has not mounted')
+      }
+    },
+    { interval: POLL_MS, timeout: TIMEOUT_MS }
+  )
 }
 
 function editorViewIn(el: HTMLElement): EditorView {
@@ -230,7 +256,14 @@ describe('Raw view: typing survives a same-document reparse (R41)', () => {
 
     const view = editorViewIn(container)
     view.scrollDOM.scrollTop = 500
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    // R159: CodeMirror clamps and re-measures the scroll position on its own
+    // schedule, so wait for it to take rather than for 50 ms. The wait throws
+    // on timeout, so a scroll that never lands fails here instead of making the
+    // assertion below meaningless.
+    await vi.waitFor(() => expect(view.scrollDOM.scrollTop).toBeGreaterThan(0), {
+      interval: POLL_MS,
+      timeout: TIMEOUT_MS
+    })
     const scrollBefore = view.scrollDOM.scrollTop
     expect(scrollBefore).toBeGreaterThan(0)
 
