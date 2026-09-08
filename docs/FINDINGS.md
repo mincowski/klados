@@ -166,6 +166,23 @@ identity) before believing it *finished*; and **repainting inside a poll remount
 destroying any pending debounce and typed input, so a wait can prevent the very thing it waits for.
 `test/support/wait.ts` holds the vocabulary and an eslint rule blocks new call-site durations.
 
+**A sandboxed preload cannot `require` a node_modules package, and electron-vite externalizes
+declared dependencies rather than bundling them.** So `sandbox: true` fails with *"Unable to load
+preload script … module not found: <pkg>"*, `window.api` is `undefined`, and the whole application
+is inert — not degraded, inert. R166 hit this on `@electron-toolkit/preload`. The preload's imports
+must be `electron` (or a genuinely inlined module) and nothing else; anything added to
+`src/preload/` needs checking against a real built app under the sandbox, because a `require` that
+works in dev and in a normal build fails only there.
+
+**The renderer's `<meta>` CSP blocks `klados-file://` from page context, and that is load-bearing.**
+`index.html` declares `default-src 'self'` with no `connect-src`, so a `fetch` of the read-token
+scheme from the document is refused outright; the parse worker's bundled script carries no CSP and
+is unaffected, which is why the app works. **It is a real second control on the file-read
+primitive** — widening that CSP for an unrelated reason would remove it silently, so
+`mainElectron.test.ts` pins the refusal. Note the limit: the meta tag does *not* travel with the
+`webContents` across a navigation, which is why R164's navigation guard is the primary control and
+this is only a secondary one.
+
 **Predicting a consequence is not evaluating it.** D-054's icon split named the exact side effect
 that broke it and dismissed it in the same sentence. If a plan says "this might mean X," that is a
 thing to test, not a thing already handled.

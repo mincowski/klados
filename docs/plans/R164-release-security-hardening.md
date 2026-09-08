@@ -1,8 +1,8 @@
 # R164–R167 — security hardening before the first public release
 
-<!-- status: open -->
+<!-- status: built-caveat -->
 
-**Open.** Register: `docs/TASKS.md`. A security review run against the whole Electron surface and
+**Built, with four things owed — see §9.** Register: `docs/TASKS.md`. Results in §8. A security review run against the whole Electron surface and
 the parser layer, ahead of the first public 1.0.0 release. Motivated by a threat model of *a
 malicious actor who knows the victim uses Klados and hands them a crafted input file, or a link
 they are asked to drag into the app.*
@@ -323,3 +323,139 @@ paths the renderer legitimately presents — not smuggled into this one.
 | **R165** | LOW | `setWindowOpenHandler` scheme allowlist + blanket permission deny | defence-in-depth (currently unreachable) |
 | **R166** | LOW | `sandbox: true`, verify-then-enable | defence-in-depth (blast radius) |
 | **R167** | release | SHA-256 `SHA256SUMS.txt` in `release.yml` + README verify section | integrity signal for unsigned builds |
+
+---
+
+## 8. Results
+
+**Built, all four ids.** The marker is `built-caveat` and §9 says what is owed — none of it because
+something failed, all of it because the last mile of a security change is a manual or tag-time
+check.
+
+### 8a. What landed
+
+**R164** — three controls, one rule (`core/mainSecurity.ts`'s `isAppUrl`, asked at two
+chokepoints):
+
+- `app.on('web-contents-created')` denying `will-navigate` and `will-redirect` to anything that is
+  not the app's own page. The app-level form, per §2d as amended.
+- **All 13 `ipcMain` registrations** behind a sender check (`main/trustedRenderer.ts`). The plan
+  said 14; the review's own count included a comment line, and the corrected number is 7 in
+  `documents.ts` plus 4 `handle` and 2 `on` in `index.ts`.
+- The drop `preventDefault` moved from `.layout` to the window (`renderer/dropGuard.ts`).
+
+`isAppUrl` compares by **origin** in dev and by **exact file** in production — deliberately not
+"protocol is `file:`", and that distinction is tested: mutating it to the looser rule turns
+`test/mainSecurity.test.ts` red on the case the plan declined.
+
+**R165** — an `http:`/`https:`/`mailto:` allowlist before `shell.openExternal`, and a blanket
+permission deny.
+
+**R166** — `sandbox: true`, and §8b is what it took.
+
+**R167** — a `checksums` job that reads the assembled release back with `gh release download`,
+hashes it, and uploads `SHA256SUMS.txt`; plus a README "Verifying your download" section.
+
+Suite: **1,837 → 1,857 tests**, all passing, lint at its 3-warning ratchet.
+
+### 8b. Three things the plan asserted that turned out to be false
+
+Recorded prominently because §2c's whole discipline is separating what was read from what was
+assumed, and each of these was on the assumed side.
+
+**1. `sandbox: true` is not a one-line change — it broke the application outright.** The plan:
+*"`@electron-toolkit/preload`'s `electronAPI` (bundled by electron-vite at build time, not a
+runtime `require`). There is no obvious blocker."* electron-vite **externalizes declared
+dependencies**, so the built preload still contained `require("@electron-toolkit/preload")`, and a
+sandboxed preload's `require` resolves only a handful of built-in Electron modules:
+
+```
+Unable to load preload script: out\preload\index.js
+Error: module not found: @electron-toolkit/preload
+```
+
+The whole script failed, `window.api` was `undefined`, and the app was inert. **This is exactly
+what "verify-then-enable" was written to catch**, and it is the strongest argument in the round for
+that framing over "flip it".
+
+Fixed by **removing** `electronAPI` rather than bundling it: `window.electron` has no reader
+anywhere in `src/renderer`, and the exposed-surface test only ever described `window.api`. Smaller
+bridge, working sandbox, and R51's "no accidental passthrough" applied to something that had been
+passing through since the project was scaffolded.
+
+**2. `klados-file://` is not "fetchable from any script in the renderer."** §2b said it was.
+Probed against the real app from page context:
+
+```
+Connecting to 'klados-file://…' violates the following Content Security Policy directive:
+"default-src 'self'". Note that 'connect-src' was not explicitly set … The action has been blocked.
+```
+
+`index.html`'s own CSP blocks it; the parse worker, loaded from a bundled script with no CSP of its
+own, is unaffected. **A second control on the read primitive that neither the plan nor the review
+had noticed**, now pinned by a test so that widening the CSP for an unrelated reason cannot remove
+it silently. **It does not weaken R164** — a page the renderer is *navigated to* carries its own CSP
+or none, which is §2a.3's point exactly.
+
+**3. The permission deny was not tidying — the default was "granted".** With the handlers removed
+from a real build, `Notification.requestPermission()` returns **`granted`** — not a prompt, and not
+a refusal. §3's "pure defence-in-depth" undersold it.
+
+### 8c. Verification — what was run, not argued
+
+Every guard in this round was checked by breaking it and watching a test fail:
+
+| Mutation | Result |
+|---|---|
+| `isAppUrl`'s production branch → "protocol is `file:`" | the local-file case goes red |
+| `setAppUrl` → a wrong URL, rebuilt | the real-app IPC round trip rejects with *Refused `keybindings:read` from an untrusted frame*, while both pre-existing real-app tests still pass |
+| permission handlers removed, rebuilt | `Notification.requestPermission()` returns `granted` |
+
+The second is the one that mattered most. **The sender guard is the single change in this round
+that can brick the application**: if `event.senderFrame.url` and the recorded URL ever fail to
+agree, every handler refuses and the renderer can neither read a file nor save one — and no unit
+test of the predicate could see it, because the predicate would be entirely correct. So
+`mainElectron.test.ts` now performs a real IPC round trip against the built app, and the mutation
+above is the proof that the test has power over it.
+
+§1's "no task" conclusion was re-run rather than re-read before any of this: XXE stays literal, a
+six-level entity chain yields 3 nodes and 122 B, and 200 000 nested elements stop at 10 001 nodes
+with one diagnostic in 13.9 ms.
+
+**R167 was dry-run** rather than left to the tag, since by R141/R151's argument the first real
+exercise is a `v*` tag where a mistake costs a deleted draft and a moved tag: three fake assets
+produce three lines, a stale `SHA256SUMS.txt` is excluded rather than hashed into its own
+successor, `sha256sum -c --ignore-missing` round-trips, an empty asset list fails the job with an
+error annotation, the workflow is valid YAML, and the step's script parses under `bash -n`.
+
+### 8d. Review pass, per `CLAUDE.md`
+
+Read as `git diff` per id. Beyond §8b, it found:
+
+- **The `.layout` drop comment already claimed what the code did not do** — *"A file dropped
+  anywhere on the window opens it"* — while `TitleBar` and `TabStrip` sat above it with no handler
+  at all. The same species as R159–R163's entire round: a comment describing behaviour its body
+  lacks. Its D6/R26 rationale was carried across to `dropGuard.ts` rather than deleted with the
+  code.
+- **`secureOn` can only drop, not reject**, and one of its two channels is `app:confirmQuit` — the
+  renderer's signal that every dirty tab is resolved and the window may close. A wrongly refused
+  send there would present as a window that will not close, with no explanation anywhere, so the
+  denial logs.
+- The plan's "14 handlers" is 13 (§8a).
+
+## 9. Owed
+
+- **R164 — manual confirmation on a real build** that dropping a *link* on the title bar no longer
+  navigates the window. Flagged as manual by §2e from the start: native drag-drop cannot be
+  dispatched from the harness. The navigation guard is tested at the decision level and the drop
+  guard at the event level; what stays unverified is the OS gesture that produces the event.
+- **R166 — the full manual lifecycle under `sandbox: true`.** Automated coverage reaches the
+  preload surface, an IPC round trip and the document read path (`stat`, `mintReadToken`). **Save,
+  Save As, file watching and an edit cycle are not exercised.** Nothing suggests they are broken
+  and the seam they share — the contextBridge — is proven, but §4 asked for the lifecycle and this
+  is not the whole of it.
+- **R167 — its first genuine exercise is the `v1.x` tag.** The dry-run covers the hashing logic;
+  `gh release download` against a real draft release cannot be rehearsed without making one.
+- **`@electron-toolkit/preload` is now an unused dependency.** Left declared rather than removed:
+  a lockfile change days before a release is the user's call, and R155's lesson is that a dead
+  dependency is a permanent Dependabot signal rather than a cosmetic one.
