@@ -456,6 +456,9 @@ Read as `git diff` per id. Beyond §8b, it found:
   is not the whole of it.
 - **R167 — its first genuine exercise is the `v1.x` tag.** The dry-run covers the hashing logic;
   `gh release download` against a real draft release cannot be rehearsed without making one.
-- **`@electron-toolkit/preload` is now an unused dependency.** Left declared rather than removed:
-  a lockfile change days before a release is the user's call, and R155's lesson is that a dead
-  dependency is a permanent Dependabot signal rather than a cosmetic one.
+**Not owed, resolved:** `@electron-toolkit/preload` was left declared when R166 removed its only
+import, on the grounds that a lockfile change before a release is the user's call. Asked and
+answered — **removed**, one dependency line and one lockfile entry, no transitive fallout since its
+only edge was a peer dependency on `electron` it shared with the app. `@electron-toolkit/utils` is
+a different package, still imported by `main/index.ts`, and stays. This is R155's point applied
+rather than deferred: a dead dependency is a permanent Dependabot signal, not a cosmetic one.

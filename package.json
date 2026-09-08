@@ -41,7 +41,6 @@
   "dependencies": {
     "@codemirror/state": "^6.7.1",
     "@codemirror/view": "^6.43.7",
-    "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "@fluentui/svg-icons": "^1.1.334",
     "@tanstack/react-virtual": "^3.14.9",

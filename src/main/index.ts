@@ -159,7 +159,7 @@ async function createWindow(): Promise<void> {
       //
       // **Flipping it broke the app, and that is why the plan asked for
       // verify-then-enable rather than "flip it".** The preload carried a
-      // runtime `require("@electron-toolkit/preload")` — electron-vite
+      // runtime require of `@electron-toolkit/preload` — electron-vite
       // externalizes declared dependencies rather than bundling them — and a
       // sandboxed preload cannot resolve node_modules, so the script failed to
       // load outright and `window.api` was undefined. `preload/index.ts` now

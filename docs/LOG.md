@@ -74,9 +74,11 @@ pass — which is exactly why that test had to be written: **the sender guard is
 the round that can brick the application**, and no unit test of the predicate could have seen it,
 because the predicate would be entirely correct.
 
-Suite 1,837 → 1,857. Four things owed, none of them a failure: two manual confirmations the harness
-cannot make, a workflow whose first real exercise is the tag, and a now-unused dependency left for
-the user to decide about before a release.
+Suite 1,837 → 1,857. Three things owed, none of them a failure: two manual confirmations the
+harness cannot make, and a workflow whose first real exercise is the tag. A fourth — the dependency
+R166 orphaned — was resolved inside the round rather than carried: `@electron-toolkit/preload`
+removed outright, since reducing dependencies is exactly R155's point and a dead one is a permanent
+Dependabot signal rather than a cosmetic problem.
 
 ---
 
