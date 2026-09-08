@@ -259,4 +259,20 @@ describe.skipIf(!builtAppAvailable)('the built app via _electron (R51, R58)', ()
     // And the privileged scheme stays unreachable from the document's context.
     expect(result.fetchRefused).toBe(true)
   })
+
+  /**
+   * R165 (`docs/plans/R164-release-security-hardening.md` §3) — the blanket
+   * permission deny, asserted where it actually runs.
+   *
+   * The decision itself is a constant, so a unit test of it would prove
+   * nothing. What is worth pinning is that the handlers are **registered**:
+   * they live inside `app.on('web-contents-created')` in main, and a refactor
+   * that moved or dropped that block would leave Chromium's defaults in place
+   * with nothing to notice. Asking the real renderer for a real permission is
+   * the only check that sees the difference.
+   */
+  it('R165: the renderer cannot obtain a permission — every request is denied', async () => {
+    const permission = await page.evaluate(async () => Notification.requestPermission())
+    expect(permission).toBe('denied')
+  })
 })
