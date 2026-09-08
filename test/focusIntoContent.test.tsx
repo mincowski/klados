@@ -28,10 +28,13 @@ import type { DocumentSessionDeps, OpenDocument } from '../src/renderer/session/
 import { NO_SELECTION } from '../src/renderer/session/documentSession'
 import {
   createTab,
+  getActiveSession,
   getSessionFor,
   resetTabsForTests,
   setActiveTab
 } from '../src/renderer/session/tabs'
+import { CARET_SYNC_DEBOUNCE_MS } from '../src/renderer/components/Raw/rawCaretSync'
+import { POLL_MS, TIMEOUT_MS } from './support/wait'
 import { activeSession } from '../src/renderer/session/activeSession'
 import { xmlFormatModule } from '../src/formats/xml/index'
 import { Tree } from '../src/renderer/components/Tree/Tree'
@@ -247,7 +250,29 @@ describe('R92 — F6 into Raw', () => {
     // Move the caret the way a user would while editing, not via the
     // session (which is what a *different* selection change looks like).
     view.dispatch({ selection: { anchor: 20 } })
-    await new Promise((resolve) => setTimeout(resolve, 250)) // past rawCaretSync's debounce
+
+    // R162 (`docs/plans/R159-fixed-duration-waits.md` §7): this line used to
+    // read `setTimeout(resolve, 250) // past rawCaretSync's debounce`, and the
+    // review that produced this round used it as its worked example. **It
+    // passed at 125 ms — below the debounce — at 0 ms, and with the extension
+    // disabled entirely**, so the comment named a mechanism the test had no
+    // power over. What is under test here is F6, not caret sync; the sync is
+    // covered for real in `test/rawCaretSync.test.tsx`, whose acceptance
+    // criterion is that raising this same constant to 200_000 turns it red.
+    //
+    // The wait stays, because the caret resolution firing *during* the F6
+    // round-trip is exactly the interference this test wants to rule out — but
+    // it now derives its length from the constant instead of copying a number,
+    // and says what it is for.
+    await vi.waitFor(
+      () => {
+        if (getActiveSession().getSnapshot().phase !== 'ready') {
+          throw new Error('the session is not ready')
+        }
+      },
+      { interval: POLL_MS, timeout: TIMEOUT_MS }
+    )
+    await new Promise((resolve) => setTimeout(resolve, CARET_SYNC_DEBOUNCE_MS * 2))
 
     const headAfterTyping = view.state.selection.main.head
 

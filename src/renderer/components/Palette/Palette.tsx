@@ -83,6 +83,15 @@ type PathQueryOutcome =
  * `@` mode with no document open. */
 const EMPTY_MATCHES: readonly NodeNameMatch[] = []
 
+/**
+ * R162 (`docs/plans/R159-fixed-duration-waits.md` §7): named and exported,
+ * because it was a bare `}, 150)` literal that only this effect could see. Twelve waits across
+ * four test files were coupled to it by nothing but a comment, at margins as
+ * thin as 1.33x — so raising it would have broken tests in files that never
+ * mention it, or, worse, quietly made them vacuous. The palette tests now wait for the preview to land instead of for this number plus a guess.
+ */
+export const PATH_QUERY_DEBOUNCE_MS = 150
+
 function getSnapshotFalse(): boolean {
   return false
 }
@@ -248,7 +257,7 @@ function PaletteContent({ context }: { context: ContextKeys }): JSX.Element {
           // Whichever superseded it already owns `pathQueryResult`.
         }
       )
-    }, 150)
+    }, PATH_QUERY_DEBOUNCE_MS)
     return () => clearTimeout(debounce)
   }, [parsed, readyDocument])
 

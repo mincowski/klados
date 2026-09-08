@@ -22,7 +22,7 @@ import {
   setActiveTab
 } from '../src/renderer/session/tabs'
 import { POLL_MS, TIMEOUT_MS } from './support/wait'
-import { FindBar } from '../src/renderer/components/Find/FindBar'
+import { FindBar, FIND_DEBOUNCE_MS } from '../src/renderer/components/Find/FindBar'
 import { openFind, resetFindStoreForTests } from '../src/renderer/components/Find/findStore'
 import '../src/renderer/styles/tokens.css'
 import '../src/renderer/components/Find/Find.css'
@@ -220,7 +220,7 @@ describe('R87 — the / mode control', () => {
     // a duration.** The assertion is that typing did *not* search, and there is
     // no condition for a thing that must not happen — a window comfortably past
     // the debounce a text search would have used is the correct tool.
-    await new Promise((resolve) => setTimeout(resolve, 250))
+    await new Promise((resolve) => setTimeout(resolve, FIND_DEBOUNCE_MS * 2))
     await paint(<FindBar />)
     expect(container.querySelector('.find-count')!.textContent).toContain('No matches')
 
