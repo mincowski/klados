@@ -25,7 +25,7 @@ import {
   resetTabsForTests,
   setActiveTab
 } from '../src/renderer/session/tabs'
-import { POLL_MS, TIMEOUT_MS } from './support/wait'
+import { POLL_MS, SETTLE_MS, TIMEOUT_MS } from './support/wait'
 import { registerPane, resetFocusForTests } from '../src/renderer/focus'
 import { FindBar } from '../src/renderer/components/Find/FindBar'
 import {
@@ -143,7 +143,7 @@ async function paint(jsx: React.ReactNode): Promise<void> {
     root.render(jsx)
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
   })
-  await new Promise((resolve) => setTimeout(resolve, 50))
+  await new Promise((resolve) => setTimeout(resolve, SETTLE_MS))
 }
 
 async function openDocument(
@@ -256,6 +256,11 @@ function keydown(
     new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...modifiers })
   )
 }
+
+/** R163: the window a chord that must do nothing gets to misbehave in.
+ * Named, not written at the call site, because it is a deliberate duration
+ * rather than one nobody revisited. */
+const NO_OP_WINDOW_MS = 100
 
 const CONTENT = '{"value":"cat cat cat"}'
 
@@ -600,7 +605,7 @@ describe('R120-R123 — the Find bar keyboard', () => {
     // R160: **deliberately still a duration.** The assertion is that nothing
     // happens, and "nothing" has no condition to wait for — a generous window
     // for the chord to misbehave in is the correct tool, and the only one.
-    await new Promise((resolve) => setTimeout(resolve, 100))
+    await new Promise((resolve) => setTimeout(resolve, NO_OP_WINDOW_MS))
     await paint(<FindBar />)
 
     const state = getSessionFor(id)!.getSnapshot()

@@ -14,6 +14,11 @@ import {
 } from '../src/core/parseClient'
 import { runParseJob, runTransformJob } from '../src/worker/parse.worker'
 import { waitForQuiet } from './support/wait'
+
+/** R163: the window a cancelled 30 ms reparse gets to wrongly fire in.
+ * Named rather than written at the call site so it reads as the deliberate
+ * negative-assertion duration it is. */
+const STALE_REPARSE_WINDOW_MS = 50
 import type { TransformClientOptions } from '../src/core/transformClient'
 import { buildRowIndex, DEFAULT_MAX_ROW_BYTES } from '../src/core/rowIndex'
 import { jsonFormatModule } from '../src/formats/json/index'
@@ -998,7 +1003,11 @@ describe('createDocumentSession (D6)', () => {
       expect(parseFromUrlCalls).toBe(1) // just the second document's own open
       expect(parseCalls).toBe(0) // no full reparse ever ran for either document
 
-      await new Promise((resolve) => setTimeout(resolve, 50)) // past the original 30ms window
+      // R163: **a negative assertion, so a duration is the correct tool** and
+      // this is not `SETTLE_MS` wearing a different hat — the point is to give
+      // the cancelled 30 ms reparse a window in which to wrongly fire. There is
+      // no condition for a thing that must never happen.
+      await new Promise((resolve) => setTimeout(resolve, STALE_REPARSE_WINDOW_MS))
       expect(parseFromUrlCalls).toBe(1)
       expect(parseCalls).toBe(0) // still none — the stale reparse never ran
 
@@ -1177,7 +1186,10 @@ describe('createDocumentSession (D6)', () => {
       session.applyEdit({ start: 25, end: 30, text: '9' }) // "c":33333 -> "c":9  (later position first)
       session.applyEdit({ start: 15, end: 20, text: '8' }) // "b":22222 -> "b":8
       session.applyEdit({ start: 5, end: 10, text: '7' }) // "a":11111 -> "a":7 (earliest, last)
-      await new Promise((resolve) => setTimeout(resolve, 20))
+      // R163: the last inline sleep in this file gating a positive assertion —
+      // 20 ms against a 5 ms debounce plus a graft, which is the same 4×
+      // margin every other site in this round turned out not to have.
+      await flushReparse(session)
 
       const state = session.getSnapshot()
       if (state.phase !== 'ready') throw new Error('unreachable')

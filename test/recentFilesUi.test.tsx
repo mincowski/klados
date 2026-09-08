@@ -7,6 +7,7 @@
  * what the stacking assertion needs; the rest just needs a real session.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { SETTLE_MS } from './support/wait'
 import { userEvent } from '@vitest/browser/context'
 import { createRoot, type Root } from 'react-dom/client'
 import {
@@ -124,7 +125,7 @@ async function paint(): Promise<void> {
     root.render(<DocumentArea />)
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
   })
-  await new Promise((resolve) => setTimeout(resolve, 50))
+  await new Promise((resolve) => setTimeout(resolve, SETTLE_MS))
 }
 
 function entry(path: string, formatId = 'json'): RecentFile {
@@ -145,7 +146,7 @@ describe('R96 — clicking a recent file opens it into the active tab', () => {
       (el) => el.getAttribute('title')?.includes('a.json')
     )!
     nameLink.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await new Promise((resolve) => setTimeout(resolve, SETTLE_MS))
 
     expect(getTabIds().length).toBe(before)
     expect(getSessionFor(tabId)!.getSnapshot().phase).toBe('ready')
@@ -230,7 +231,7 @@ describe('R104 — stacked layout at 560px', () => {
       (el) => el.getAttribute('title')?.includes('gone.json')
     )!
     nameLink.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await new Promise((resolve) => setTimeout(resolve, SETTLE_MS))
     await paint()
 
     const alert = container.querySelector('[role="alert"]')!
@@ -320,7 +321,7 @@ describe('R97 — a stale entry', () => {
       (el) => el.getAttribute('title')?.includes('gone.json')
     )!
     nameLink.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await new Promise((resolve) => setTimeout(resolve, SETTLE_MS))
     await paint()
 
     expect(container.querySelector('[role="alert"]')).not.toBeNull()

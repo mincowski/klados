@@ -6,7 +6,7 @@
  * `gridFilter.test.ts`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { POLL_MS, TIMEOUT_MS } from './support/wait'
+import { POLL_MS, SETTLE_MS, TIMEOUT_MS } from './support/wait'
 import { createRoot, type Root } from 'react-dom/client'
 import { SourceBuffer } from '../src/core/buffer'
 import { Interner } from '../src/core/interner'
@@ -67,7 +67,7 @@ async function paint(jsx: React.ReactNode): Promise<void> {
   // The virtualizer measures via `ResizeObserver`, which doesn't always
   // settle within two rAFs in headless Chromium (R33's own treeExpansion
   // precedent) — an extra macrotask tick gives it room to fire.
-  await new Promise((resolve) => setTimeout(resolve, 50))
+  await new Promise((resolve) => setTimeout(resolve, SETTLE_MS))
 }
 
 const options: ParseOptions = { maxDepth: 1000, encoding: 'utf-8' }

@@ -7,6 +7,11 @@
  * open" or "a stat that rejects" is real, not simulated.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+/** R163: the window a burst of reparses gets to wrongly re-enter the
+ * ready transition in. A negative assertion, so a duration is the right
+ * tool — named so it reads as chosen rather than inherited. */
+const REPARSE_BURST_WINDOW_MS = 250
 import {
   rehydrateParseResult,
   type ParseClientOptions,
@@ -227,7 +232,7 @@ describe('recording a recent file (R95 §2)', () => {
     // `setState` re-lands), so the recent-files count must not move either.
     session.applyEdit({ start: 1, end: 1, text: 'x' })
     session.applyEdit({ start: 1, end: 1, text: 'y' })
-    await new Promise((resolve) => setTimeout(resolve, 250))
+    await new Promise((resolve) => setTimeout(resolve, REPARSE_BURST_WINDOW_MS))
 
     expect(listener).toHaveBeenCalledOnce()
   })

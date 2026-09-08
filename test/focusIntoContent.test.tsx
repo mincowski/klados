@@ -34,7 +34,7 @@ import {
   setActiveTab
 } from '../src/renderer/session/tabs'
 import { CARET_SYNC_DEBOUNCE_MS } from '../src/renderer/components/Raw/rawCaretSync'
-import { POLL_MS, TIMEOUT_MS } from './support/wait'
+import { POLL_MS, SETTLE_MS, TIMEOUT_MS } from './support/wait'
 import { activeSession } from '../src/renderer/session/activeSession'
 import { xmlFormatModule } from '../src/formats/xml/index'
 import { Tree } from '../src/renderer/components/Tree/Tree'
@@ -137,7 +137,7 @@ async function paint(jsx: React.ReactNode): Promise<void> {
     root.render(jsx)
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
   })
-  await new Promise((resolve) => setTimeout(resolve, 50))
+  await new Promise((resolve) => setTimeout(resolve, SETTLE_MS))
 }
 
 /** A shell double, `test/focus.test.ts`'s own `fakePane` — `PaneShell`'s
@@ -216,10 +216,10 @@ describe('R92 — F6 into Raw', () => {
     // Scroll far away from the caret with the mouse, the way the plan's
     // own trap describes.
     scroller.scrollTop = scroller.scrollHeight
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await new Promise((resolve) => setTimeout(resolve, SETTLE_MS))
 
     focusPane('raw')
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await new Promise((resolve) => setTimeout(resolve, SETTLE_MS))
 
     expect(document.activeElement).toBe(contentEl)
     expect(shell.focus).not.toHaveBeenCalled()
@@ -277,7 +277,7 @@ describe('R92 — F6 into Raw', () => {
     const headAfterTyping = view.state.selection.main.head
 
     focusPane('raw') // F6 away isn't modeled directly; re-focusing is the observable half
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await new Promise((resolve) => setTimeout(resolve, SETTLE_MS))
 
     expect(view.state.selection.main.head).toBe(headAfterTyping)
   })

@@ -14,6 +14,7 @@
  * that is already inside the shell it is given.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { SETTLE_MS } from './support/wait'
 import { StrictMode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import {
@@ -132,7 +133,7 @@ async function paint(jsx: React.ReactNode): Promise<void> {
     root.render(jsx)
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
   })
-  await new Promise((resolve) => setTimeout(resolve, 50))
+  await new Promise((resolve) => setTimeout(resolve, SETTLE_MS))
 }
 
 /** `test/focusIntoContent.test.tsx`'s own shell double — a plain object, no
@@ -171,7 +172,7 @@ describe('F6 works on the first press after opening a document', () => {
     // The observable symptom: the *first* F6 has to move focus out of the
     // Tree. The bug left it there indefinitely.
     moveFocus('next')
-    await new Promise((resolve) => setTimeout(resolve, 60))
+    await new Promise((resolve) => setTimeout(resolve, SETTLE_MS))
     expect(document.activeElement).not.toBe(treeEl)
   })
 

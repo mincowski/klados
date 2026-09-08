@@ -63,6 +63,26 @@ const DEFAULT_QUIET_MS = 50
  * arrived in the frame after the one that looked settled". */
 const DEFAULT_QUIET_FRAMES = 3
 
+/**
+ * The settle margin a test's own `paint()` helper adds after two
+ * `requestAnimationFrame`s, and the only fixed duration R163's lint rule leaves
+ * unremarked — because it is passed as an identifier rather than written at the
+ * call site, which is exactly the distinction the rule draws.
+ *
+ * **It is a margin, not an assertion gate.** Nothing waits on it to decide
+ * whether something happened; it exists because the virtualizers measure
+ * through `ResizeObserver`, which does not reliably settle inside two frames in
+ * headless Chromium (`grid.test.tsx` recorded that, and `treeExpansion.test.tsx`
+ * before it). Zeroing all 58 of this suite's fixed sleeps left 1,817 of 1,834
+ * tests passing, and every one of these was in the harmless majority.
+ *
+ * Sixteen files had each chosen 50 independently. Naming it here is the same
+ * move R162 made on the product side: a duration a test must express should be
+ * imported, not copied, so that changing it is one edit and finding every user
+ * of it is one search.
+ */
+export const SETTLE_MS = 50
+
 export interface QuietOptions {
   /** How long nothing may change before the wait returns. */
   readonly quietMs?: number

@@ -21,7 +21,7 @@ import {
   resetTabsForTests,
   setActiveTab
 } from '../src/renderer/session/tabs'
-import { POLL_MS, TIMEOUT_MS } from './support/wait'
+import { POLL_MS, SETTLE_MS, TIMEOUT_MS } from './support/wait'
 import { FindBar, FIND_DEBOUNCE_MS } from '../src/renderer/components/Find/FindBar'
 import { openFind, resetFindStoreForTests } from '../src/renderer/components/Find/findStore'
 import '../src/renderer/styles/tokens.css'
@@ -110,7 +110,7 @@ async function paint(jsx: React.ReactNode): Promise<void> {
     root.render(jsx)
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
   })
-  await new Promise((resolve) => setTimeout(resolve, 50))
+  await new Promise((resolve) => setTimeout(resolve, SETTLE_MS))
 }
 
 const CARS_XML =

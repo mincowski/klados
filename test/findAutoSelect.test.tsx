@@ -28,7 +28,7 @@ import {
   resetTabsForTests,
   setActiveTab
 } from '../src/renderer/session/tabs'
-import { POLL_MS, TIMEOUT_MS } from './support/wait'
+import { POLL_MS, SETTLE_MS, TIMEOUT_MS } from './support/wait'
 import { activeSession } from '../src/renderer/session/activeSession'
 import { FindBar } from '../src/renderer/components/Find/FindBar'
 import { openFind, resetFindStoreForTests } from '../src/renderer/components/Find/findStore'
@@ -120,7 +120,7 @@ async function paint(jsx: React.ReactNode): Promise<void> {
     root.render(jsx)
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
   })
-  await new Promise((resolve) => setTimeout(resolve, 50))
+  await new Promise((resolve) => setTimeout(resolve, SETTLE_MS))
 }
 
 function typeNeedle(text: string): void {
