@@ -54,7 +54,22 @@ export function installDropGuard(target: EventTarget = window): () => void {
     if (file === undefined) return
     const api = getKladosApi()
     if (api === undefined) return
-    openPathInNewTab(api.document.getPathForFile(file))
+
+    // **A dragged link produces a `File` with no path**, and `getPathForFile`
+    // answers `''` for anything that did not come from the filesystem. Opening
+    // `''` reaches `document:stat` and fails with
+    // `ENOENT: no such file or directory, stat ''` — a red error box on a new
+    // tab, from dropping a link on the tab strip.
+    //
+    // Inherited rather than introduced: `Layout.tsx` had the same two lines and
+    // the same missing check. What changed is the reach — while the handler
+    // covered only `.layout`, a link dropped on the chrome never got this far.
+    // **Widening a guard exposed a latent defect behind it**, which is worth
+    // recording as its own small lesson: the guard was right and the thing it
+    // newly protects was not ready to be reached.
+    const path = api.document.getPathForFile(file)
+    if (path === '') return
+    openPathInNewTab(path)
   }
 
   target.addEventListener('dragover', onDragOver)

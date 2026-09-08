@@ -28,7 +28,8 @@
  * its own step before `npm test`.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { existsSync } from 'fs'
+import { existsSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
 import { fileURLToPath } from 'url'
 import path from 'path'
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright'
@@ -274,5 +275,115 @@ describe.skipIf(!builtAppAvailable)('the built app via _electron (R51, R58)', ()
   it('R165: the renderer cannot obtain a permission — every request is denied', async () => {
     const permission = await page.evaluate(async () => Notification.requestPermission())
     expect(permission).toBe('denied')
+  })
+
+  /**
+   * File watching, end to end through the real IPC in both directions.
+   *
+   * Written because a manual pass of R166's owed lifecycle reported that
+   * **neither watcher behaviour fired** — a clean document did not reload and a
+   * dirty one raised no prompt. That is either a regression this round caused
+   * or a defect it merely surfaced, and the difference is not something to
+   * reason about from the code: `document:watch` goes renderer → main through
+   * the new sender guard, and the notification comes back main → renderer over
+   * `webContents.send`, which the guard does not touch.
+   *
+   * So this drives the actual seam: watch a real file from the page, change it
+   * from the test process, and wait for the renderer to hear about it.
+   */
+  it('file watching notifies the renderer when the file changes on disk', async () => {
+    const watched = path.join(tmpdir(), `klados-watch-${Date.now()}.json`)
+    writeFileSync(watched, '{"a":1}')
+
+    try {
+      await page.evaluate(async (filePath: string) => {
+        const api = (
+          window as unknown as {
+            api: {
+              document: {
+                watch: (p: string, key: string) => Promise<void>
+                onExternalChange: (cb: (key: string) => void) => () => void
+              }
+            }
+          }
+        ).api
+        const seen: string[] = []
+        ;(window as unknown as { __watchSeen: string[] }).__watchSeen = seen
+        api.document.onExternalChange((key) => seen.push(key))
+        await api.document.watch(filePath, 'manual-check')
+      }, watched)
+
+      // `mtimeMs` is what the registry compares, so the content must differ.
+      writeFileSync(watched, '{"a":2,"b":3}')
+
+      await expect
+        .poll(
+          async () =>
+            page.evaluate(
+              () => (window as unknown as { __watchSeen: string[] }).__watchSeen.length
+            ),
+          { timeout: 10_000 }
+        )
+        .toBeGreaterThan(0)
+    } finally {
+      rmSync(watched, { force: true })
+    }
+  })
+
+  /**
+   * The same seam, but saved the way editors actually save.
+   *
+   * A direct `writeFileSync` over the path is the easy case. Most editors do an
+   * **atomic save** instead — write a sibling temp file, then rename it over
+   * the target — which replaces the directory entry rather than the file's
+   * contents. `fs.watch` handling that is not something to assume: the registry
+   * compares `mtimeMs` to turn "the watcher noticed something" into "the
+   * contents actually changed", and a rename produces a different event shape
+   * from a write.
+   *
+   * Kept as a test rather than left as the one-off probe it started as, because
+   * this is the shape a user's real editor produces, and it is the shape a
+   * manual check would exercise without anyone realising it was a distinct
+   * case.
+   */
+  it('file watching survives an atomic save — write a temp file, rename it over', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'klados-watch-'))
+    const watched = path.join(dir, 'doc.json')
+    const staging = path.join(dir, 'doc.json.tmp')
+    writeFileSync(watched, '{"a":1}')
+
+    try {
+      await page.evaluate(async (filePath: string) => {
+        const api = (
+          window as unknown as {
+            api: {
+              document: {
+                watch: (p: string, key: string) => Promise<void>
+                onExternalChange: (cb: (key: string) => void) => () => void
+              }
+            }
+          }
+        ).api
+        const seen: string[] = []
+        ;(window as unknown as { __atomicSeen: string[] }).__atomicSeen = seen
+        api.document.onExternalChange((key) => seen.push(key))
+        await api.document.watch(filePath, 'atomic-save')
+      }, watched)
+
+      writeFileSync(staging, '{"a":2,"b":3}')
+      renameSync(staging, watched)
+
+      await expect
+        .poll(
+          async () =>
+            page.evaluate(
+              () => (window as unknown as { __atomicSeen: string[] }).__atomicSeen.length
+            ),
+          { timeout: 10_000 }
+        )
+        .toBeGreaterThan(0)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

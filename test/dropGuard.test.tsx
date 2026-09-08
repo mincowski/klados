@@ -15,7 +15,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { installDropGuard } from '../src/renderer/dropGuard'
-import { resetTabsForTests } from '../src/renderer/session/tabs'
+import { getTabIds, resetTabsForTests } from '../src/renderer/session/tabs'
 import type { KladosApi } from '../src/preload/api'
 
 type ApiWindow = Window & { api?: KladosApi }
@@ -118,6 +118,30 @@ describe('R164 — a dropped file still opens', () => {
 
     expect(event.defaultPrevented).toBe(true)
     expect(getPathForFile).toHaveBeenCalledWith(file)
+  })
+})
+
+describe('R164 — a dragged link is not a file', () => {
+  it('does not try to open the empty path getPathForFile answers with', () => {
+    // Found by manual testing (§9's owed item, run for real): dropping a *link*
+    // on the tab strip produced a new tab with
+    // `ENOENT: no such file or directory, stat ''`. Chromium hands over a
+    // `File` for some dragged content, and `webUtils.getPathForFile` returns
+    // `''` for anything not from the filesystem.
+    const getPathForFile = vi.fn().mockReturnValue('')
+    ;(window as ApiWindow).api = fakeApi(getPathForFile)
+
+    dispose = installDropGuard()
+    const file = new File(['whatever'], 'dragged-link')
+    const event = dropEvent()
+    Object.defineProperty(event, 'dataTransfer', { value: { files: [file] } })
+    document.body.dispatchEvent(event)
+
+    // Still prevented — that is the security half, and it is unconditional.
+    expect(event.defaultPrevented).toBe(true)
+    expect(getPathForFile).toHaveBeenCalledWith(file)
+    // But nothing was opened: no tab beyond the one `resetTabsForTests` leaves.
+    expect(getTabIds().length).toBeLessThanOrEqual(1)
   })
 })
 
