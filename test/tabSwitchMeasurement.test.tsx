@@ -23,6 +23,7 @@ import '../src/renderer/devPerformanceTracks'
 import { describe, expect, it } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { Profiler, type ProfilerOnRenderCallback } from 'react'
+import { waitForQuietFrames } from './support/wait'
 import { SourceBuffer } from '../src/core/buffer'
 import { Interner } from '../src/core/interner'
 import { NodeStore } from '../src/core/nodeStore'
@@ -116,9 +117,21 @@ function emptyStats(): Record<Pane, number> {
   return { tree: 0, detail: 0, raw: 0, scrubber: 0, statusBar: 0 }
 }
 
+/**
+ * R161 (`docs/plans/R159-fixed-duration-waits.md` §6): a commit counter beside
+ * the millisecond total, used only by `drainMount` below.
+ *
+ * The duration total cannot serve as the drain signal on its own — a commit
+ * whose `actualDuration` rounds to 0 would look like no commit at all, which is
+ * precisely the "stable and not-yet-started are indistinguishable" trap this
+ * round keeps finding. Counting is unambiguous.
+ */
+const commits = { count: 0 }
+
 function recorder(stats: Record<Pane, number>, pane: Pane): ProfilerOnRenderCallback {
   return (_id, _phase, actualDuration) => {
     stats[pane] += actualDuration
+    commits.count++
   }
 }
 
@@ -190,7 +203,21 @@ describe('R30 — tab-switch remount cost', () => {
     await paint(<Harness document={docA} stats={stats} />)
     // First mount's cost (CodeMirror's own setup included) isn't the
     // number under test — only the *switch* is.
+    //
+    // R161: and that comment is the reason `paint`'s two `requestAnimationFrame`s
+    // cannot be where the zeroing happens. **CodeMirror's setup is
+    // effect-driven, not frame-driven**, so it has no obligation to land inside
+    // them; when it lands late its commit arrives after the counters are zeroed
+    // and is charged to the switch. R158 found exactly this in the sibling file
+    // `documentPropsRenderCost.test.tsx`, where it failed a macOS CI run with
+    // `expected 11 to be 10`. Here the assertion is a generous
+    // `wallMs < 500`, so it would never have gone red — it would have quietly
+    // inflated the R30 figure this test prints to the log as its own
+    // deliverable, which is `CLAUDE.md`'s "a component measured cleanly while
+    // the pipeline around it was not" for the fifth time.
+    await waitForQuietFrames(() => commits.count, { label: 'drainMount' })
     for (const pane of PANES) stats[pane] = 0
+    commits.count = 0
 
     const start = performance.now()
     await paint(<Harness document={docB} stats={stats} />)
