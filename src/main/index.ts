@@ -151,7 +151,26 @@ async function createWindow(): Promise<void> {
     icon: process.platform === 'win32' ? iconIco : icon,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      // R166 (`docs/plans/R164-release-security-hardening.md` §4): `true`, verified
+      // rather than flipped. `contextIsolation` was already on and
+      // `nodeIntegration` off, so the renderer main world had no Node — but
+      // `sandbox: false` kept the *preload* running with full Node access and
+      // dropped the renderer out of Chromium's own OS-level sandbox.
+      //
+      // **Flipping it broke the app, and that is why the plan asked for
+      // verify-then-enable rather than "flip it".** The preload carried a
+      // runtime `require("@electron-toolkit/preload")` — electron-vite
+      // externalizes declared dependencies rather than bundling them — and a
+      // sandboxed preload cannot resolve node_modules, so the script failed to
+      // load outright and `window.api` was undefined. `preload/index.ts` now
+      // documents that; the fix was to stop exposing an `electronAPI` nothing
+      // ever read.
+      //
+      // `mainElectron.test.ts` is the verification, and it is repeatable in a
+      // way the plan's manual lifecycle pass would not have been: the preload
+      // surface, an IPC round trip and the document read path all run against
+      // the real built app under this setting.
+      sandbox: true
     }
   })
 

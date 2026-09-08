@@ -195,4 +195,68 @@ describe.skipIf(!builtAppAvailable)('the built app via _electron (R51, R58)', ()
 
     expect(outcome).toBe('resolved')
   })
+
+  /**
+   * R166 (`docs/plans/R164-release-security-hardening.md` §4) — the document
+   * read path through the real preload bridge, under `sandbox: true`.
+   *
+   * **This is what makes the sandbox a verified change rather than a flipped
+   * option.** The plan asked for a manual lifecycle pass; a manual pass
+   * confirms the seam on the day it is run and says nothing on any later day.
+   * The read path is what a sandbox would most plausibly break, and `stat` and
+   * `mintReadToken` are the two calls that actually cross `contextBridge` into
+   * main — so they are the ones worth pinning.
+   *
+   * **The `klados-file://` half is asserted as a refusal, and finding out why
+   * corrected the plan.** §2b called the scheme "fetchable from any script in
+   * the renderer, not just the worker". It is not fetchable from *this* page:
+   * `index.html`'s own CSP is `default-src 'self'` with no `connect-src`, so
+   * Chromium refuses the connection outright —
+   *
+   *   Connecting to 'klados-file://…' violates the following Content Security
+   *   Policy directive: "default-src 'self'". … The action has been blocked.
+   *
+   * — while the parse worker, loaded from a bundled script with no CSP of its
+   * own, is unaffected. That is a **second control on the read primitive that
+   * neither the plan nor the review had noticed**, and it is worth a test
+   * because nothing else in the tree records that it exists: someone widening
+   * the CSP for an unrelated reason would remove it silently.
+   *
+   * It does not weaken R164. A page the renderer is *navigated to* carries its
+   * own CSP or none — §2a.3's whole point is that the `<meta>` tag does not
+   * travel — so the primitive is still reachable by hostile content. What is
+   * corrected is the reach *from the app's own page*, not the threat.
+   */
+  it('R166: the read path crosses the bridge, and the CSP still blocks it from page context', async () => {
+    const target = path.join(root, 'package.json')
+
+    const result = await page.evaluate(async (filePath: string) => {
+      const api = (
+        window as unknown as {
+          api: {
+            document: {
+              stat: (p: string) => Promise<{ size: number; readOnly: boolean }>
+              mintReadToken: (p: string) => Promise<string>
+            }
+          }
+        }
+      ).api
+      const stat = await api.document.stat(filePath)
+      const token = await api.document.mintReadToken(filePath)
+      let fetchRefused = false
+      try {
+        await fetch(`klados-file://${token}/`)
+      } catch {
+        fetchRefused = true
+      }
+      return { size: stat.size, tokenLength: token.length, fetchRefused }
+    }, target)
+
+    // Both IPC calls returned real answers through the bridge — the part
+    // `sandbox: true` could have broken.
+    expect(result.size).toBeGreaterThan(0)
+    expect(result.tokenLength).toBeGreaterThan(0)
+    // And the privileged scheme stays unreachable from the document's context.
+    expect(result.fetchRefused).toBe(true)
+  })
 })

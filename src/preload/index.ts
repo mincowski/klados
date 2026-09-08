@@ -1,5 +1,4 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import { electronAPI } from '@electron-toolkit/preload'
 import type { DocumentStat, KladosApi, OpenDialogResult, TitleBarTheme } from './api'
 
 // Custom APIs for renderer
@@ -66,16 +65,31 @@ const api: KladosApi = {
 // Use `contextBridge` APIs to expose Electron APIs to
 // renderer only if context isolation is enabled, otherwise
 // just add to the DOM global.
+//
+// R166 (`docs/plans/R164-release-security-hardening.md` §4): `window.electron`
+// — `@electron-toolkit/preload`'s `electronAPI` — used to be exposed here too,
+// and **it is what blocked `sandbox: true`.** The plan asserted the package was
+// "bundled by electron-vite at build time, not a runtime `require`". It is not:
+// electron-vite externalizes declared dependencies, so the built preload still
+// carried `require("@electron-toolkit/preload")`, and a sandboxed preload's
+// `require` resolves only a small set of built-in Electron modules. The whole
+// script therefore failed to load — *"Unable to load preload script … module not
+// found: @electron-toolkit/preload"* — leaving `window.api` undefined and the
+// application inert.
+//
+// Removed rather than bundled, because **nothing ever used it**: `window.electron`
+// has no reader anywhere in `src/renderer`, and `mainElectron.test.ts`'s
+// exposed-surface assertion only ever described `window.api`. Deleting it fixes
+// the sandbox, shrinks the bridge, and is the same instinct as R51's "no
+// accidental passthrough" — the surface should be what the app needs and
+// nothing else.
 if (process.contextIsolated) {
   try {
-    contextBridge.exposeInMainWorld('electron', electronAPI)
     contextBridge.exposeInMainWorld('api', api)
   } catch (error) {
     console.error(error)
   }
 } else {
-  // @ts-ignore (define in dts)
-  window.electron = electronAPI
   // @ts-ignore (define in dts)
   window.api = api
 }
