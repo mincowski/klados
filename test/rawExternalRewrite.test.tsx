@@ -35,7 +35,13 @@ import { resetContextForTests } from '../src/renderer/commands/context'
 import type { KladosApi } from '../src/preload/api'
 import type { DocumentSessionDeps } from '../src/renderer/session/documentSession'
 import type { TransformClientOptions } from '../src/core/transformClient'
-import { createTab, getSessionFor, resetTabsForTests } from '../src/renderer/session/tabs'
+import {
+  createTab,
+  getActiveSession,
+  getSessionFor,
+  resetTabsForTests
+} from '../src/renderer/session/tabs'
+import { POLL_MS, TIMEOUT_MS, waitForQuiet } from './support/wait'
 import { Raw } from '../src/renderer/components/Raw/Raw'
 import '../src/renderer/styles/tokens.css'
 import '../src/renderer/components/Raw/Raw.css'
@@ -180,11 +186,14 @@ async function paint(): Promise<void> {
   })
 }
 
-/** Same 60ms figure `rawEditCaretSurvival.test.tsx`/`documentSession.test.ts`
- * both use — long enough for a near-zero debounce timer plus the fake
- * parse's own microtask chain to land. */
+/** Waits for the session to stop moving, rather than for 60 ms.
+ *
+ * R159 (`docs/plans/R159-fixed-duration-waits.md`): the number used to justify
+ * itself by citing `rawEditCaretSurvival.test.tsx` *and*
+ * `documentSession.test.ts` — the second of which R154 had already converted
+ * away from a fixed wait, so the citation pointed at the counter-example. */
 async function settle(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 60))
+  await waitForQuiet(() => getActiveSession().getSnapshot(), { label: 'settle' })
   await paint()
 }
 
@@ -192,9 +201,24 @@ async function openTab(text: string): Promise<string> {
   const tabId = createTab(depsFor(text, 20))
   await getSessionFor(tabId)!.openPath('C:/docs/edit.json')
   await paint()
-  await new Promise((resolve) => setTimeout(resolve, 60))
+  // R159: the session ready *and* CodeMirror mounted — a condition, not 60 ms.
+  await waitForEditorMounted()
   await paint()
   return tabId
+}
+
+async function waitForEditorMounted(): Promise<void> {
+  await vi.waitFor(
+    () => {
+      if (getActiveSession().getSnapshot().phase !== 'ready') {
+        throw new Error('waitForEditorMounted: session is not ready')
+      }
+      if (container.querySelector('.cm-content') === null) {
+        throw new Error('waitForEditorMounted: CodeMirror has not mounted')
+      }
+    },
+    { interval: POLL_MS, timeout: TIMEOUT_MS }
+  )
 }
 
 function editorViewIn(el: HTMLElement): EditorView {
@@ -283,7 +307,9 @@ describe('Raw view follows a buffer rewritten outside it (R100)', () => {
     const session = getSessionFor(tabId)!
     await session.openPath('C:/docs/edit.json')
     await paint()
-    await new Promise((resolve) => setTimeout(resolve, 60))
+    // R159: `openTab`'s body, inlined here because this test needs the api
+    // handle — so it gets `openTab`'s wait too, not the sleep it replaced.
+    await waitForEditorMounted()
     await paint()
 
     // `mintReadToken` calls `read` once at open (already resolved via the

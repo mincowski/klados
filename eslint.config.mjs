@@ -43,5 +43,38 @@ export default defineConfig(
       // in a given implementation is conventionally named with a leading `_`.
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }]
     }
+  },
+  // R163 (`docs/plans/R159-fixed-duration-waits.md` §8): a test may not wait a
+  // number of milliseconds written at the call site.
+  //
+  // Four rounds found this defect once each — R140's `flushReparse` (which
+  // failed the v1.0.0 release build), R152's missing `waitForOverflowButtons`,
+  // R154's two, R158's `mountAndDrain` — and each fixed the one instance in
+  // front of it. The review that produced this rule found 58 of them across 24
+  // files, and something worse than flakiness: `rawCaretSync` had **no test
+  // coverage at all**, hidden behind a 250 ms sleep whose comment named the
+  // debounce it was not actually waiting for. A wait that is too short does not
+  // only go red; where the assertion is negative it goes green forever.
+  //
+  // **Two escapes, both deliberate, and the rule distinguishes them by syntax
+  // rather than by trust.** `setTimeout(fn, 0)` is a macrotask hop, not a
+  // duration — five legitimate uses. And a delay passed as an *identifier* is
+  // allowed, because naming it is the fix: `SETTLE_MS` for a paint margin,
+  // `CARET_SYNC_DEBOUNCE_MS` imported from the product for a wait that must
+  // outlast a real debounce, `NO_OP_WINDOW_MS` for a negative assertion that
+  // has no condition to wait for. The banned thing is the anonymous number.
+  {
+    files: ['test/**/*.ts', 'test/**/*.tsx'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            'CallExpression[callee.name="setTimeout"][arguments.1.type="Literal"][arguments.1.value!=0]',
+          message:
+            'Do not wait a fixed number of milliseconds in a test. Wait for the condition: `vi.waitFor` for a predicate, `waitForQuiet`/`waitForQuietFrames` from test/support/wait.ts for quiescence. If a duration is genuinely correct — a negative assertion, or a margin that gates nothing — give it a name and pass that instead. See docs/plans/R159-fixed-duration-waits.md.'
+        }
+      ]
+    }
   }
 )

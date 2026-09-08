@@ -53,6 +53,15 @@ import './Find.css'
  * session-layer confirmation gate has no reason to depend on `Detail/`. */
 const REPLACE_ALL_CONFIRM_MATCHES = 50_000
 
+/**
+ * R162 (`docs/plans/R159-fixed-duration-waits.md` §7): named and exported,
+ * because it was a bare `}, 150)` literal that nothing outside this function could name. Twelve waits across
+ * four test files were coupled to it by nothing but a comment, at margins as
+ * thin as 1.33x — so raising it would have broken tests in files that never
+ * mention it, or, worse, quietly made them vacuous. Most of those waits are now conditions; the few that must stay durations import this.
+ */
+export const FIND_DEBOUNCE_MS = 150
+
 function useFindState(): FindState {
   return useSyncExternalStore(subscribeFind, getFindState, getFindState)
 }
@@ -253,7 +262,7 @@ export function FindBar(): JSX.Element | null {
     debounceRef.current = setTimeout(() => {
       pendingAutoSelectRef.current = true
       activeSearchStore.search({ text: nextText, mode: 'text', options })
-    }, 150)
+    }, FIND_DEBOUNCE_MS)
   }
 
   // R87 §3: a path is a query you compose, not a needle you narrow live —

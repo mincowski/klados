@@ -16,11 +16,13 @@ import type { KladosApi } from '../src/preload/api'
 import type { DocumentSessionDeps } from '../src/renderer/session/documentSession'
 import {
   createTab,
+  getActiveSearchStoreInstance,
   getSessionFor,
   resetTabsForTests,
   setActiveTab
 } from '../src/renderer/session/tabs'
-import { FindBar } from '../src/renderer/components/Find/FindBar'
+import { POLL_MS, SETTLE_MS, TIMEOUT_MS } from './support/wait'
+import { FindBar, FIND_DEBOUNCE_MS } from '../src/renderer/components/Find/FindBar'
 import { openFind, resetFindStoreForTests } from '../src/renderer/components/Find/findStore'
 import '../src/renderer/styles/tokens.css'
 import '../src/renderer/components/Find/Find.css'
@@ -108,7 +110,7 @@ async function paint(jsx: React.ReactNode): Promise<void> {
     root.render(jsx)
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
   })
-  await new Promise((resolve) => setTimeout(resolve, 50))
+  await new Promise((resolve) => setTimeout(resolve, SETTLE_MS))
 }
 
 const CARS_XML =
@@ -146,6 +148,22 @@ function pressEnter(): void {
   const input = container.querySelector<HTMLInputElement>('.find-input')!
   input.dispatchEvent(
     new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+  )
+}
+
+/**
+ * R160 (`docs/plans/R159-fixed-duration-waits.md` §5): Enter in path mode runs
+ * a chunked query, so "200 ms" was a guess at how long it takes. A new,
+ * complete snapshot says it ran and finished.
+ */
+async function waitForPathResult(before: unknown): Promise<void> {
+  await vi.waitFor(
+    () => {
+      const snapshot = getActiveSearchStoreInstance().getSnapshot()
+      if (snapshot === before) throw new Error('waitForPathResult: the query has not run yet')
+      if (!snapshot.complete) throw new Error('waitForPathResult: the result is not complete yet')
+    },
+    { interval: POLL_MS, timeout: TIMEOUT_MS }
   )
 }
 
@@ -198,13 +216,18 @@ describe('R87 — the / mode control', () => {
     await paint(<FindBar />)
 
     typeText('cars/car')
-    // Long enough to clear the 150ms debounce a text search would have used.
-    await new Promise((resolve) => setTimeout(resolve, 250))
+    // R160 (`docs/plans/R159-fixed-duration-waits.md` §5): **deliberately still
+    // a duration.** The assertion is that typing did *not* search, and there is
+    // no condition for a thing that must not happen — a window comfortably past
+    // the debounce a text search would have used is the correct tool.
+    await new Promise((resolve) => setTimeout(resolve, FIND_DEBOUNCE_MS * 2))
     await paint(<FindBar />)
     expect(container.querySelector('.find-count')!.textContent).toContain('No matches')
 
+    // Enter *does* search, so this half has a condition: a new, complete result.
+    const beforeEnter = getActiveSearchStoreInstance().getSnapshot()
     pressEnter()
-    await new Promise((resolve) => setTimeout(resolve, 200))
+    await waitForPathResult(beforeEnter)
     await paint(<FindBar />)
     expect(container.querySelector('.find-count')!.textContent).toContain('of 2')
   })
@@ -218,8 +241,21 @@ describe('R87 — the / mode control', () => {
 
     typeText('cars/')
     pressEnter()
-    await new Promise((resolve) => setTimeout(resolve, 200))
-    await paint(<FindBar />)
+    // R160: a *malformed* query never reaches the search store at all — it is
+    // rejected at parse and rendered as a diagnostic — so there is no result
+    // transition to wait for, and `waitForPathResult` times out on it. The
+    // footnote appearing is this path's own condition. Worth writing down: two
+    // assertions one line apart in the same file want different waits, and the
+    // duration they shared was what made them look interchangeable.
+    await vi.waitFor(
+      async () => {
+        await paint(<FindBar />)
+        if (container.querySelector('.find-footnote-path') === null) {
+          throw new Error('the path diagnostic has not rendered')
+        }
+      },
+      { interval: POLL_MS, timeout: TIMEOUT_MS }
+    )
 
     const footnote = container.querySelector('.find-footnote-path')
     expect(footnote).not.toBeNull()

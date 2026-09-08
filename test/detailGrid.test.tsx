@@ -5,6 +5,7 @@
  * does (`test/grid.test.tsx`'s own R40 describe block).
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { SETTLE_MS } from './support/wait'
 import { createRoot, type Root } from 'react-dom/client'
 import { SourceBuffer } from '../src/core/buffer'
 import { Interner } from '../src/core/interner'
@@ -41,7 +42,7 @@ async function paint(jsx: React.ReactNode): Promise<void> {
     root.render(jsx)
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
   })
-  await new Promise((resolve) => setTimeout(resolve, 50))
+  await new Promise((resolve) => setTimeout(resolve, SETTLE_MS))
 }
 
 const options: ParseOptions = { maxDepth: 1000, encoding: 'utf-8' }
