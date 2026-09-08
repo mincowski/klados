@@ -16,6 +16,15 @@ release-integrity work the review also surfaced.
 A second review agent ran in parallel over the same tree; this document is written to stand on its
 own regardless of what that one reported.
 
+**Reviewed before implementation, and the review's changes are marked in place.** Every fact in §2a
+and §2b was re-derived from the code rather than taken on the page's word, and §1 — the "no task"
+half, and so the claim that scopes this whole round — was re-run rather than re-read. All of it
+held. Four things changed: **sender validation joins R164** (§2d), because the plan reached
+`will-navigate` and stopped while the same chain has a second chokepoint at the IPC seam that
+**not one of 14 handlers guards**; a **blanket permission deny joins R165**; **R167's hashing moves
+to one final job** over the published assets rather than a step per runner; and §1's
+`process.argv` sentence is corrected. Nothing was removed, and no severity moved.
+
 ---
 
 ## 1. What the review verified is safe — the parser layer (no task)
@@ -40,10 +49,21 @@ Two structural facts back this up and are worth stating so they are not re-litig
   (verified: `icons.ts` is a fixed static-import list).
 - **No OS-shell entry point.** No `fileAssociations`/`protocols` in `electron-builder.yml`, no
   `app.setAsDefaultProtocolClient`, no `open-file`/`second-instance` handler, and `process.argv`
-  is never read. The shell never launches Klados with an attacker-controlled path; a malicious
-  file enters *only* via the Open dialog or drag-drop.
+  is never read **in `src/main`, `src/renderer` or `src/preload`** — it is read in
+  `src/cli/inspect.ts:84` and `src/cli/bench-format.ts:153`, which are development harnesses that
+  never ship inside the app. (Corrected in review: the original sentence said "never read", and a
+  reader who greps finds two hits and loses confidence in a table that is otherwise exactly right.)
+  The shell never launches Klados with an attacker-controlled path; a malicious file enters *only*
+  via the Open dialog or drag-drop.
 
 The parser layer needs no change. The exposure is entirely in the window/IPC layer, below.
+
+**Re-verified in review, by running rather than reading**, since "no task" is the highest-leverage
+claim in this document — if §1 is wrong the whole round is scoped wrong. Through `npm run inspect`
+against freshly built fixtures: the XXE case parses to `value="&xxe;"` with the DOCTYPE an opaque
+token and no read attempted; a six-level entity chain goes in at 529 B and produces **3 nodes and
+122 B of store**, so there is no amplification; and 200 000 nested elements stop at **10 001 nodes,
+`complete: false`, one diagnostic, 13.9 ms**, with no overflow. All three tables above hold.
 
 ---
 
@@ -123,6 +143,26 @@ top-frame navigation whose destination is not the app's own origin:
   is a `fetch` scheme, never a navigation target, so it is not on the allowlist.
 - Cover both `will-navigate` and `will-redirect`; `e.preventDefault()` on a miss.
 
+**Use the app-level `web-contents-created` form, not the window's `webContents` directly**
+(settled in review, where the plan offered both). The whole value of this guard is that it catches
+triggers nobody enumerated — §2c's own argument — and a guard attached to one `webContents` covers
+only the contexts that exist at the moment it runs. The app-level form covers every context the app
+ever creates, including ones a future round adds without remembering this document.
+
+**Also load-bearing, added in review — validate the sender of every IPC message.** The plan reached
+`will-navigate` and stopped; the same chain has a second chokepoint it did not consider.
+**There are 14 `ipcMain` registrations across `main/index.ts` and `main/documents.ts`, and not one
+checks who is calling.** `event.sender` appears six times and every use is
+`BrowserWindow.fromWebContents(...)` to find a window — never to establish an origin.
+
+This is **not** §6's rejected path validation wearing a different hat, and the distinction is the
+reason it belongs here: path validation asks *which file may this caller touch*, needs real state
+about what the user has chosen, and fights three legitimate flows. Sender validation asks *may this
+caller speak at all*, needs no state, and fights nothing — every legitimate caller is the app's own
+renderer. It is Electron's own standing recommendation, and it is the belt to `will-navigate`'s
+braces: if any future path ever reaches a context the navigation guard misses, the IPC still
+refuses. One shared guard applied at the handler seam, not fourteen copies.
+
 **Secondary (defence-in-depth + a UX gain) — a window-level drop guard in the renderer.** Move the
 `dragover`/`drop` `preventDefault` off the `.layout` div and onto a window-level listener (a small
 module armed from `App`, or `#root`), so **no** region of the window is ever an unguarded drop
@@ -141,12 +181,16 @@ off the `.layout` JSX.
   existing "drop opens in a new tab" behaviour on the body is unchanged.
 - Manual confirmation on a real build that dropping a link on the title bar no longer navigates
   the window — flagged as manual because the harness cannot dispatch native DnD (§2c).
+- A test on the sender guard: a frame at the app's own origin is accepted, one at
+  `https://example.com` is refused, and the refusal is a rejected IPC call rather than a silent
+  no-op — a handler that quietly returns nothing on a hostile call is indistinguishable from one
+  that worked.
 
 ### 2f. Cost
 
-Small and localised: one `web-contents-created` block in `main/index.ts`, one window-level
-listener module in the renderer, and the deletion of `Layout.tsx`'s two handlers. No change to the
-token design, the protocol handler, or any parser. No new dependency.
+Small and localised: one `web-contents-created` block in `main/index.ts`, one shared sender guard at
+the IPC seam, one window-level listener module in the renderer, and the deletion of `Layout.tsx`'s
+two handlers. No change to the token design, the protocol handler, or any parser. No new dependency.
 
 ---
 
@@ -166,6 +210,15 @@ live.
 `{ action: 'deny' }` return. **Acceptance:** a test on the handler function that a
 `https://` URL is forwarded and a `file://` URL is dropped. **Cost:** a three-line guard, one
 test.
+
+**Added in review — deny web permissions outright, in the same block.** Nothing in the app calls
+`setPermissionRequestHandler` or `setPermissionCheckHandler`, so Chromium's defaults apply and any
+page loaded in the renderer may *ask* for camera, microphone, geolocation, notifications, clipboard
+read, and the rest. **Klados is a local file viewer and editor: the correct answer to every one of
+them is no**, permanently, with no prompt to misread. A blanket deny is smaller than R165's own
+allowlist, sits in the same file for the same reason, and — like R165 — is unreachable today and
+becomes live the moment R164's premise is ever broken. Acceptance is a test that the registered
+handler denies a representative permission; cost is a two-line handler.
 
 ---
 
@@ -213,7 +266,18 @@ to the GitHub release, compute a SHA-256 for each artifact and publish them — 
 `SHA256SUMS.txt` asset attached alongside the artifacts, or rendered into the release body. Prefer
 a `SHA256SUMS.txt` file in the standard `<hash>␣␣<filename>` format so `sha256sum -c` /
 `Get-FileHash` verification is mechanical. The hashes must be computed **in the workflow** from the
-exact uploaded files, on each runner (or gathered from all three), never typed by hand.
+exact uploaded files, never typed by hand.
+
+**Settled in review: one final job that hashes the assembled release, not a step on each runner.**
+The plan offered "on each runner (or gathered from all three)"; per-runner is the fiddly branch and
+the wrong one. Three platforms means three shells — `sha256sum`, `shasum -a 256`, `Get-FileHash`,
+each with its own output format — so a per-runner step is three code paths that must agree on a
+byte-exact file format, plus a fourth to merge them. **And it would hash what each runner built
+rather than what was actually published**, which is the thing a downloader is comparing against. A
+single Linux job that runs after the matrix, gathers the artifacts, and emits one `SHA256SUMS.txt`
+is one code path over the real assets. This matters more than it looks because, by this document's
+own R141/R151 argument, **the first genuine exercise of any of it is a `v*` tag** — where a mistake
+costs a deleted draft release and a moved tag.
 
 **README:** add a short "Verifying your download" section next to the existing unsigned-build note
 (`README.md:30`) showing the one-line verification command per platform (`sha256sum -c
@@ -255,7 +319,7 @@ paths the renderer legitimately presents — not smuggled into this one.
 
 | Task | Severity | Area | Load-bearing? |
 |---|---|---|---|
-| **R164** | HIGH | `main/index.ts` navigation guard + renderer window-level drop guard | yes — closes the read+write exposure |
-| **R165** | LOW | `setWindowOpenHandler` scheme allowlist | defence-in-depth (currently unreachable) |
+| **R164** | HIGH | `main/index.ts` navigation guard + IPC sender validation + renderer window-level drop guard | yes — closes the read+write exposure |
+| **R165** | LOW | `setWindowOpenHandler` scheme allowlist + blanket permission deny | defence-in-depth (currently unreachable) |
 | **R166** | LOW | `sandbox: true`, verify-then-enable | defence-in-depth (blast radius) |
 | **R167** | release | SHA-256 `SHA256SUMS.txt` in `release.yml` + README verify section | integrity signal for unsigned builds |
