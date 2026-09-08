@@ -1,15 +1,14 @@
 # R159–R163 — waits that measure a duration instead of a condition
 
-<!-- status: open -->
+<!-- status: built -->
 
-**Open.** Register: `docs/TASKS.md`. A codebase-wide review of the failure mode R140, R152, R154
-and R158 each found once, after the fourth instance made "four times is not a coincidence" the
-obvious reading.
+**Built.** Register: `docs/TASKS.md`. Results in §13. A codebase-wide review of the failure mode
+R140, R152, R154 and R158 each found once, after the fourth instance made "four times is not a
+coincidence" the obvious reading.
 
-The review is §1–§3 and is finished; §4–§8 are the five tasks it produced. **The headline is not
-the population — it is that this defect has a second harm nobody has been looking for, and one
-confirmed instance of it: a shipped feature with no test coverage, hidden behind a wait that looks
-like coverage.**
+The review is §1–§3; §4–§8 are the five tasks it produced. **The headline is not the population —
+it is that this defect has a second harm nobody has been looking for, and one confirmed instance of
+it: a shipped feature with no test coverage, hidden behind a wait that looks like coverage.**
 
 ---
 
@@ -338,5 +337,111 @@ wait does was produced by running the suite with that wait changed, not by readi
 
 ## 13. Results
 
-*(to be written when the work lands — measured suite wall clock, the §2b re-run, the §7 mutation
-outcome, and whether the review pass found anything)*
+**Built, all five ids, and every acceptance criterion met.** 58 fixed-duration sleeps written at a
+call site are now **zero**; the durations that remain are named constants, which is the distinction
+§8's rule draws.
+
+### 13a. The two experiments, re-run
+
+| | before the round | after |
+|---|---|---|
+| Every fixed duration halved | **7 failures**, 4 files | **0 failures** |
+| Every fixed duration zeroed | 17 failures | **0 failures** |
+| Tests | 1,834 | **1,837** |
+| Suite wall clock | 41.56 s | **41.41 s** |
+| Test time | 108.56 s | **104.50 s** |
+
+**Slightly faster with three more tests**, which is §9's expectation confirmed rather than merely
+hoped: replacing a 250 ms sleep with a 5 ms poll should also *save* time, and if a conversion made
+the suite slower it would mean something was waiting for the wrong thing.
+
+The second row is worth reading twice. Zeroing every remaining duration changes nothing, so the
+survivors provably gate no assertion — which is exactly what §10 claimed when it declined to convert
+them, now measured rather than argued. **And the experiment that took a scripted 24-file rewrite in
+§2c is now a one-line edit**, because the value has a name. That is the strongest argument for
+R163's naming half, and it was not the argument the plan made for it.
+
+### 13b. What each task did
+
+**R159** — `test/support/wait.ts`: `waitForQuiet`, `waitForQuietFrames`, `POLL_MS`, `TIMEOUT_MS`.
+No predicate helper, deliberately: `vi.waitFor` already exists and reimplementing it was the
+mistake the module was written to prevent. Collapsed into it: R140/R154's two loops, R158's
+`mountAndDrain`, and **five character-identical copies of a 60 ms `openTab`** across
+`rawEditCaretSurvival`, `rawExternalRewrite`, `rawZoomRemeasure`, `rawDecorationTiming` and
+`inactiveSelection` — two of which justified the number by citing the helper R154 had already
+replaced.
+
+**R160** — the seven sub-2× sites, `documentSession.test.ts:769`, both name/body mismatches, and
+(beyond the plan) `findAutoSelect`'s `waitForSearch` and `findPathMode`'s Enter sites, which are
+the same named-helper tell and were not worth leaving.
+
+**R161** — `tabSwitchMeasurement.test.tsx` drains on a commit count before zeroing. Measured after:
+**wall 36.4 ms, 24.0 ms profiled**, against its own generous 500 ms bound. It drains on a *count*
+rather than the millisecond total because a commit whose `actualDuration` rounds to zero would be
+indistinguishable from no commit — this round's own trap in miniature.
+
+**R162** — `test/rawCaretSync.test.tsx`, three tests, and `CARET_SYNC_DEBOUNCE_MS`,
+`FIND_DEBOUNCE_MS`, `PATH_QUERY_DEBOUNCE_MS` exported. **The whole product diff for this round is
+three constants gaining names and `export`; no behaviour changed.**
+
+**R163** — the eslint rule, plus `SETTLE_MS` and three named negative-assertion windows. One more
+straggler converted rather than named: `documentSession.test.ts`'s 20 ms after three `applyEdit`s
+gated a positive assertion on decoded bytes.
+
+### 13c. §7's acceptance was the mutation, and the mutation was run
+
+With `CARET_SYNC_DEBOUNCE_MS` raised to `200_000`:
+
+```
+× selects the node under the caret once the debounce elapses          5245ms
+  Error: the caret has not resolved to a node yet
+✓ does not resolve before the debounce elapses                        1067ms
+✓ a programmatic reposition does not resolve at all                   2054ms
+```
+
+Exactly the right shape: the positive test dies, the two negative ones correctly survive, because
+with the sync disabled nothing resolves and that is what they assert.
+
+**The ceilings on those two waits were added because of what the first mutation run looked like.**
+Deriving them from the constant with no bound meant sleeping 100 and 400 *seconds* under the
+mutation — two 30-second timeouts burying the one failure that mattered. Capped at 1 s and 2 s they
+still mean what they say, and the mutation now reads as a single clean red.
+
+### 13d. Review pass, per `CLAUDE.md`
+
+Read as `git diff` per id. **It found things, and the useful ones were wrong conditions rather than
+wrong code** — which is the risk §12 named, arriving exactly where it said it would:
+
+- **Waiting for the Find bar to stop reading "Searching…" is not waiting for the search.** Before
+  the debounce fires the store still holds the *previous* result, and for a fresh bar that is the
+  empty one, so the label already reads "No matches". **Ten tests failed on it.** R154's finding in
+  a new place: *stable and not-yet-started are indistinguishable from outside.* The condition has to
+  be "a **new** snapshot, and complete" — prove the work happened before believing it finished.
+- **Re-searching the text already in the box produces no store change at all**, so there is nothing
+  to wait for. One test does exactly that, to confirm a cancelled Replace All left the count where
+  it was. `search()` now clears first, so the sequence has two observable transitions instead of
+  none.
+- **A malformed path query never reaches the search store**, so two assertions one line apart in
+  `findPathMode.test.tsx` want different waits. The duration they shared is what made them look
+  interchangeable.
+- Repainting inside a poll **remounts the component**, destroying the pending debounce timer and the
+  typed input value — so a wait that repaints can prevent the very thing it waits for. It broke the
+  two tests that mount `<Notifications />` alongside the bar.
+
+Each is recorded at the site where it was wrong, not just here, because the next person to touch
+one of these waits needs the reason more than the conclusion.
+
+Two smaller things the review caught: a global rewrite that hit five helpers of differing arity
+(`tsc` reported it, as it did for R154), and a self-referential replacement that duplicated a line
+six times. Both mechanical, both caught before commit — the same argument for reviewing `git diff`
+rather than working from the memory of having written it.
+
+### 13e. The rule, verified three ways
+
+`no-restricted-syntax` on `test/**`, rejecting a non-zero numeric literal as a `setTimeout` delay:
+
+- a probe file with `setTimeout(resolve, 250)` **errors**, with the message pointing at this plan;
+- the same file with `setTimeout(resolve, 0)` and `setTimeout(resolve, MS)` **passes**;
+- `src/` is out of scope, so the product's own debounces are untouched.
+
+`npm run lint` stays at its documented 3-warning ratchet.
