@@ -140,6 +140,42 @@ description.
 
 ## Recurring mistakes this project actually makes
 
+**The suite tests mechanisms; nobody was testing the application. One 20-minute manual pass against
+a real build found three user-visible defects that ~1,860 automated tests did not**, and the three
+are worth listing because they fail differently and none of them is an edge case. All three are
+**planned and open** at the time of writing — live defects, not history:
+
+- **R168** — a Raw edit on a **CRLF** document lands at the wrong byte. Silent data corruption, on
+  the line ending Windows uses by default.
+- **R170** — a tree at **depth 10,000** compresses every label out of existence and cannot scroll
+  to them.
+- **R169** — "Reload and Discard" gives no sign it did anything, so it reads as a dead button.
+
+**Two of those are whole dimensions of the input space that no test ever varied.** Not untested
+values within a tested axis — untested *axes*. Every Raw edit fixture in the suite is LF-only, so
+the units-to-bytes conversion had never once met a carriage return; every tree fixture is shallow,
+so indentation had never been allowed to exceed a viewport. Both were found the first time a person
+opened a real file of that shape.
+
+**The third is a property the suite is not shaped to hold at all.** R169 is about *feedback* —
+whether the UI acknowledges a click within a frame — and every test here asserts outcomes. A test
+that the document reloaded passes identically whether the button felt instant or dead.
+
+The structural cause is the same one the entry below names at module level, one level up:
+`mainElectron.test.ts` is the only test that drives the real application, and **it contained two
+tests** (zoom, preload surface) until R164–R167 needed it four more times, each of which
+immediately caught something a unit test could not reach. Everything else exercises a component
+against a harness, and a harness is built from the same assumptions as the code.
+
+Two things follow, and they are cheap:
+
+1. **When adding a fixture, ask what axis it does not vary.** Line endings, encoding, depth, size,
+   and whether the file is on the platform's native path shape are the ones that have bitten so
+   far. A second fixture differing on one axis is worth more than ten differing on none.
+2. **Anything a person perceives — feedback, focus, a native dialog, a drop target — belongs in
+   `mainElectron.test.ts` against the real build**, not in a component harness. That file is where
+   this project's blind spot ends.
+
 **Measuring a component cleanly while leaving the pipeline around it unmeasured. Five instances so
 far**: M0's row-index pre-scan claim, M2's `isNumericColumn` (1522 ms, absent from its own results
 table), the M3 splice timed without its index rebuilds, M5c's J1 — the first where a *review fix*
