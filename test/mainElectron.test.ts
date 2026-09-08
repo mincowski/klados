@@ -161,4 +161,38 @@ describe.skipIf(!builtAppAvailable)('the built app via _electron (R51, R58)', ()
       }
     })
   })
+
+  /**
+   * R164 (`docs/plans/R164-release-security-hardening.md` §2d) — the sender
+   * guard, end to end against the real thing.
+   *
+   * **This test exists because the guard is the one change in the round that
+   * can brick the application.** Every IPC call now goes through
+   * `isTrustedSender`, which compares `event.senderFrame.url` against the URL
+   * `createWindow` recorded. If those two strings ever fail to agree — a
+   * `loadFile` path that normalises differently from `pathToFileURL`, a drive
+   * letter in the other case on Windows, a dev URL with a trailing slash — then
+   * *every* handler refuses, the renderer cannot read a file or save one, and
+   * the app is dead on arrival. That is not a failure any unit test of the
+   * predicate can see, because the predicate would be entirely correct.
+   *
+   * `keybindings:read` is the probe: it reaches main, touches no fixture, and
+   * returns `null` when nothing is persisted. What is asserted is that it
+   * *resolves* — a refusal rejects with "Refused … from an untrusted frame".
+   */
+  it('R164: the real renderer is a trusted IPC sender — a round trip resolves', async () => {
+    const outcome = await page.evaluate(async () => {
+      try {
+        const api = (
+          window as unknown as { api: { keybindings: { read: () => Promise<unknown> } } }
+        ).api
+        await api.keybindings.read()
+        return 'resolved'
+      } catch (error) {
+        return `rejected: ${String(error)}`
+      }
+    })
+
+    expect(outcome).toBe('resolved')
+  })
 })

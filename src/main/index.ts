@@ -1,5 +1,6 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
+import { app, shell, BrowserWindow } from 'electron'
 import { join } from 'path'
+import { pathToFileURL } from 'url'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { titleBarOverlayColorsFor, type TitleBarTheme } from '../shared/titleBar'
@@ -12,6 +13,8 @@ import icon from '../../assets/build/icons/256.png?asset'
 import iconIco from '../../assets/build/icon.ico?asset'
 import { registerReadTokenProtocol } from './documents'
 import { handleWindowClose, confirmQuit as confirmQuitFlow } from '../core/mainQuitFlow'
+import { isAppUrl } from '../core/mainSecurity'
+import { getAppUrl, secureHandle, secureOn, setAppUrl } from './trustedRenderer'
 
 // R26 (`R24-tabs.md` §4) — the consolidated quit flow. Windows whose
 // close has actually been confirmed by the renderer (every dirty tab
@@ -51,7 +54,7 @@ async function writePersistedTitleBarTheme(theme: TitleBarTheme): Promise<void> 
   await writeFile(titleBarThemePath(), JSON.stringify({ theme }), 'utf-8')
 }
 
-ipcMain.handle('titleBar:setOverlayColors', async (event, theme: TitleBarTheme): Promise<void> => {
+secureHandle('titleBar:setOverlayColors', async (event, theme: TitleBarTheme): Promise<void> => {
   // Only Windows' `titleBarOverlay` exists to recolour — macOS's
   // `hiddenInset` traffic lights and Linux's native frame both ignore
   // this call, but the renderer calls it unconditionally on every theme
@@ -67,7 +70,7 @@ ipcMain.handle('titleBar:setOverlayColors', async (event, theme: TitleBarTheme):
 // D4 — user keybinding overrides, persisted as a JSON file in userData.
 // No in-app editor in M1; the file is the whole interface, read on startup
 // and written by `commands/keybindings.ts`'s `saveOverrides`.
-ipcMain.handle('keybindings:read', async (): Promise<string | null> => {
+secureHandle('keybindings:read', async (): Promise<string | null> => {
   try {
     return await readFile(keybindingsPath(), 'utf-8')
   } catch (err) {
@@ -76,7 +79,7 @@ ipcMain.handle('keybindings:read', async (): Promise<string | null> => {
   }
 })
 
-ipcMain.handle('keybindings:write', async (_event, contents: string): Promise<void> => {
+secureHandle('keybindings:write', async (_event, contents: string): Promise<void> => {
   await mkdir(app.getPath('userData'), { recursive: true })
   await writeFile(keybindingsPath(), contents, 'utf-8')
 })
@@ -85,7 +88,7 @@ ipcMain.handle('keybindings:write', async (_event, contents: string): Promise<vo
 // above: the renderer's final answer, once every dirty tab in its
 // consolidated quit flow has been resolved (or there was nothing dirty to
 // begin with).
-ipcMain.on('app:confirmQuit', (event) => {
+secureOn('app:confirmQuit', (event) => {
   const win = BrowserWindow.fromWebContents(event.sender)
   if (win === null) return
   confirmQuitFlow(win, quitConfirmedWindows)
@@ -96,7 +99,7 @@ ipcMain.on('app:confirmQuit', (event) => {
 // window open. This exists so the renderer has an explicit "the user
 // backed out" signal to send, symmetric with `confirmQuit` — nothing here
 // needs to *do* anything for the window to simply stay open.
-ipcMain.on('app:cancelQuit', () => {})
+secureOn('app:cancelQuit', () => {})
 
 // R59 (`R58-zoom.md` §4): `webContents.setZoomFactor` is main-process
 // only, so this is the one seam the renderer's own persisted zoom
@@ -104,7 +107,7 @@ ipcMain.on('app:cancelQuit', () => {})
 // closed-over `mainWindow`, the same pattern `titleBar:setOverlayColors`
 // above uses — correct for whichever window actually asked, not
 // necessarily the first one created.
-ipcMain.handle('view:setZoomFactor', (event, factor: number): void => {
+secureHandle('view:setZoomFactor', (event, factor: number): void => {
   BrowserWindow.fromWebContents(event.sender)?.webContents.setZoomFactor(factor)
 })
 
@@ -206,10 +209,19 @@ async function createWindow(): Promise<void> {
 
   // HMR for renderer base on electron-vite cli.
   // Load the remote URL for development or the local html file for production.
+  // R164 (`docs/plans/R164-release-security-hardening.md` §2d): record what we
+  // are about to load *before* loading it, so the navigation guard and the IPC
+  // sender guard both have an answer to "is this still our page?" from the
+  // first frame onward. Ordered correctly by construction — nothing can
+  // navigate or send IPC before the load it is about to be compared against.
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+    const devUrl = process.env['ELECTRON_RENDERER_URL']
+    setAppUrl(devUrl)
+    mainWindow.loadURL(devUrl)
   } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+    const indexPath = join(__dirname, '../renderer/index.html')
+    setAppUrl(pathToFileURL(indexPath).href)
+    mainWindow.loadFile(indexPath)
   }
 }
 
@@ -230,6 +242,35 @@ app.whenReady().then(() => {
   // see https://github.com/alex8088/electron-toolkit/tree/master/packages/utils
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
+  })
+
+  // R164 (`docs/plans/R164-release-security-hardening.md` §2d) — the primary
+  // control. Nothing constrained top-level navigation before this: no
+  // `will-navigate`, no `will-redirect`, no `web-contents-created` anywhere in
+  // `src/`. Combined with a preload that re-exposes `window.api` on whatever
+  // origin loads next, and IPC that mints read tokens for any path and writes
+  // any bytes to any path, a single unexpected navigation turned the renderer
+  // into an arbitrary file read *and* write primitive for remote content.
+  //
+  // **The app-level form, not `mainWindow.webContents` directly**, though both
+  // would close today's hole. The value of this guard is that it denies every
+  // unexpected navigation whatever the trigger — a dropped link, a stray
+  // `location` assignment, a future feature, a bug — and a guard bound to one
+  // `webContents` covers only the contexts that exist when it runs. This one
+  // covers every context the app ever creates, including ones added by someone
+  // who never read this comment.
+  app.on('web-contents-created', (_, contents) => {
+    const deny = (event: Electron.Event, url: string): void => {
+      const appUrl = getAppUrl()
+      if (appUrl !== null && isAppUrl(url, appUrl)) return
+      event.preventDefault()
+      console.warn(`[security] blocked navigation to ${url}`)
+    }
+    contents.on('will-navigate', (event, url) => deny(event, url))
+    // A redirect is a navigation the page did not initiate, which is if
+    // anything the more interesting half — a permitted first hop that lands
+    // somewhere else entirely.
+    contents.on('will-redirect', (event, url) => deny(event, url))
   })
 
   void createWindow()

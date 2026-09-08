@@ -14,14 +14,12 @@
  * as a sibling of `StatusBar` here but never part of layout flow), so the
  * panes' pixel geometry no longer shifts when a message appears.
  */
-import { useEffect, useMemo, useRef, useSyncExternalStore, type DragEvent, type JSX } from 'react'
+import { useEffect, useMemo, useRef, useSyncExternalStore, type JSX } from 'react'
 import { getContext, subscribeContext } from '../../commands/context'
 import { commandsForSurface } from '../../commands/registry'
 import { runCommand, tooltipFor } from '../../commands/uiHelpers'
 import type { FocusablePane, Pane } from '../../focus'
 import { focusPaneOrFirstAvailable, registerPane } from '../../focus'
-import { getKladosApi } from '../../preloadApi'
-import { openPathInNewTab } from '../../session/tabs'
 import { useDocumentSession } from '../../session/useDocumentSession'
 import { Detail } from '../Detail/Detail'
 import { FindBar } from '../Find/FindBar'
@@ -125,27 +123,12 @@ function useDividerDrag(
   }
 }
 
-/** A file dropped anywhere on the window opens it — the drag-drop half of
- * D6's "opens by dialog, drag-drop, and command," alongside `openDialog`
- * and `klados.document.open`. `getPathForFile` (preload, `webUtils`)
- * replaces the `File.path` Electron removed from the renderer-side `File`
- * object. R26 (`R24-tabs.md` §4): opens into a new tab, the same
- * "opening a file never touches whatever's already open" rule
- * `klados.document.open` now follows — a dropped file used to silently
- * replace the active tab's own document. */
-function onDragOver(event: DragEvent<HTMLDivElement>): void {
-  event.preventDefault()
-}
-
-function onDrop(event: DragEvent<HTMLDivElement>): void {
-  event.preventDefault()
-  const file = event.dataTransfer.files[0]
-  if (file === undefined) return
-  const api = getKladosApi()
-  if (api === undefined) return
-  const path = api.document.getPathForFile(file)
-  openPathInNewTab(path)
-}
+// R164 (`docs/plans/R164-release-security-hardening.md` §2d): the drop
+// handling moved to `renderer/dropGuard.ts`, attached at the window rather
+// than here. It always claimed to cover "anywhere on the window" and never
+// did — `TitleBar` and `TabStrip` are siblings *above* `.layout`, so ~64px
+// of chrome was an unguarded drop target, where Chromium's default action
+// for a dragged link is to navigate the top frame.
 
 export function Layout(): JSX.Element {
   const layout = useSyncExternalStore(subscribeLayout, getLayoutState, getLayoutState)
@@ -198,7 +181,7 @@ export function Layout(): JSX.Element {
   )
 
   return (
-    <div className="layout" onDragOver={onDragOver} onDrop={onDrop}>
+    <div className="layout">
       <div className="layout-body">
         {documentState.phase !== 'ready' ? (
           <DocumentArea />

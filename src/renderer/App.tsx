@@ -11,6 +11,7 @@ import { Shortcuts } from './components/Help/Shortcuts'
 import { TabStrip } from './components/TabStrip/TabStrip'
 import { TitleBar } from './components/TitleBar/TitleBar'
 import { initQuitFlow } from './session/quitFlow'
+import { installDropGuard } from './dropGuard'
 
 /**
  * D4: the global keymap. Bindings load asynchronously (they may come from
@@ -60,6 +61,9 @@ export function App(): React.JSX.Element {
   // `beginSessionRestore` — arming it any time before the user tries to
   // quit is enough.
   useEffect(() => initQuitFlow(), [])
+  // R164: window-level, so no region of the window is an unguarded drop
+  // target — see dropGuard.ts for what used to fall through the chrome.
+  useEffect(() => installDropGuard(), [])
 
   return (
     <main>
