@@ -752,7 +752,12 @@ describe('createDocumentSession (D6)', () => {
       if (mid.phase !== 'ready') throw new Error('unreachable')
       expect(mid.document.pendingSpanDeltas.length).toBeGreaterThan(0)
 
-      await new Promise((resolve) => setTimeout(resolve, 60))
+      // R160 (`docs/plans/R159-fixed-duration-waits.md` §5): this was a bare
+      // 60 ms sleep gating the positive assertion below — in the very file
+      // whose helper R154 rewrote, and one of the seven sites that failed when
+      // the review halved every sleep. The helper was three lines up the file
+      // the whole time.
+      await flushReparse(session)
 
       const after = session.getSnapshot()
       if (after.phase !== 'ready') throw new Error('unreachable')

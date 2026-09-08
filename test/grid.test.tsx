@@ -6,6 +6,7 @@
  * `gridFilter.test.ts`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { POLL_MS, TIMEOUT_MS } from './support/wait'
 import { createRoot, type Root } from 'react-dom/client'
 import { SourceBuffer } from '../src/core/buffer'
 import { Interner } from '../src/core/interner'
@@ -148,9 +149,20 @@ describe('Grid on wide tables (R34 §7)', () => {
     )!.set!
     nativeSetter.call(quickFilter, 'v0_69') // f69's value on row 0 — column 69 is overflow
     quickFilter!.dispatchEvent(new Event('input', { bubbles: true }))
-    // The quick filter commits on a debounce (`FILTER_DEBOUNCE_MS`).
-    await new Promise((resolve) => setTimeout(resolve, 300))
-    await paint(<Grid store={store} sourceBuffer={sourceBuffer} members={members} />)
+    // R160 (`docs/plans/R159-fixed-duration-waits.md` §5): the quick filter
+    // commits on `FILTER_DEBOUNCE_MS` (200 ms), and this waited 300 — a 1.5×
+    // margin over a constant nothing connects to this file, and one of the
+    // seven sites that failed when the review halved every sleep. The toggle
+    // appearing is the condition; wait for that instead.
+    await vi.waitFor(
+      async () => {
+        await paint(<Grid store={store} sourceBuffer={sourceBuffer} members={members} />)
+        if (container.querySelector('.grid-hidden-matches-toggle') === null) {
+          throw new Error('the hidden-matches toggle has not appeared')
+        }
+      },
+      { interval: POLL_MS, timeout: TIMEOUT_MS }
+    )
 
     const toggle = container.querySelector(
       '.grid-hidden-matches-toggle'

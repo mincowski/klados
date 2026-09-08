@@ -23,10 +23,12 @@ import type { KladosApi } from '../src/preload/api'
 import type { DocumentSessionDeps } from '../src/renderer/session/documentSession'
 import {
   createTab,
+  getActiveSearchStoreInstance,
   getSessionFor,
   resetTabsForTests,
   setActiveTab
 } from '../src/renderer/session/tabs'
+import { POLL_MS, TIMEOUT_MS } from './support/wait'
 import { activeSession } from '../src/renderer/session/activeSession'
 import { FindBar } from '../src/renderer/components/Find/FindBar'
 import { openFind, resetFindStoreForTests } from '../src/renderer/components/Find/findStore'
@@ -140,10 +142,30 @@ async function openDocument(): Promise<void> {
   await getSessionFor(id)!.openPath('C:/docs/file.xml')
 }
 
-// Debounce (150ms, `FindBar.tsx`'s own `runSearch`) plus the chunked job's
-// own settle time.
-async function waitForSearch(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 250))
+/**
+ * R160 (`docs/plans/R159-fixed-duration-waits.md` §5): this was 250 ms, under a
+ * comment reading "Debounce (150ms) plus the chunked job's own settle time" —
+ * the failure mode stated outright, since a chunked job's settle time is not a
+ * quantity a test can know. It is now the condition: a result that is both new
+ * (so the debounced query provably ran) and complete (so the job finished).
+ */
+async function waitForSearch(before: unknown): Promise<void> {
+  await vi.waitFor(
+    () => {
+      const snapshot = getActiveSearchStoreInstance().getSnapshot()
+      if (snapshot === before) throw new Error('waitForSearch: the query has not run yet')
+      if (!snapshot.complete) throw new Error('waitForSearch: the result is not complete yet')
+    },
+    { interval: POLL_MS, timeout: TIMEOUT_MS }
+  )
+}
+
+/** Types the needle and waits for its result, capturing the pre-search
+ * snapshot so the wait can tell "ran and finished" from "never started". */
+async function searchFor(needle: string): Promise<void> {
+  const before = getActiveSearchStoreInstance().getSnapshot()
+  typeNeedle(needle)
+  await waitForSearch(before)
 }
 
 describe('R79 — a text search selects a match when its result lands', () => {
@@ -151,8 +173,7 @@ describe('R79 — a text search selects a match when its result lands', () => {
     await openDocument()
     openFind()
     await paint(<FindBar />)
-    typeNeedle('needle')
-    await waitForSearch()
+    await searchFor('needle')
     await paint(<FindBar />)
 
     expect(container.querySelector('.find-count')!.textContent).toContain('1 of 3')
@@ -166,8 +187,7 @@ describe('R79 — a text search selects a match when its result lands', () => {
     activeSession.setCaretOffset(12) // inside the second "needle" (10-16)
     openFind() // anchor captured now, at 12
     await paint(<FindBar />)
-    typeNeedle('needle')
-    await waitForSearch()
+    await searchFor('needle')
     await paint(<FindBar />)
 
     // The first match at or after 12 is the third, at offset 17 — index 2.
@@ -180,8 +200,7 @@ describe('R79 — a text search selects a match when its result lands', () => {
     await openDocument()
     openFind()
     await paint(<FindBar />)
-    typeNeedle('needle')
-    await waitForSearch()
+    await searchFor('needle')
     await paint(<FindBar />)
     expect(container.querySelector('.find-count')!.textContent).toContain('1 of 3')
 
@@ -191,10 +210,13 @@ describe('R79 — a text search selects a match when its result lands', () => {
     // stay unset for it.
     // "<a>needle needle needle</a>" — insert a space just before the
     // closing '>' (offset 26), which touches none of the three matches.
+    const afterFirstSearch = getActiveSearchStoreInstance().getSnapshot()
     activeSession.applyEdit({ start: 26, end: 26, text: ' ' })
     activeSession.setCaretOffset(26)
 
-    await new Promise((resolve) => setTimeout(resolve, 150)) // past the 5ms reparse debounce + settle
+    // R160: the reparse landing *and* the re-run finishing is the condition —
+    // "past the 5ms reparse debounce + settle" was a guess at the second half.
+    await waitForSearch(afterFirstSearch)
     await paint(<FindBar />)
 
     const snapshot = activeSession.getSnapshot()

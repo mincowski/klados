@@ -6,6 +6,7 @@
  * render anything but the "open a document" placeholder.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { POLL_MS, TIMEOUT_MS } from './support/wait'
 import { createRoot, type Root } from 'react-dom/client'
 import {
   rehydrateParseResult,
@@ -128,6 +129,27 @@ async function paint(jsx: React.ReactNode): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 50))
 }
 
+/**
+ * R160 (`docs/plans/R159-fixed-duration-waits.md` §5): the palette evaluates a
+ * path query inside a debounced effect, so every assertion below it used to sit
+ * behind a 200 ms sleep — a 1.33× margin over a debounce that is a bare
+ * `}, 150)` literal in `Palette.tsx`, which this file cannot even name. Two of
+ * the seven sites that failed when the review halved every sleep were here.
+ *
+ * The DOM says when the preview has landed, so wait for that. Repainting inside
+ * the poll is deliberate: these tests drive `root.render` explicitly rather
+ * than leaving a mounted tree to re-render itself.
+ */
+async function waitForPalette(isSettled: () => boolean): Promise<void> {
+  await vi.waitFor(
+    async () => {
+      await paint(<Palette />)
+      if (!isSettled()) throw new Error('waitForPalette: the preview has not landed')
+    },
+    { interval: POLL_MS, timeout: TIMEOUT_MS }
+  )
+}
+
 function typeInPalette(text: string): void {
   const input = container.querySelector<HTMLInputElement>('.palette-input')!
   const nativeSetter = Object.getOwnPropertyDescriptor(
@@ -173,12 +195,11 @@ describe('R72 §5 — a malformed query renders a caret under the offending char
     openPalette()
     await paint(<Palette />)
     typeInPalette('/a[') // unterminated '['
-    // The query is parsed inside the same 150ms-debounced effect that
-    // evaluates it against the store (`Palette.tsx`'s own comment: "a
-    // diagnostic shows before Enter is pressed," not synchronously on
-    // every keystroke) — wait past the debounce before checking.
-    await new Promise((resolve) => setTimeout(resolve, 200))
-    await paint(<Palette />)
+    // The query is parsed inside the same debounced effect that evaluates it
+    // against the store (`Palette.tsx`'s own comment: "a diagnostic shows
+    // before Enter is pressed," not synchronously on every keystroke) — so the
+    // diagnostic appearing is the condition (R160).
+    await waitForPalette(() => container.querySelector('.palette-path-error-query') !== null)
 
     const query = container.querySelector('.palette-path-error-query')
     const caret = container.querySelector('.palette-path-error-caret')
@@ -206,10 +227,14 @@ describe('R88 — Enter on / hands off to Find rather than publishing a result',
     openPalette()
     await paint(<Palette />)
     typeInPalette('/cars/car')
-    // The preview evaluation is debounced 150ms (`Palette.tsx`'s own
-    // comment) — Enter is gated on `displayedPathQueryResult?.ok === true`.
-    await new Promise((resolve) => setTimeout(resolve, 200))
-    await paint(<Palette />)
+    // Enter is gated on `displayedPathQueryResult?.ok === true`, which the
+    // palette reports as "Enter to show N matches" once the debounced preview
+    // has landed — until then it reads "Evaluating…" (R160).
+    await waitForPalette(() =>
+      (container.querySelector('.palette-disabled-mode')?.textContent ?? '').includes(
+        'Enter to show'
+      )
+    )
 
     const input = container.querySelector<HTMLInputElement>('.palette-input')!
     input.dispatchEvent(
@@ -221,9 +246,16 @@ describe('R88 — Enter on / hands off to Find rather than publishing a result',
 
     await paint(<FindBar />)
     // Find re-evaluates the handed-off query itself and shows the count —
-    // not a snapshot the palette computed and handed over.
-    await new Promise((resolve) => setTimeout(resolve, 200))
-    await paint(<FindBar />)
+    // not a snapshot the palette computed and handed over. R160: that count
+    // arriving is the condition.
+    await vi.waitFor(
+      async () => {
+        await paint(<FindBar />)
+        const count = container.querySelector('.find-count')?.textContent ?? ''
+        if (!count.includes(' of ')) throw new Error('Find has not reported a count yet')
+      },
+      { interval: POLL_MS, timeout: TIMEOUT_MS }
+    )
     const pathToggle = container.querySelector<HTMLButtonElement>(
       '.find-toggle[title*="Path query"]'
     )!

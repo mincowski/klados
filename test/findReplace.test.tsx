@@ -19,10 +19,13 @@ import type { KladosApi } from '../src/preload/api'
 import type { DocumentSessionDeps } from '../src/renderer/session/documentSession'
 import {
   createTab,
+  getActiveSearchStoreInstance,
+  getActiveSession,
   getSessionFor,
   resetTabsForTests,
   setActiveTab
 } from '../src/renderer/session/tabs'
+import { POLL_MS, TIMEOUT_MS } from './support/wait'
 import { registerPane, resetFocusForTests } from '../src/renderer/focus'
 import { FindBar } from '../src/renderer/components/Find/FindBar'
 import {
@@ -163,9 +166,84 @@ function typeIn(selector: string, text: string): void {
   el.dispatchEvent(new Event('input', { bubbles: true }))
 }
 
+/**
+ * R160 (`docs/plans/R159-fixed-duration-waits.md` §5): every wait in this file
+ * used to be a duration chosen against `FindBar.tsx`'s debounce — a bare
+ * `}, 150)` literal this file cannot name — plus a guess at how long the
+ * chunked search job would take. Three of the seven sites that failed when the
+ * review halved every sleep were here.
+ *
+ * **The condition has to be "a *new* result, and complete" — not "not
+ * Searching…".** The first attempt at this waited for the bar's own label to
+ * stop reading "Searching…", which looked right and was not: before the
+ * debounce fires the store still holds the *previous* result, and for a fresh
+ * bar that is the empty one, so the label already reads "No matches" and the
+ * wait returns having waited for nothing. Ten tests failed on it. That is R154's
+ * finding again in a new place — *stable and not-yet-started are
+ * indistinguishable from outside* — and the fix is the same shape: prove the
+ * work happened (a different snapshot) before believing it finished.
+ *
+ * **It must not repaint while polling**, which the second attempt did and
+ * which broke the two tests that mount `<Notifications />` alongside the bar:
+ * painting a different tree remounts `FindBar`, and the remount destroys the
+ * pending debounce timer *and* the typed input value, so the query it is
+ * waiting for can never run. The search store is not React — poll it directly
+ * and let the caller repaint afterwards, exactly as before.
+ */
+async function waitForNewSearchResult(before: unknown): Promise<void> {
+  await vi.waitFor(
+    () => {
+      const snapshot = getActiveSearchStoreInstance().getSnapshot()
+      if (snapshot === before) {
+        throw new Error('waitForNewSearchResult: the debounced query has not run yet')
+      }
+      if (!snapshot.complete) {
+        throw new Error('waitForNewSearchResult: the result is not complete yet')
+      }
+    },
+    { interval: POLL_MS, timeout: TIMEOUT_MS }
+  )
+}
+
+/**
+ * Waits for a replace to reach the buffer. R160: the session is not React, so
+ * this polls it directly rather than painting — the callers repaint for
+ * themselves straight afterwards, and several of them render `Notifications`
+ * alongside the bar.
+ */
+async function waitForDocumentText(
+  matches: (text: string) => boolean,
+  what: string
+): Promise<void> {
+  await vi.waitFor(
+    () => {
+      const state = getActiveSession().getSnapshot()
+      const bytes = state.phase === 'ready' ? state.document.sourceBuffer.bytes : new Uint8Array()
+      if (!matches(new TextDecoder().decode(bytes))) {
+        throw new Error(`waitForDocumentText: ${what}`)
+      }
+    },
+    { interval: POLL_MS, timeout: TIMEOUT_MS }
+  )
+}
+
 async function search(text: string): Promise<void> {
+  // R160: **re-searching the text already in the box produces no store change
+  // at all**, so there would be nothing for `waitForNewSearchResult` to wait
+  // for — one test does exactly that, to confirm a cancelled Replace All left
+  // the count where it was. Clearing first gives the sequence two observable
+  // transitions instead of none. Found by this conversion, not by reasoning:
+  // the wait timed out and the reason was worth keeping.
+  const input = container.querySelector<HTMLInputElement>('.find-input')
+  if (input !== null && input.value === text && text !== '') {
+    const beforeClear = getActiveSearchStoreInstance().getSnapshot()
+    typeIn('.find-input', '')
+    await waitForNewSearchResult(beforeClear)
+  }
+
+  const before = getActiveSearchStoreInstance().getSnapshot()
   typeIn('.find-input', text)
-  await new Promise((resolve) => setTimeout(resolve, 250))
+  await waitForNewSearchResult(before)
   await paint(<FindBar />)
 }
 
@@ -272,7 +350,7 @@ describe('R90 — the replace row', () => {
       (b) => b.getAttribute('aria-label') === 'Replace'
     )!
     replaceButton.click()
-    await new Promise((resolve) => setTimeout(resolve, 100))
+    await waitForDocumentText((t) => t === '{"value":"dog cat cat"}', 'the replace has not landed')
     await paint(<FindBar />)
 
     // Two "cat"s remain, and the bar has already landed on the next one.
@@ -291,7 +369,7 @@ describe('R90 — the replace row', () => {
       (b) => b.getAttribute('aria-label') === 'Replace All'
     )!
     replaceAllButton.click()
-    await new Promise((resolve) => setTimeout(resolve, 100))
+    await waitForDocumentText((t) => !t.includes('cat'), 'Replace All has not landed')
     await paint(
       <>
         <FindBar />
@@ -344,7 +422,10 @@ describe('R90 — the replace row', () => {
       (b) => b.textContent === 'Replace All'
     )!
     confirmButton.click()
-    await new Promise((resolve) => setTimeout(resolve, 100))
+    await waitForDocumentText(
+      (t) => t.includes('x'.repeat(200)),
+      'the confirmed Replace All has not landed'
+    )
     await paint(
       <>
         <FindBar />
@@ -494,7 +575,7 @@ describe('R120-R123 — the Find bar keyboard', () => {
 
     const replaceInput = container.querySelector<HTMLInputElement>('.find-replace-input')!
     keydown(replaceInput, 'Enter')
-    await new Promise((resolve) => setTimeout(resolve, 100))
+    await waitForDocumentText((t) => t === '{"value":"dog cat cat"}', 'the replace has not landed')
     await paint(<FindBar />)
 
     expect(container.querySelector('.find-count')!.textContent).toContain('of 2')
@@ -516,6 +597,9 @@ describe('R120-R123 — the Find bar keyboard', () => {
       '.find-input:not(.find-replace-input)'
     )!
     keydown(findInput, 'Enter', { ctrlKey: true, altKey: true })
+    // R160: **deliberately still a duration.** The assertion is that nothing
+    // happens, and "nothing" has no condition to wait for — a generous window
+    // for the chord to misbehave in is the correct tool, and the only one.
     await new Promise((resolve) => setTimeout(resolve, 100))
     await paint(<FindBar />)
 
@@ -538,7 +622,7 @@ describe('R120-R123 — the Find bar keyboard', () => {
       '.find-input:not(.find-replace-input)'
     )!
     keydown(findInput, 'Enter', { ctrlKey: true, altKey: true })
-    await new Promise((resolve) => setTimeout(resolve, 100))
+    await waitForDocumentText((t) => t === '{"value":"dog dog dog"}', 'the chord has not replaced')
     await paint(<FindBar />)
 
     const state = getSessionFor(id)!.getSnapshot()
@@ -633,7 +717,6 @@ describe('R126-R128 — the match count', () => {
       </div>
     )
     await search('cat')
-    await new Promise((resolve) => setTimeout(resolve, 300))
     await paint(
       <div style={{ position: 'relative', width: '900px', height: '400px' }}>
         <FindBar />
@@ -731,9 +814,10 @@ describe('R126-R128 — the match count', () => {
     await paint(<FindBar />)
     expect(container.querySelector('.find-bar')).toBeNull()
 
+    const beforeReopen = getActiveSearchStoreInstance().getSnapshot()
     openFind()
     await paint(<FindBar />)
-    await new Promise((resolve) => setTimeout(resolve, 250))
+    await waitForNewSearchResult(beforeReopen)
     await paint(<FindBar />)
 
     expect(container.querySelector<HTMLInputElement>('.find-input')!.value).toBe('cat')
@@ -752,9 +836,10 @@ describe('R126-R128 — the match count', () => {
 
     closeFind()
     await paint(<FindBar />)
+    const beforeReopen = getActiveSearchStoreInstance().getSnapshot()
     openFind()
     await paint(<FindBar />)
-    await new Promise((resolve) => setTimeout(resolve, 250))
+    await waitForNewSearchResult(beforeReopen)
     await paint(<FindBar />)
 
     expect(container.querySelector('.find-count')!.textContent).toContain('of 2')
