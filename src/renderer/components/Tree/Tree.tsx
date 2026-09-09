@@ -13,6 +13,7 @@
 import { useVirtualizer } from '@tanstack/react-virtual'
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -57,6 +58,26 @@ import './Tree.css'
 
 const ROOT: NodeRef = 0
 const ROW_HEIGHT = 23
+/** R170: the per-level indent, named because the horizontal reveal below now
+ * computes with it. It was a bare literal in the row's own style. */
+const INDENT_PX = 16
+/** Everything between a row's indent and its label — the disclosure triangle,
+ * the kind glyph, and the gaps around them. Used only to decide whether a label
+ * is far enough off-screen to be worth scrolling to, so an approximation is the
+ * right kind of value: a few pixels out changes nothing a user can see, and
+ * measuring it exactly would mean reading the DOM on every keystroke. */
+const ROW_LEAD_PX = 40
+/** How much of a label must be on screen before the reveal leaves it alone. */
+const MIN_LABEL_PX = 80
+/** Breathing room left to the left of a revealed row, so it does not sit flush
+ * against the edge with its ancestors' indentation entirely hidden. */
+const REVEAL_MARGIN_PX = 24
+/** `.tree-row`'s own `padding-right` (`--space-2`), which follows the last
+ * child and so is not covered by measuring that child's right edge. */
+const ROW_TRAILING_PX = 8
+/** `.tree-row`'s flex `gap` (`--space-1`), between the label and the child
+ * count that can follow it. */
+const ROW_GAP_PX = 4
 /** Long enough to type a multi-character search deliberately, short enough
  * that an unrelated keypress later doesn't extend a stale query — the same
  * reasoning as `keybindings.ts`'s chord timeout, at a similar magnitude. */
@@ -180,6 +201,20 @@ export function TreeContent({ document, selectedNode }: TreeContentProps): JSX.E
   // deep node in Raw leaves the Tree showing Document" (M5b): the fallback
   // used to be the whole story, silently standing in for "not found."
   const activeIndex = Math.max(0, indexOfNode(rows, selectedNode))
+  // R170: the active row's depth, pulled out as a plain number so the reveal
+  // effect below can depend on it directly. `rows` itself is rebuilt on every
+  // render, so depending on *it* would re-run the reveal continuously and fight
+  // the user's own scrolling — and holding it in a ref instead would mean
+  // writing that ref during render, which is the pattern lint rejects in
+  // `Scrollbar.tsx`. A scalar avoids both.
+  const activeDepth = rows[activeIndex]?.depth ?? 0
+  // R170: whether the overlay `<Scrollbar>` is currently drawing a horizontal
+  // track, reported by the scrollbar itself rather than recomputed here.
+  // Reserving the bottom gutter unconditionally would cost every ordinary tree
+  // — which never overflows — 15px of vertical space for nothing, so this
+  // mirrors `Grid.css`'s own conditional class rather than `margin-right`'s
+  // unconditional one.
+  const [hasHorizontalTrack, setHasHorizontalTrack] = useState(false)
 
   const parentRef = useRef<HTMLDivElement>(null)
   const rowVirtualizer = useVirtualizer({
@@ -192,6 +227,71 @@ export function TreeContent({ document, selectedNode }: TreeContentProps): JSX.E
   useEffect(() => {
     rowVirtualizer.scrollToIndex(activeIndex, { align: 'auto' })
   }, [activeIndex, rowVirtualizer])
+
+  // R170 — how wide the scrollable content actually is, so a *shallow* row's
+  // background spans it rather than stopping at the pane's own width.
+  //
+  // **`min-width: 100%` alone is not enough, and the gap only shows once the
+  // tree is scrolled.** 100% resolves against the containing block — the pane —
+  // so at `scrollLeft: 0` a shallow row looks right and tells you nothing;
+  // scrolled to the right edge of a 40-deep tree its selected background stopped
+  // 175px short (measured). Acceptance 3 asks for the backgrounds to read
+  // correctly at shallow *and* deep indentation, and that is the case it means.
+  //
+  // **Written as a CSS custom property rather than held in React state.** It is
+  // a presentational measurement, and routing it through state cost a render per
+  // measurement — `documentPropsRenderCost.test.tsx`, which counts renders
+  // across a typing burst, went from 10 to 15. A custom property reaches every
+  // row through `.tree-row`'s own rule with no render at all.
+  //
+  // **The extent is what it takes to read the label, deliberately not the
+  // preview.** `.tree-row-preview` is `flex: 1`, so it stretches to whatever the
+  // row currently is — measuring to a row's last child fed this value straight
+  // back into itself and latched, leaving the tree permanently scrollable after
+  // one deep document had been open. It is also right on its own terms: a
+  // preview exists to be truncated, and a long one should not make the whole
+  // tree scrollable.
+  //
+  // **Bounded by the rendered window** (§5: no per-frame walk of all rows) — the
+  // virtualizer keeps that at a few dozen elements however large the document.
+  useLayoutEffect(() => {
+    const el = parentRef.current
+    if (el === null) return
+    let widest = 0
+    for (const rowEl of el.querySelectorAll<HTMLElement>('.tree-row')) {
+      const label = rowEl.querySelector<HTMLElement>('.tree-row-label')
+      if (label === null) continue
+      // `offsetLeft` is relative to the row (absolutely positioned, so it is the
+      // label's offset parent) and `scrollWidth` is the label's *unclipped* text
+      // width — its rendered width is useless here, since the whole defect was
+      // `text-overflow: ellipsis` shrinking it to nothing.
+      const count = rowEl.querySelector<HTMLElement>('.tree-row-count')
+      const countWidth = count === null ? 0 : count.getBoundingClientRect().width + ROW_GAP_PX
+      widest = Math.max(widest, label.offsetLeft + label.scrollWidth + countWidth)
+    }
+    const extent = widest > 0 ? widest + ROW_TRAILING_PX : 0
+    el.style.setProperty('--tree-content-width', `${extent}px`)
+  })
+
+  // R170 (`docs/plans/R170-tree-horizontal-scroll.md` §6.5): `scrollToIndex` is
+  // vertical only, so on a deeply indented row it brought the *row* into view
+  // while its label stayed off the right edge — on a tree that can now scroll
+  // horizontally that is the same "you moved and saw nothing" this round exists
+  // to fix, on the other axis.
+  //
+  // **Computed from `depth`, not measured.** The label's position is
+  // `depth * INDENT_PX` plus a fixed lead, both of which this component already
+  // knows; reading the DOM would mean a forced layout per keystroke and would
+  // need the row to have mounted first.
+  useEffect(() => {
+    const el = parentRef.current
+    if (el === null) return
+    const indentPx = activeDepth * INDENT_PX
+    const labelStart = indentPx + ROW_LEAD_PX
+    const offRight = labelStart > el.scrollLeft + el.clientWidth - MIN_LABEL_PX
+    const offLeft = indentPx < el.scrollLeft
+    if (offRight || offLeft) el.scrollLeft = Math.max(0, indentPx - REVEAL_MARGIN_PX)
+  }, [activeIndex, activeDepth])
 
   function bump(): void {
     setVersion((v) => v + 1)
@@ -433,7 +533,7 @@ export function TreeContent({ document, selectedNode }: TreeContentProps): JSX.E
   return (
     <div className="tree-viewport">
       <div
-        className="tree scrollbar-host"
+        className={`tree scrollbar-host${hasHorizontalTrack ? ' tree-has-horizontal-track' : ''}`}
         ref={parentRef}
         role="tree"
         aria-label="Document tree"
@@ -469,7 +569,7 @@ export function TreeContent({ document, selectedNode }: TreeContentProps): JSX.E
           })}
         </div>
       </div>
-      <Scrollbar target={parentRef} axis="vertical" />
+      <Scrollbar target={parentRef} axis="both" onHorizontalTrackChange={setHasHorizontalTrack} />
     </div>
   )
 }
@@ -517,7 +617,12 @@ function TreeRowView({
       className={['tree-row', selected && 'tree-row-selected', matched && 'tree-row-matched']
         .filter(Boolean)
         .join(' ')}
-      style={{ position: 'absolute', top, left: 0, right: 0, height: ROW_HEIGHT }}
+      // R170: `right: 0` used to pin the row box to exactly the container's
+      // width, which squeezed `.tree-row-label` to nothing at depth. Width now
+      // comes from `.tree-row` itself — `max-content` floored at the pane and at
+      // the widest rendered label — so the label survives and the background
+      // still spans. See `Tree.css` and the measurement effect above.
+      style={{ position: 'absolute', top, left: 0, height: ROW_HEIGHT }}
       onMouseDown={onSelect}
       // Double-click anywhere on the row toggles, so the disclosure triangle
       // is a shortcut rather than the only way to unfold — a 16px target is
@@ -536,7 +641,7 @@ function TreeRowView({
           : undefined
       }
     >
-      <span className="tree-row-indent" style={{ width: row.depth * 16 }} />
+      <span className="tree-row-indent" style={{ width: row.depth * INDENT_PX }} />
       {expandable ? (
         <button
           type="button"
