@@ -1,0 +1,214 @@
+# R179–R181 — the caret can rest between the CR and the LF
+
+<!-- status: open -->
+
+**Open.** Register: `docs/TASKS.md`. R168 made CodeMirror's document byte-faithful by keeping the
+`\r` as an ordinary character. That was right, and it created a document position **inside** the
+CRLF pair that ordinary arrow keys and ordinary clicks reach. Typing there splices bytes between the
+CR and the LF, producing a line ending the app never intended and no other editor reads back the
+same way.
+
+Found by a user editing `spike/fixtures/small.json` by hand, in the manual pass that has now produced
+R168–R171 and R175–R178.
+
+---
+
+## 1. What was observed, and the bytes that prove it
+
+Reported verbatim:
+
+> In Raw view, I clicked somewhere in the text and the caret appeared there. That also works when I
+> click at the exact end of the line. If I click behind the text in a line, the caret does not show
+> up. But if I then start typing "ds", the typed text appears right at the end of the line. Then I
+> opened the file in VSCode and there the "ds" is displayed on a new line.
+
+The file on disk settles it without any reproduction. `spike/fixtures/small.json` now reads:
+
+```
+"  \"address\": {\r\n    \"city\": \"Frankfurt\",\rds\n    \"country\": \"Germany\"\r"
+```
+
+Ten CRLF pairs and **one bare LF** — the line the user typed on. The insertion landed at
+`…"Frankfurt",` `\r` **`ds`** `\n`, so the CR now terminates a line by itself and the LF starts the
+next one. VS Code renders a lone CR as a break, which is why `ds` appeared on its own line there and
+on paste.
+
+The file is untracked and gitignored, so nothing in the repository was damaged, but that local copy
+now holds the broken bytes and should be regenerated before it is used to judge anything else.
+
+## 2. Why the position exists
+
+R168 set `EditorState.lineSeparator.of('\n')` so that `state.doc` is byte-faithful to the window.
+CodeMirror's default split (`/\r\n?|\n/`) discards the `\r` entirely, which is what made every
+offset conversion undercount and what R168 correctly fixed.
+
+The consequence R168 did not follow through on: with `\n` as the only separator, a CRLF line's
+content **ends with the `\r`**, so `line.to` is the position *after* the CR and *before* the LF. That
+is a legal document position, one unit wide, and it sits in the middle of what the file means as a
+single line terminator.
+
+R168's own comment states the neighbouring consequence — that a lone `\r` is no longer a line break
+— and stops there. This is the other half of the same change.
+
+## 3. Measured: which input paths actually reach it
+
+Against a real `EditorView` with `EditorState.lineSeparator.of('\n')`, document
+`alpha\r\nbeta\r\ngamma\r\n`, in real Chromium via the browser project (Playwright), with genuine
+CDP-driven key events rather than synthetic ones. Line 1 is `alpha\r`, `line.to` is 6, and position
+6 is the gap.
+
+| Path | Lands at | Inside the CRLF? |
+|---|---|---|
+| `End` | 5 (before the CR) | no |
+| `Shift`+`End` | 5, selects `pha` | no |
+| `ArrowRight` from position 5 | **6** | **yes** |
+| `ArrowUp` from the line below | **12** (that line's `line.to`) | **yes** |
+| Click at the end of the rendered text | **6** | **yes** |
+| Click past the end of the line | **6** | **yes** |
+
+And the symptom the user could see, measured directly:
+
+```
+coordsAtPos(line.to)    -> NULL
+coordsAtPos(line.to - 1) -> 42
+```
+
+**CodeMirror cannot produce screen coordinates for the gap position at all**, which is exactly "the
+caret does not show up". The caret is not missing; it is at a position that has no box.
+
+Typing one character there reproduces the user's file exactly:
+
+```
+before: "alpha\r\nbeta\r\ngamma\r\n"
+after:  "alpha\rds\nbeta\r\ngamma\r\n"
+```
+
+The same probe against the default line split produces `alphads\n` — correct placement, but that
+configuration is the R168 defect and is not an option.
+
+## 4. Why R168 concluded this was unreachable, and what was wrong with it
+
+R168 considered exactly this failure, built a module to prevent it, then deleted the module after
+establishing that the three CodeMirror APIs it relied on were **on no input path**: this editor
+loads no `@codemirror/commands` keymap, so cursor motion is the browser's own contentEditable
+behaviour. `rawKeymap.ts` binds `Escape`, `Tab`, `Shift-Tab` and `Enter`, and nothing else —
+re-confirmed, so that half of the reasoning still holds.
+
+The inference drawn from it does not. "Motion is native, and native motion resolves against rendered
+geometry" was taken to mean the caret could not land on a character that renders as nothing. §3 shows
+native `ArrowRight` and native `ArrowUp` both land there, because the `\r` occupies a document
+position whether or not it paints. **The evidence gathered was about the keyboard API surface; the
+conclusion drawn was about the browser's behaviour, which was never measured.**
+
+It is worth naming because the fix R168 deleted was a `Prec.highest` keymap and an `atomicRanges`
+extension, and one of those two — the atomic ranges — was independently found to be wrong there (it
+biases by direction of travel, so a click jumped to the following line). The module deserved to be
+deleted. The conclusion that no protection was needed did not follow from that.
+
+## 5. What else the gap breaks
+
+Beyond the insertion the user hit:
+
+- **Backspace at the start of a line** deletes the `\n` and leaves the `\r` stranded inside the
+  joined line — `alpha\rbeta`. A lone CR in the middle of a line, silently.
+- **Delete at the end of a line** (caret before the CR) removes the `\r` alone and converts that one
+  line ending from CRLF to LF, silently.
+- Both survive a save, because invariant 6 means the buffer is written verbatim. The corruption is
+  durable and invisible in Klados' own rendering — the same property that made R168 silent.
+
+## 6. R179 — the selection never rests inside a CRLF pair
+
+A transaction filter that inspects every selection range's endpoints and moves any endpoint `p`
+where `doc[p-1] === '\r'` and `doc[p] === '\n'` back to `p - 1`.
+
+A filter is the right seam because **every** way the selection changes is a transaction: native
+arrow motion, mouse clicks, drag selection, programmatic jumps from Locate in Source, and the
+selection CodeMirror derives after native typing. Fixing it once there covers the paths in §3's
+table and the ones nobody has enumerated, which is R164's argument and R171's.
+
+Requirements:
+
+- **Both endpoints of every range**, not just the head — a drag can leave `anchor` in the gap.
+- **Multiple ranges**, since `changeByRange` and future multi-cursor work produce them.
+- **Position 0 and the end of the document** must be safe to test without reading out of bounds.
+- **A line ending in LF alone is untouched**, and a mixed-ending file is handled per position rather
+  than per document.
+- **The clamp must not fight the user**: moving to `p - 1` is the position they visibly aimed at in
+  every case in §3, since `p - 1` is where the rendered text ends.
+
+Also to be settled by measurement during the round, not assumed: whether a transaction that
+*inserts* at the gap position can arrive without a preceding selection transaction to clamp — drag
+and drop and IME composition are the candidates. If one can, the filter clamps insertion positions
+too; if none can, the plan says so rather than adding speculative code.
+
+**Acceptance is the user's own sequence:** click past the end of a line in a CRLF document, type,
+save, and read the bytes back — the CRLF pair is intact and the typed text precedes it.
+
+## 7. R180 — a deletion crosses the whole line ending, never half of it
+
+With R179 in place the caret cannot sit inside the pair, which removes the insertion defect but not
+§5's two deletion defects: those start from positions either side of a *complete* CRLF and delete
+one unit.
+
+Backspace at a line's start must remove `\r\n` together when the preceding line ends in CRLF, and
+Delete at the position before a `\r` must do the same. Neither is currently bound at all, so this is
+a new binding rather than a change to one, and it must fall through to native behaviour everywhere
+else rather than reimplementing deletion.
+
+**The test is on the bytes, not the document**: delete across a CRLF boundary, save, and assert the
+buffer contains no lone `\r` and no lone `\n` that was not there before.
+
+## 8. R181 — Enter inserts the document's own line ending
+
+Verified, not assumed: `rawKeymap.ts`'s `insertNewlineAndIndentCommand` builds
+`const insert = '\n' + leadingWhitespace(line.text)`, a literal LF. **Every line a user adds to a
+CRLF file gets an LF ending**, so editing a CRLF document steadily converts it to a mixed-ending
+one — a smaller, slower version of the same silent corruption.
+
+The line ending to insert must come from the document, not from `EditorState.lineBreak`, which
+follows `lineSeparator` and is deliberately pinned to `\n` by R168 so that splitting stays exact on
+mixed files. So the command reads the ending of the line it is splitting (or the document's dominant
+ending) and inserts that.
+
+**The decision this needs, and it belongs to the round rather than to this plan:** what a document
+with mixed endings should get. Per-line matching is the least surprising and is what makes an
+existing CRLF file stay CRLF; a document-wide dominant ending is more predictable and is what most
+editors do. Both are defensible and the choice goes in `DECISIONS.md`.
+
+R181 is separable. If it is dropped, R179 and R180 still stand on their own and the plan loses
+nothing but the slow drift.
+
+## 9. What must not be done
+
+- **Not `atomicRanges`.** Already tried and already found wrong for this in R168: it biases by
+  direction of travel, so a range spanning a line break resolves to the wrong side and a click jumps
+  to the next line.
+- **Not reverting `lineSeparator`.** The default split discards the `\r`, which is the R168 defect
+  and a byte-corruption bug an order of magnitude worse than this one. R168 §2's reasoning for
+  preferring one facet over teaching four conversions about dropped CRs is unchanged.
+- **Not hiding the `\r` with a replacing decoration alone.** It changes what paints, not which
+  positions exist, so §3's arrow-key paths still reach the gap.
+- **Not a fix in `rawEdit.ts`'s offset mapping.** The mapping is correct — R168 made it so. The
+  defect is the position the user is allowed to occupy, which is upstream of every conversion.
+
+## 10. Acceptance
+
+1. No sequence of native arrow keys, clicks or drags leaves a selection endpoint between a `\r` and
+   its `\n`, asserted against a real browser rather than a synthetic event.
+2. The user's reported sequence, driven end to end on a CRLF document, leaves the bytes correct.
+3. A deletion across a line ending removes both bytes or neither, asserted on the saved buffer.
+4. If R181 lands: a line added to a CRLF document ends with CRLF, and the choice for mixed documents
+   is recorded in `DECISIONS.md`.
+5. The caret is visible wherever it can now be placed — §3's `coordsAtPos` returning `NULL` was the
+   visible half of this defect, and no reachable position may keep that property.
+6. An LF-only document behaves exactly as it does today, asserted rather than assumed.
+
+## 11. Out of scope
+
+Lone-CR documents as a line-ending convention (R168 settled that they are ordinary text). Any change
+to how the buffer is saved. Normalising a file's endings on open or on save — this plan is about not
+corrupting what is there, not about tidying it.
+
+## 12. Version
+
+No bump implied — defect fixes against unreleased `1.0.0`, consistent with R168–R178.
