@@ -322,3 +322,94 @@ describe('Raw view follows a buffer rewritten outside it (R100)', () => {
     expectViewMatchesBuffer(tabId)
   })
 })
+
+/**
+ * R168 (`docs/plans/R168-crlf-edit-offset.md` §8.4) — the same cases against
+ * **CRLF** documents.
+ *
+ * Every fixture above is LF-only, and so was every other Raw edit fixture in
+ * the suite, which is the whole reason a one-byte-per-line-break splice error
+ * lived in `Raw.tsx` undetected: on an LF document CodeMirror's units and the
+ * buffer's bytes agree exactly, and the conversion between them was never
+ * exercised against the line ending most of the target platform uses.
+ *
+ * **`expectViewMatchesBuffer` is already the exact assertion the defect
+ * violated** — the view's text against the buffer's own bytes — so these need
+ * no new machinery, only a fixture whose line endings differ from the one
+ * assumption the code was making. Each of these fails without
+ * `EditorState.lineSeparator.of('\n')`: CodeMirror's document drops every
+ * `\r`, and the comparison is against a buffer that still has them.
+ *
+ * **Format and Minify are deliberately absent.** Both regenerate the document
+ * through the format module, which emits its own line endings, so what they do
+ * to a CRLF file is a question about the *formatter*, not about whether the Raw
+ * view's offsets are correct. R168 neither changes nor answers it; the question
+ * is recorded as an open one in the plan's Results.
+ */
+describe('Raw view follows a buffer rewritten outside it — CRLF documents (R168)', () => {
+  it('Replace All', async () => {
+    const source = '{\r\n"a":"xy",\r\n"b":"xy"\r\n}'
+    const tabId = await openTab(source)
+    const session = getSessionFor(tabId)!
+    // Offsets derived from the source rather than written out: the fixture is
+    // ASCII apart from its line endings, so an index into the string is a byte
+    // offset, and deriving them keeps the two occurrences right if the fixture
+    // is ever edited.
+    const first = source.indexOf('xy')
+    const second = source.indexOf('xy', first + 1)
+    const outcome = session.applyReplaceAll(
+      [
+        { start: first, end: first + 2 },
+        { start: second, end: second + 2 }
+      ],
+      'ZZZZ'
+    )
+    expect(outcome.ok).toBe(true)
+    await settle()
+    expectViewMatchesBuffer(tabId)
+  })
+
+  it('Undo', async () => {
+    const source = '{\r\n"a":"xy"\r\n}'
+    const tabId = await openTab(source)
+    const session = getSessionFor(tabId)!
+    const at = source.indexOf('xy') + 2
+    session.applyEdit({ start: at, end: at, text: 'QQ' })
+    await settle()
+    session.undo()
+    await settle()
+    expectViewMatchesBuffer(tabId)
+  })
+
+  it('Redo', async () => {
+    const source = '{\r\n"a":"xy"\r\n}'
+    const tabId = await openTab(source)
+    const session = getSessionFor(tabId)!
+    const at = source.indexOf('xy') + 2
+    session.applyEdit({ start: at, end: at, text: 'QQ' })
+    await settle()
+    session.undo()
+    await settle()
+    session.redo()
+    await settle()
+    expectViewMatchesBuffer(tabId)
+  })
+
+  it('Reload', async () => {
+    const { deps, api } = depsForWithApi('{\r\n"a":1\r\n}', 20)
+    const tabId = createTab(deps)
+    const session = getSessionFor(tabId)!
+    await session.openPath('C:/docs/edit.json')
+    await paint()
+    await waitForEditorMounted()
+    await paint()
+
+    // Reloading into a document with *more* CRLFs than the one on screen —
+    // the re-slice has to stay byte-faithful across a change in how many of
+    // them there are, not merely across a same-shaped rewrite.
+    api.read.mockResolvedValueOnce(utf8('{\r\n"a":99,\r\n"b":2\r\n}'))
+    await session.reloadAndDiscard()
+    await settle()
+    expectViewMatchesBuffer(tabId)
+  })
+})

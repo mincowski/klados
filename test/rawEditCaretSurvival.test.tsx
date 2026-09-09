@@ -275,4 +275,42 @@ describe('Raw view: typing survives a same-document reparse (R41)', () => {
     const viewAfter = editorViewIn(container)
     expect(viewAfter.scrollDOM.scrollTop).toBe(scrollBefore)
   })
+
+  it('a run of keystrokes on a CRLF document lands in the buffer in order (R168)', async () => {
+    // R168 (`docs/plans/R168-crlf-edit-offset.md` §8.4). Every fixture in this
+    // file is LF-only, which is how a splice that drifted one byte per
+    // preceding line break stayed invisible: on an LF document CodeMirror's
+    // units and the buffer's bytes agree exactly.
+    //
+    // This is the *sequencing* half rather than a second single-keystroke
+    // case (`rawCrlfEdit.test.tsx` owns those): three consecutive keystrokes
+    // on a line with two CRLFs before it, each measured against a document the
+    // previous one already changed. A conversion that is wrong by a constant
+    // would still be caught by one keystroke; one wrong in a way that
+    // accumulates only shows up here.
+    const source = '{\r\n  "a": 1,\r\n  "b": "xy"\r\n}'
+    await openTab(source)
+    const view = editorViewIn(container)
+    view.focus()
+
+    const base = view.state.doc.toString().indexOf('xy') + 2
+    for (let i = 0; i < 3; i++) {
+      view.dispatch({
+        changes: { from: base + i, to: base + i, insert: String(i) },
+        selection: { anchor: base + i + 1 }
+      })
+    }
+
+    const snapshot = getActiveSession().getSnapshot()
+    if (snapshot.phase !== 'ready') throw new Error('unreachable')
+    const buffer = new TextDecoder().decode(snapshot.document.sourceBuffer.bytes)
+    expect(buffer).toBe('{\r\n  "a": 1,\r\n  "b": "xy012"\r\n}')
+
+    // And the reparse that follows leaves it alone — the step at which the
+    // originally reported symptom became visible on screen.
+    await flushReparse()
+    expect(editorViewIn(container).state.doc.toString()).toBe(
+      '{\r\n  "a": 1,\r\n  "b": "xy012"\r\n}'
+    )
+  })
 })

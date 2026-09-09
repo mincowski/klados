@@ -346,6 +346,39 @@ export function RawContent({ document, caretOffset, selectedNode }: RawContentPr
     const state = EditorState.create({
       doc: text,
       extensions: [
+        // R168 (`docs/plans/R168-crlf-edit-offset.md`) — **the single line
+        // that makes CodeMirror's document byte-faithful to the window.**
+        //
+        // CodeMirror's default split is `/\r\n?|\n/`, which treats a CRLF as
+        // one line break and **does not keep the `\r` in the document at
+        // all**. Every offset in this directory crosses between CodeMirror's
+        // UTF-16 positions and the buffer's bytes through an offset map built
+        // from the window *text* — which does contain the `\r` — so the two
+        // sides were measuring different strings and every conversion
+        // undercounted by the number of line breaks before it. An edit on
+        // line 2 of a CRLF file spliced one byte early; on line 10, nine. It
+        // was silent, because the user sees CodeMirror's own rendering and
+        // only the saved bytes were wrong.
+        //
+        // Splitting on `\n` alone leaves the `\r` as an ordinary character at
+        // the end of its line, so `state.doc` and `handle.text` agree unit for
+        // unit and **every existing conversion becomes correct with no other
+        // change** — `rawEdit`'s two maps, `rawCaretSync`'s, and the
+        // decorations'. That is the whole reason this was preferred over
+        // teaching each conversion about dropped CRs: the bug is one
+        // disagreement, and this removes it rather than compensating for it
+        // in four places.
+        //
+        // `EditorState.lineBreak` follows this facet, so Enter inserts `\n` —
+        // unchanged from before, since the facet was previously unset and
+        // defaulted to the same thing.
+        //
+        // **Consequence, stated rather than discovered later:** a lone `\r` is
+        // no longer treated as a line break. No format this app parses emits
+        // one (it is a pre-1999 Mac convention), and treating it as ordinary
+        // text is exactly what keeps the document byte-faithful. Mixed CRLF/LF
+        // files — which are common — are handled exactly.
+        EditorState.lineSeparator.of('\n'),
         readOnlyCompartment.of(EditorState.readOnly.of(document.readOnly)),
         wrapCompartment.of([]),
         rawDecorationsExtension(

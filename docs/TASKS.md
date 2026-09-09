@@ -106,7 +106,7 @@ so a reader of an old commit message can still find out what `R41` was.
 | **R157–R158** | built | `docs/plans/R157-package-check.md` |
 | **R159–R163** | built | `docs/plans/R159-fixed-duration-waits.md` |
 | **R164–R167** | built ⚠ | `docs/plans/R164-release-security-hardening.md` |
-| **R168** | **OPEN** | `docs/plans/R168-crlf-edit-offset.md` |
+| **R168** | built ⚠ | `docs/plans/R168-crlf-edit-offset.md` |
 | **R169** | **OPEN** | `docs/plans/R169-external-change-reload.md` |
 | **R170** | **OPEN** | `docs/plans/R170-tree-horizontal-scroll.md` |
 | **R171** | **OPEN** | `docs/plans/R171-watcher-error-handling.md` |
@@ -132,6 +132,7 @@ disclosed in its own document too; this is the list that did not exist before.
 
 | Owed | Where | Why it is still open |
 |---|---|---|
+| **R168: whether a mouse *click* past the end of a CRLF line can put the caret between the `\r` and the `\n`.** The keyboard path is measured and correct; the pointer path is not. If reachable, text typed at that one position turns the line ending into a bare LF — cosmetic, but a fidelity leak. | `docs/plans/R168-crlf-edit-offset.md` §11 | `caretPositionFromPoint` and `caretRangeFromPoint` are both unavailable in the browser-project harness, so any answer from it would be a guess dressed as a measurement. Needs one manual check on a real build. |
 | **R164: dropping a *link* on the title bar is not confirmed on a real build.** The navigation guard is tested at the decision level and the drop guard at the event level; what is unverified is the OS gesture that produces the event. | `docs/plans/R164-release-security-hardening.md` §9 | Native drag-drop cannot be dispatched from the harness — flagged as manual by §2e before the work started, not discovered late. |
 | **R166: the full lifecycle under `sandbox: true` is not exercised.** Automated coverage reaches the preload surface, an IPC round trip and the document read path (`stat`, `mintReadToken`); **Save, Save As, file watching and an edit cycle are not**. | `docs/plans/R164-release-security-hardening.md` §9 | Nothing suggests they are broken and the seam they share (the contextBridge) is proven — but §4 asked for the lifecycle, and this is not the whole of it. |
 | **R167's checksum job has never run for real.** The hashing logic is dry-run; `gh release download` against a real draft release is not. | `docs/plans/R164-release-security-hardening.md` §9 | By R141/R151's own argument the first genuine exercise is a `v*` tag, and a draft release cannot be rehearsed without making one. |
