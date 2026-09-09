@@ -113,6 +113,7 @@ so a reader of an old commit message can still find out what `R41` was.
 | **R172–R174** | **OPEN** | `docs/plans/R172-published-identity.md` |
 | **R175–R178** | **OPEN** | `docs/plans/R175-self-write-suppression.md` |
 | **R179–R181** | **OPEN** | `docs/plans/R179-crlf-caret-position.md` |
+| **R182** | **OPEN** | `docs/plans/R182-ci-apt-hardening.md` |
 
 ### Pre-`R` milestones
 
@@ -325,7 +326,9 @@ disclosed in its own document too; this is the list that did not exist before.
 ` — `O(1)` in every case, and **majority is not needed at all**. “Always `
 `” is rejected because it is the current behaviour and the defect; majority was measured at ~820 MB/s (244 ms at the 200 MB ceiling) — affordable once, but needing a cache every edit invalidates, and leaving open which population to measure. The “line before” clause displaces it: it covers the last line, which is where **pressing Enter at the end of a file** lands every time a document has a trailing newline, so the single most common Enter in the editor is answered by one lookup rather than a scan. **No version bump implied.** |
 
-**Next free id: R182.**
+| **R182** | `docs/plans/R182-ci-apt-hardening.md` | — | **CI takes a hard dependency on a vendor apt repository the project never uses.** Found by CI itself: `ubuntu-latest` failed twice, eight minutes apart, on a **documentation-only** pull request that could not have touched apt, while macOS and Windows passed the full suite both times. Google’s Chrome mirror served a `Release` file created at 17:16 beside a `Packages.gz` last modified at 09:41, the hashes disagreed, and `apt-get update` exited 100 — **before a single test ran**, so the red was an absence of evidence rather than evidence of a defect. The dependency is accidental: `--with-deps` runs `apt-get install`, and `apt-get update` refreshes **every** configured source rather than the ones an install needs; the runner image preinstalls Google Chrome and its apt source, and nothing here uses it, since Playwright downloads its own Chromium and `_electron` launches the app’s bundled Electron. **The exposure is two steps, not one** — `Install xvfb` is a second `apt-get update` over the same sources, so a fix guarding only the Playwright step would be one reordering away from the same failure, which is R164’s argument again. **The fix** is a single Linux-only step before both consumers, removing the sources by **grepping for the host rather than naming the file**: a filename match would work until a runner image renamed it and would then stop silently, bringing the dependency back with nothing to say so. `xargs -r` makes an image that has already dropped it a no-op. **Rejected with reasons**: dropping `--with-deps` (trades a visible external outage for an intermittent missing library), retrying (a fixed-duration wait wearing a hat — R159–R163 — and the rerun eight minutes later shows it would not have helped), and `|| true` (hides failures of the sources that *are* needed). **Verification is weaker than this project’s norm and the plan says so rather than glossing it**: the trigger is a third-party mirror’s inconsistency, which cannot be induced and will not still be true at review time, so acceptance is this round’s own CI run reaching the test step on all three platforms. Also corrects `ci.yml`’s comment claiming “exactly two Linux-only steps”, now three — a stale count in a comment nobody re-reads is where the four-places problem starts. **No version bump implied.** |
+
+**Next free id: R183.**
 
 **First entry with no milestone**, and the first under the per-topic document convention
 (`CLAUDE.md` § "Plan documents"). The "Milestone at allocation" column stays for the historical
