@@ -16,6 +16,44 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R169 — "Reload and Discard" looked like a dead button, and Keep Mine destroyed your edits · built
+
+**Plan:** `docs/plans/R169-external-change-reload.md`
+
+**The user's own guess was the mechanism.** They reported that Reload appeared to do nothing, then
+that clicking Keep Mine made the banner vanish *and* the file reload — "maybe a temporal
+coincidence." It was. Reproduced against the real session before anything changed: nothing about the
+state moves at the click, the banner clears at the *Keep Mine* click because that flag is synchronous,
+and the reload lands moments later and replaces the buffer regardless.
+
+**Which means the more serious half was not the papercut.** `keepMine()` cleared the flag and never
+touched `reloadAbort`, so the button that exists to protect unsaved edits discarded them. The
+cancelling mechanism was already there and simply never invoked — the fix is two lines, and finding
+that it was needed took the reproduction.
+
+**The plan's suggested indicator was wrong and was not built.** §4.2 left open whether to reuse
+`phase: 'parsing'`. `DocumentArea`'s `case 'parsing'` does not render an indicator beside the
+document — it returns the "Opening…" view *instead of* the panes, so a reload entering it would
+unmount and remount everything (R41's caret and scroll loss), flash the whole view for an operation
+that takes milliseconds, and label a reload "Opening". Hence `reloadPending` as a flag, with the
+reason recorded on the field itself.
+
+**The visual decision was rendered in both themes and shown before it was settled** (`PLANNING.md`
+§1). The existing banner changes to "Reloading … from disk…" rather than a new indicator appearing —
+which is what lets the round satisfy §5 with **no timer at all**: an element already on screen cannot
+flash, so there is no threshold to tune and a 5 ms reload costs nothing. Keep Mine stays as the
+cancel, now that it genuinely cancels.
+
+**Both behaviours verified by mutation**, and one mutation went wrong instructively: the first
+attempt matched an identical two-line sequence in the document-*close* path, silently removing a real
+abort there while the suite stayed green — which reads as "the test is vacuous" when the truth was
+"the mutation missed." Checking that a mutation landed where it was aimed is part of the technique,
+not an optional extra.
+
+Suite 1874 → 1887. One adjacent gap disclosed rather than fixed: a *clean* document's background
+auto-reload still fails silently, because the session has no one to report to.
+
+
 ## R168 — a Raw edit on a CRLF document landed at the wrong byte · built ⚠
 
 **Plan:** `docs/plans/R168-crlf-edit-offset.md`

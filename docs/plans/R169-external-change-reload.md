@@ -1,8 +1,10 @@
 # R169 — "Reload and Discard" looks like a dead button
 
-<!-- status: open -->
+<!-- status: built -->
 
-**Open.** Register: `docs/TASKS.md`. Found by a user running R164–R167's owed manual pass. The
+**Built.** Register: `docs/TASKS.md`. Results in §8. **The hypothesis below was confirmed and the
+second-order defect was real: "Keep Mine" destroyed the edits it exists to protect.**
+Found by a user running R164–R167’s owed manual pass. The
 report is precise and worth quoting, because the second sentence is the diagnosis:
 
 > Nothing happened in the UI, not sure if it reloaded in the background. When I clicked "keep mine",
@@ -105,3 +107,135 @@ one reasoned about came back as a follow-up round.
 
 The CRLF corruption (R168) and the tree's horizontal scrolling (R170), both found in the same
 manual pass and both unrelated to this one.
+
+---
+
+## 8. Results
+
+**Built.** The hypothesis in §2 was confirmed exactly, the second-order defect in §3 turned out to
+be real and reachable, and the plan's own suggestion for the indicator (§4.2) turned out to be wrong
+and was not implemented.
+
+### 8a. §2's hypothesis was right, and the user's guess was the mechanism
+
+Reproduced against the real session before anything was changed. The user wrote *"maybe a temporal
+coincidence"*; it was:
+
+```
+banner up               : {"a":2}   external=true   dirty=true
+immediately after click : {"a":2}   external=true   dirty=true   ← nothing changes
+right after Keep Mine   : {"a":2}   external=false  dirty=true   ← banner vanishes here
+after the reload lands  : {"a":99}  external=false  dirty=false  ← the edit is gone anyway
+```
+
+Every line of §1 held. Nothing moves at the click, the banner clears at the *Keep Mine* click rather
+than at the reload, and the two unrelated events read as one.
+
+**§3's defect is real: clicking Keep Mine destroyed the edits it exists to protect.** The banner
+offered two outcomes and the first was not revocable. That is the more serious half of this round —
+the missing indicator is a papercut; this one loses work.
+
+### 8b. What landed
+
+1. **`OpenDocument.reloadPending`** — the state that did not exist. Raised before the first `await`
+   in `reloadFromDisk`, lowered on every exit including the early returns, and lowered *in the same
+   `setState` that swaps the document* on success, so there is no frame in which the new content is
+   showing while the acknowledgement is still up.
+
+2. **`keepMine()` cancels an in-flight reload.** The mechanism was already there and simply never
+   invoked: dropping `reloadAbort` makes `reloadFromDisk`'s own supersession checks bail before
+   committing, and `abort()` additionally rejects the in-flight `parseFromUrl` through the signal.
+   The fix is two lines; finding that it was needed took the reproduction.
+
+3. **`reloadAndDiscard` resolves a `ReloadOutcome`** instead of `void`, and the command acts on it.
+   **`cancelled` is a third outcome, not a failure** — a reload superseded by Keep Mine did what it
+   was told, and a red banner there would punish someone for choosing to keep their own edits.
+
+4. **The banner reports the reload** (§8c).
+
+### 8c. The visual decision, rendered before it was settled (`PLANNING.md` §1)
+
+Rendered against the app's own stylesheets in both themes and put in front of the user before the
+round closed, per §1's rule.
+
+**The chosen shape: the existing banner changes, rather than a new indicator appearing.** While the
+reload runs it reads *"Reloading data.json from disk…"* and offers only **Keep Mine**.
+
+**That choice is what makes §5 satisfiable with no timer at all.** §5 asks for no artificial delay
+and no spinner flashing for 16 ms, and its own suggestion — show the indicator only after a
+threshold — is a delay, just a defensible one. An element *already on screen* changing its text
+cannot flash, so there is no threshold, no timer, and a 5 ms reload costs nothing. Acceptance 2
+(visible within one frame) and acceptance 6 (no artificial delay) stop being in tension.
+
+**Keep Mine stays, and is the cancel.** It reads correctly mid-reload — the user is still choosing
+between disk and their own edits — and item 2 above made it genuinely revocable, so it is a real
+escape hatch rather than a decoration. "Reload and Discard" is dropped while it is running, because
+it is the thing already happening.
+
+**A background auto-reload raises no banner**, asserted by its own test. A clean document
+auto-reloads with no click behind it; there is no decision to present, and a notification appearing
+unbidden for an operation nobody asked for is noise.
+
+### 8d. §4.2's suggestion was wrong, and was not implemented
+
+The plan said the constraint was that *"`DocumentArea.tsx` can render the same indicator an open
+already renders"*, leaving open whether to reuse `phase: 'parsing'`.
+
+**Reusing it is not an option, and the plan's own §4.2 already half-suspected why.** `DocumentArea`'s
+`case 'parsing'` does not render an indicator *beside* the document — it returns the "Opening
+{fileName}…" view **instead of** the panes. A reload entering that phase would unmount and remount
+every pane, which is the caret and scroll destruction R41 exists to prevent, plus a full-view flash
+on an operation that usually takes a few milliseconds, plus a tab label reading "parsing" and a
+progress view saying "Opening" for a file that is already open.
+
+Read at the line before building on it, per `PLANNING.md` §2. Hence a flag, not a phase — and the
+reason is recorded on the field itself, where the next person to consider a phase will find it.
+
+### 8e. Verified by breaking it
+
+Both new behaviours were confirmed non-vacuous by mutation, not by their passing:
+
+- Removing the two lines that make `keepMine` cancel: **two tests fail**, including the reproduction
+  — `expected '{"a":99}' to be '{"a":2}'`, which is the user's lost edit, in an assertion.
+- Restoring the command to `void ctx.session.reloadAndDiscard()`: the failing-reload test fails.
+
+**One mutation went wrong in a way worth recording.** The first attempt at the `keepMine` mutation
+matched an identical two-line sequence in the *document-close* path instead, silently removing a
+real abort there — and the suite stayed green, which read as "the test is vacuous" when the truth was
+"the mutation missed." Caught by checking that the mutation had landed where it was aimed rather than
+trusting that it had. **A mutation you did not verify applied is not evidence of anything**, and a
+green suite after one is the least trustworthy signal of the two possible readings.
+
+### 8f. Acceptance, criterion by criterion
+
+1. **Reproduced** (§8a) — and the reproduction is now a test.
+2. **Visible within one frame** — `reloadPending` is raised before the first `await`, asserted
+   synchronously after the call returns, with the phase asserted to still be `ready`.
+3. **The banner clears with the reload landing** — asserted in the same test that checks the content
+   changed, since both happen in one `setState`.
+4. **§3 has a defined behaviour with a test** — Keep Mine cancels; the edit survives; the outcome is
+   `cancelled`; a second test drains the microtask queue to catch a bail-out that still lets a later
+   continuation write.
+5. **A failing reload surfaces an error** — the session returns a message and the real registered
+   command is driven against a stub session to prove it notifies.
+6. **No artificial delay** — no timer exists anywhere in the change (§8c).
+
+Suite **1874 → 1887**, lint at its 3-warning ratchet, typecheck clean.
+
+### 8g. Review pass
+
+Reviewed as a separate pass over `git diff`. One finding, fixed: the failing-reload path was
+originally covered only at the session level, so the command's `notify` call — the thing acceptance
+5 is actually about — was asserted by reading it. `Command.run` takes its session through an
+`AppContext`, so it is drivable against a stub; three tests now cover fail, cancelled and success.
+
+### 8h. Not fixed, and disclosed
+
+**A clean document's background auto-reload still fails silently.** `handleExternalChange` calls
+`reloadFromDisk` and now receives an outcome it ignores, because it is invoked from the watcher
+subscription and has no caller to hand a failure to. Surfacing it would mean giving
+`documentSession.ts` a notification dependency it deliberately does not have — `save` has the same
+shape and the same gap. The user-visible consequence is narrow: a file changed on disk, the reload
+of it failed, and the pane keeps showing content that is stale rather than saying so. Recorded
+rather than fixed, because the fix is an architectural decision about where the session may report
+to, not a line in this round.

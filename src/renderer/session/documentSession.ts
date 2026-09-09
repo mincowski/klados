@@ -80,6 +80,21 @@ import {
  * "Saved" confirmation would show one for a cancelled dialog too. */
 export type SaveAsOutcome = SaveOutcome | { readonly ok: true; readonly cancelled: true }
 
+/**
+ * R169 — what a reload from disk resolves to.
+ *
+ * `cancelled` is a third outcome rather than a failure, and the distinction
+ * is load-bearing: a reload superseded by "Keep Mine" or by a newer reload
+ * did exactly what it was told, and reporting it as an error would put a red
+ * banner in front of a user who just chose to keep their own edits. Only a
+ * genuine failure — the file is gone, the read was refused, the parse threw —
+ * carries a message worth showing.
+ */
+export type ReloadOutcome =
+  | { readonly ok: true; readonly cancelled?: false }
+  | { readonly ok: true; readonly cancelled: true }
+  | { readonly ok: false; readonly message: string }
+
 /** R90 (`R86-find-as-query-surface.md` §6) — Replace All's own byte span,
  * `{ start, end }` rather than a full `SearchResult` (`starts`/`ends`
  * arrays): the caller (`FindBar`) already has both as parallel arrays from
@@ -233,6 +248,26 @@ export interface OpenDocument {
    * clean document reloads silently the moment the change is detected,
    * never sets this. */
   readonly externalChangeDetected: boolean
+  /** R169 (`docs/plans/R169-external-change-reload.md`): a reload from disk
+   * is in flight right now.
+   *
+   * **The state that did not exist, and whose absence was the whole
+   * defect.** `reloadFromDisk` never leaves `phase: 'ready'` — it aborts the
+   * in-flight work, awaits a read and a parse, and swaps the document in one
+   * `setState` at the end — so between the click and the parse completing
+   * there was nothing on screen that had changed: no phase transition, no
+   * indicator, and the banner still sitting there because it is derived from
+   * `externalChangeDetected`, which only clears when the reload commits.
+   * Every visible signal said nothing had happened, which reads as a dead
+   * button.
+   *
+   * Deliberately a flag rather than a phase. A phase would make
+   * `DocumentArea.tsx` swap the document out for the "Opening…" view it
+   * renders for `parsing`, unmounting and remounting every pane — the caret
+   * and scroll loss R41 exists to prevent, plus a full-view flash on a
+   * reload that usually takes a few milliseconds. A reload keeps its
+   * document on screen; only the acknowledgement is new. */
+  readonly reloadPending: boolean
   /** M5-PLAN.md H7 (§11.2's soft-cap shape): a Format/Minify request on a
    * document at or above `TRANSFORM_CONFIRM_BYTES`, waiting on
    * `confirmTransformAnyway`/`cancelTransform` rather than running
@@ -403,10 +438,23 @@ export interface DocumentSession {
    * externalChangeDetected` is set (a change landed while there were
    * unsaved edits, so it wasn't auto-reloaded). Also what a clean
    * document's *silent* auto-reload calls internally; no separate
-   * mechanism. Restores selection via F5's cascade. */
-  reloadAndDiscard(): Promise<void>
+   * mechanism. Restores selection via F5's cascade.
+   *
+   * **R169: resolves with an outcome rather than `void`.** It used to
+   * resolve `void` and every failure path returned early and silently, so a
+   * reload of a file that had since been deleted left the banner up with no
+   * explanation — the same "looks dead" symptom as the missing indicator,
+   * from a genuinely different cause. The caller surfaces it; this module
+   * stays free of the notification store, exactly as `save` does. */
+  reloadAndDiscard(): Promise<ReloadOutcome>
   /** F8: dismisses a pending external-change notice without reloading —
-   * "Keep mine." A no-op if nothing is pending. */
+   * "Keep mine." A no-op if nothing is pending.
+   *
+   * **R169: also cancels a reload that is already in flight.** It used to
+   * clear the flag alone, so a user who clicked Reload, saw nothing happen,
+   * and clicked Keep Mine to back out still lost their edits when the reload
+   * landed moments later — the banner offered two outcomes and the first one
+   * was not revocable. Reproduced before it was fixed. */
   keepMine(): void
   /** F6 (M3-PLAN.md): undoes the most recent undo entry (a whole coalesced
    * burst, not one keystroke) — a no-op with nothing to undo, no document
@@ -777,6 +825,7 @@ export function createDocumentSession(deps: DocumentSessionDeps = {}): DocumentS
         dirty: false,
         reparsePending: false,
         externalChangeDetected: false,
+        reloadPending: false,
         pendingTransform: null,
         minifiedBannerDismissed: false,
         transformInProgress: false,
@@ -2101,15 +2150,20 @@ export function createDocumentSession(deps: DocumentSessionDeps = {}): DocumentS
    * F5's own cascade — the reload produces a brand new store exactly the
    * way an ordinary reparse does, so the same machinery applies.
    */
-  async function reloadFromDisk(): Promise<void> {
-    if (state.phase !== 'ready') return
+  async function reloadFromDisk(): Promise<ReloadOutcome> {
+    if (state.phase !== 'ready') return { ok: false, message: 'No document is open.' }
     const api = getApi()
-    if (api === undefined) return
+    if (api === undefined) return { ok: false, message: 'The document API is unavailable.' }
     const { filePath, fileName } = state.document
 
     const controller = new AbortController()
     reloadAbort?.abort()
     reloadAbort = controller
+    // R169: raised *before* the first await, so the acknowledgement is on
+    // screen within the same frame as the click even though the work behind
+    // it takes as long as it takes. `clearReloadPending` is what lowers it,
+    // on every exit — including the ones that return early.
+    setReloadPending(true)
     // Cancelled up front, not just cleaned up on success: an ordinary
     // debounced reparse (`runReparse`) racing this reload writes to the
     // same `document.store`/`sourceBuffer` fields via entirely separate
@@ -2137,13 +2191,25 @@ export function createDocumentSession(deps: DocumentSessionDeps = {}): DocumentS
     try {
       token = await api.document.mintReadToken(filePath)
     } catch {
+      // R169: the document is left showing as-is, which is right — but this
+      // used to be the whole of it, so a reload of a file that had since been
+      // deleted or locked was indistinguishable from a reload that did
+      // nothing. The caller turns this into a visible explanation.
       reloadAbort = null
-      return // can't reload — leave the current document showing as-is
+      clearReloadPending()
+      return {
+        ok: false,
+        message: `Could not read ${fileName}. It may have been moved or deleted.`
+      }
     }
-    if (reloadAbort !== controller) return // superseded by a newer reload
+    // Superseded — by "Keep Mine" (R169) or by a newer reload. Not a failure:
+    // `reloadAbort` no longer being this controller means someone else is now
+    // responsible for the flag, so this path must not lower it.
+    if (reloadAbort !== controller) return { ok: true, cancelled: true }
     if (state.phase !== 'ready' || state.document.filePath !== filePath) {
       reloadAbort = null
-      return
+      clearReloadPending()
+      return { ok: true, cancelled: true }
     }
 
     let result: ParseClientResult
@@ -2153,12 +2219,27 @@ export function createDocumentSession(deps: DocumentSessionDeps = {}): DocumentS
         signal: controller.signal
       })
     } catch {
-      reloadAbort = null
-      return
+      // An abort lands here too — `parseFromUrl` rejects on `controller.signal`
+      // — so a cancellation must not be reported as a failure. The controller
+      // identity is what tells them apart: a supersession replaced it.
+      const superseded = reloadAbort !== controller
+      if (!superseded) {
+        reloadAbort = null
+        clearReloadPending()
+      }
+      return superseded
+        ? { ok: true, cancelled: true }
+        : {
+            ok: false,
+            message: `Could not reload ${fileName}. The file may be invalid or unreadable.`
+          }
     }
-    if (reloadAbort !== controller) return
+    if (reloadAbort !== controller) return { ok: true, cancelled: true }
     reloadAbort = null
-    if (state.phase !== 'ready' || state.document.filePath !== filePath) return
+    if (state.phase !== 'ready' || state.document.filePath !== filePath) {
+      clearReloadPending()
+      return { ok: true, cancelled: true }
+    }
 
     const oldStore = state.document.store
     const oldSelectedNode = state.selection.selectedNode
@@ -2199,6 +2280,11 @@ export function createDocumentSession(deps: DocumentSessionDeps = {}): DocumentS
         dirty: false,
         reparsePending: false,
         externalChangeDetected: false,
+        // R169: the reload has committed, so both the banner and the
+        // acknowledgement it replaced go down together, in this same
+        // `setState` — which is what makes the banner's disappearance
+        // coincide with the content actually changing.
+        reloadPending: false,
         pendingTransform: null,
         transformInProgress: false,
         // R42/D-070: same fresh-baseline reasoning as `pendingDirtyRange`
@@ -2222,6 +2308,10 @@ export function createDocumentSession(deps: DocumentSessionDeps = {}): DocumentS
     pendingUndoBurst = null
     undoState = EMPTY_UNDO_STACK
     syncUndoContext()
+    // `reloadPending` was lowered by the `setState` above, in the same commit
+    // that swapped the document — not here — so there is no frame in which the
+    // new content is showing while the acknowledgement is still up.
+    return { ok: true }
   }
 
   /** The main process's own change notification — CONCEPT.md §11.3's own
@@ -2237,14 +2327,49 @@ export function createDocumentSession(deps: DocumentSessionDeps = {}): DocumentS
     setState({ ...state, document: { ...state.document, externalChangeDetected: true } })
   }
 
-  async function reloadAndDiscard(): Promise<void> {
-    await reloadFromDisk()
+  async function reloadAndDiscard(): Promise<ReloadOutcome> {
+    return reloadFromDisk()
   }
 
   function keepMine(): void {
     if (state.phase !== 'ready') return
+    // R169: **cancel a reload that is already in flight.** Dropping the
+    // controller is what makes `reloadFromDisk`'s own `reloadAbort !==
+    // controller` checks bail before committing; `abort()` additionally
+    // rejects an in-flight `parseFromUrl` through `controller.signal`
+    // rather than leaving it to run to completion and be discarded.
+    //
+    // Without this, "Keep Mine" cleared the banner and the reload landed
+    // moments later anyway — so the button that exists to protect unsaved
+    // edits destroyed them. Reproduced against the real session before it
+    // was fixed, and the reproduction is now `keepMine cancels a reload
+    // already in flight` in `documentSession.test.ts`.
+    reloadAbort?.abort()
+    reloadAbort = null
     setCtx('hasExternalChange', false)
-    setState({ ...state, document: { ...state.document, externalChangeDetected: false } })
+    setState({
+      ...state,
+      document: { ...state.document, externalChangeDetected: false, reloadPending: false }
+    })
+  }
+
+  /**
+   * R169 — raises or lowers the in-flight flag without disturbing anything
+   * else on the document.
+   *
+   * Guarded on `phase`, because every call site is either side of an await
+   * and the document can close underneath one. Guarded on the current value
+   * too: `setState` notifies subscribers, and a no-op notification during a
+   * reload is a re-render of every pane for nothing.
+   */
+  function setReloadPending(pending: boolean): void {
+    if (state.phase !== 'ready') return
+    if (state.document.reloadPending === pending) return
+    setState({ ...state, document: { ...state.document, reloadPending: pending } })
+  }
+
+  function clearReloadPending(): void {
+    setReloadPending(false)
   }
 
   /** R24-tabs.md: writes real `setContext` calls, unconditionally — every

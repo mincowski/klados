@@ -107,7 +107,7 @@ so a reader of an old commit message can still find out what `R41` was.
 | **R159–R163** | built | `docs/plans/R159-fixed-duration-waits.md` |
 | **R164–R167** | built ⚠ | `docs/plans/R164-release-security-hardening.md` |
 | **R168** | built ⚠ | `docs/plans/R168-crlf-edit-offset.md` |
-| **R169** | **OPEN** | `docs/plans/R169-external-change-reload.md` |
+| **R169** | built | `docs/plans/R169-external-change-reload.md` |
 | **R170** | **OPEN** | `docs/plans/R170-tree-horizontal-scroll.md` |
 | **R171** | **OPEN** | `docs/plans/R171-watcher-error-handling.md` |
 | **R172–R174** | **OPEN** | `docs/plans/R172-published-identity.md` |
