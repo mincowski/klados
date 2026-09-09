@@ -203,6 +203,10 @@ Serialized Error: { errno: -4048, syscall: 'watch', code: 'EPERM', filename: nul
 
 That is the reported crash, reproduced inside the test runner. Three of the four tests go red.
 
+**On Windows.** Those same three tests fail on macOS and Linux for the opposite reason — the error
+never arrives at all — and they are now gated. §10h has the measurement and what it does and does
+not qualify.
+
 `test/documentWatchers.test.ts` covers the consequence with fakes — that a failed watcher is
 released, closed, its keys forgotten, nobody notified, nothing re-armed, and that a *stale* failure
 from a replaced watcher cannot take its successor down. Removing the registry's release turns the
@@ -234,7 +238,8 @@ own error behaviour alone.
 ### 10e. Acceptance, criterion by criterion
 
 1. **A reliable trigger** — found (§10a), and the withdrawn candidate is recorded too.
-2. **A watcher error cannot produce an uncaught exception, demonstrated by inducing one** — §10c.
+2. **A watcher error cannot produce an uncaught exception, demonstrated by inducing one** — §10c,
+   **on Windows only**; §10h has the measurement and what carries this elsewhere.
 3. **The failed watch is released and the bookkeeping matches** — asserted by re-watching, which is
    what makes it observable.
 4. **§4's choice written down with what was rejected** — D-089.
@@ -242,7 +247,9 @@ own error behaviour alone.
 6. **No retry loop** — asserted: after a failure the watcher count stays at one, and nothing is
    notified.
 
-Suite **1887 → 1896**, lint at its 3-warning ratchet, typecheck clean.
+Suite **1896 → 1905** on Windows, lint at its 3-warning ratchet, typecheck clean. The baseline is
+1896 rather than the 1887 this branch started from because R170 merged first; the round's own
+contribution is nine either way. On macOS and Linux three of those nine are skipped (§10h).
 
 ### 10f. Review pass
 
@@ -259,3 +266,37 @@ Reviewed as a separate pass over `git diff`. Two findings, both fixed:
 **The renderer is not told.** D-089 records why, and the alternative with it. If the "changed on
 disk" banner silently never appearing turns out to matter, that is a follow-up with a UI decision in
 it, not a line of code.
+
+### 10h. The trigger is Windows-only, and CI is what established that
+
+The first CI run of this branch passed on `windows-latest` and failed on `macos-latest` and
+`ubuntu-latest` — all three error-inducing tests, both platforms, the same message:
+
+```
+FAIL test/fsWatcherDeps.test.ts > deleting the watched directory reports EPERM instead of raising it
+FAIL test/fsWatcherDeps.test.ts > the injected reporter sees the path and the error
+FAIL test/fsWatcherDeps.test.ts > end to end: the registry releases the path after a real failure
+Error: no watcher error arrived
+```
+
+**Deleting the watched file's parent directory emits no `'error'` event at all on macOS or Linux.**
+The negative test — deleting the file alone raises nothing — passed everywhere, and
+`documentWatchers.test.ts`'s injected-failure cases passed everywhere, so the divergence is precisely
+and only the real OS trigger.
+
+**§10a's probing was done on Windows, and §10a does not say so.** That is the error, and it is the
+same shape as the one §10a itself corrects: a scenario that reproduces under the conditions it was
+found in, generalised one step too far. A real-filesystem test inherits every platform difference of
+the thing it drives, and this one drove `fs.watch` on one platform.
+
+The three tests are now gated on `process.platform === 'win32'` behind a named constant. **The gate
+is not a workaround for a failing test**, and the distinction matters: the defect is
+platform-independent — `fs.FSWatcher` is an `EventEmitter` on every platform and the listener is
+attached unconditionally — while the *reproduction* is not. `windows-latest` is in the CI matrix, so
+removing the listener still turns CI red. Verified by forcing the constant to `false` and re-running:
+three skipped, one passed, file green — so the gate produces a clean run rather than a silently
+broken one.
+
+**What this costs, stated plainly:** on macOS and Linux, acceptance 2 is carried by the fake-driven
+tests in `documentWatchers.test.ts` rather than by an induced real failure. It is not carried on
+those platforms by nothing, and it is not carried on those platforms by an induced error either.

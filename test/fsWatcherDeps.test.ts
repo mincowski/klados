@@ -22,6 +22,21 @@
  * no error within four seconds, so it is not claimed and not tested — a
  * scenario that reproduces once and then does not is a flaky test, not a
  * finding.
+ *
+ * **The trigger is Windows-only, and CI is what established that.** The first
+ * run of this file went green on `windows-latest` and red on `macos-latest` and
+ * `ubuntu-latest` — all three error-inducing tests, both platforms, `no watcher
+ * error arrived`. Deleting the watched file's parent directory emits no
+ * `'error'` event at all on those platforms; the probing that found the trigger
+ * was done on Windows only, and a real-filesystem test inherits every platform
+ * difference of the thing it is driving.
+ *
+ * So those three are gated below, and the gate is not a workaround: **the defect
+ * being fixed is platform-independent and the reproduction is not.** The
+ * listener is attached unconditionally, `windows-latest` is in the CI matrix, so
+ * removing it still turns CI red — and `documentWatchers.test.ts` carries the
+ * cross-platform coverage of the *consequence* (release, close, no re-arm)
+ * against injected failures, which needs no OS cooperation.
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -41,6 +56,10 @@ const WATCH_ERROR_TIMEOUT_MS = 4000
  * outcome is 'no event ever arrives', which is the case R163's rule names as
  * the legitimate use of a duration. */
 const NO_ERROR_SETTLE_MS = 300
+/** Whether this platform's `fs.watch` reports the failure R171 is about at all.
+ * Measured, not assumed — see the platform note above. Only the *reproduction*
+ * is gated on this; the listener it exercises is attached everywhere. */
+const REPORTS_WATCH_ERRORS = process.platform === 'win32'
 
 const created: string[] = []
 
@@ -88,20 +107,23 @@ function watchUntilError(
 }
 
 describe('R171 — a real watcher error is reported, not thrown', () => {
-  it('deleting the watched directory reports EPERM instead of raising it', async () => {
-    const { dir, file } = tempFile()
-    const { error, handle } = await watchUntilError(file, () => {
-      rmSync(dir, { recursive: true, force: true })
-    })
+  it.runIf(REPORTS_WATCH_ERRORS)(
+    'deleting the watched directory reports EPERM instead of raising it',
+    async () => {
+      const { dir, file } = tempFile()
+      const { error, handle } = await watchUntilError(file, () => {
+        rmSync(dir, { recursive: true, force: true })
+      })
 
-    // The reported error, matched on its code rather than its prose.
-    expect((error as NodeJS.ErrnoException).code).toBe('EPERM')
-    expect(error.message).toContain('watch')
-    // Closing an already-failed watcher must not throw either — the handle is
-    // discarded on this path, and a throw here would be the same uncaught
-    // exception in a new place.
-    expect(() => handle.close()).not.toThrow()
-  })
+      // The reported error, matched on its code rather than its prose.
+      expect((error as NodeJS.ErrnoException).code).toBe('EPERM')
+      expect(error.message).toContain('watch')
+      // Closing an already-failed watcher must not throw either — the handle is
+      // discarded on this path, and a throw here would be the same uncaught
+      // exception in a new place.
+      expect(() => handle.close()).not.toThrow()
+    }
+  )
 
   it('deleting only the file is not an error, and the watch stays healthy', async () => {
     // Recorded because it is the hypothesis §3 started from, and it is wrong —
@@ -123,7 +145,7 @@ describe('R171 — a real watcher error is reported, not thrown', () => {
     expect(dir).toBeTruthy()
   })
 
-  it('the injected reporter sees the path and the error', async () => {
+  it.runIf(REPORTS_WATCH_ERRORS)('the injected reporter sees the path and the error', async () => {
     const { dir, file } = tempFile()
     const seen: { path: string; message: string }[] = []
     await new Promise<void>((resolve, reject) => {
@@ -149,56 +171,59 @@ describe('R171 — a real watcher error is reported, not thrown', () => {
     expect(seen[0]!.message).toContain('watch')
   })
 
-  it('end to end: the registry releases the path after a real failure', async () => {
-    // Acceptance 3 — the bookkeeping has to match reality afterwards.
-    //
-    // **Observed by re-watching, not by asking.** The first version of this
-    // asserted that `unwatch` did not throw, which it never does either way:
-    // the test passed whether or not the entry had been released, and proved
-    // nothing. The release *is* observable, though — a released path builds a
-    // fresh entry next time, so the real `fs.watch` is constructed a second
-    // time, whereas a surviving entry would simply be joined.
-    const { dir, file } = tempFile()
-    let watchCalls = 0
-    let reportError: (() => void) | null = null
-    const failed = new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(
-        () => reject(new Error('no watcher error arrived')),
-        WATCH_ERROR_TIMEOUT_MS
-      )
-      reportError = () => {
-        clearTimeout(timer)
-        resolve()
-      }
-    })
+  it.runIf(REPORTS_WATCH_ERRORS)(
+    'end to end: the registry releases the path after a real failure',
+    async () => {
+      // Acceptance 3 — the bookkeeping has to match reality afterwards.
+      //
+      // **Observed by re-watching, not by asking.** The first version of this
+      // asserted that `unwatch` did not throw, which it never does either way:
+      // the test passed whether or not the entry had been released, and proved
+      // nothing. The release *is* observable, though — a released path builds a
+      // fresh entry next time, so the real `fs.watch` is constructed a second
+      // time, whereas a surviving entry would simply be joined.
+      const { dir, file } = tempFile()
+      let watchCalls = 0
+      let reportError: (() => void) | null = null
+      const failed = new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error('no watcher error arrived')),
+          WATCH_ERROR_TIMEOUT_MS
+        )
+        reportError = () => {
+          clearTimeout(timer)
+          resolve()
+        }
+      })
 
-    const real = createFsWatcherDeps(() => reportError?.())
-    const registry = createDocumentWatcherRegistry({
-      stat: real.stat,
-      watch: (watchedPath, onEvent, onError) => {
-        watchCalls++
-        return real.watch(watchedPath, onEvent, onError)
-      }
-    })
+      const real = createFsWatcherDeps(() => reportError?.())
+      const registry = createDocumentWatcherRegistry({
+        stat: real.stat,
+        watch: (watchedPath, onEvent, onError) => {
+          watchCalls++
+          return real.watch(watchedPath, onEvent, onError)
+        }
+      })
 
-    await registry.watch('tab-1', file, () => {})
-    expect(watchCalls).toBe(1)
+      await registry.watch('tab-1', file, () => {})
+      expect(watchCalls).toBe(1)
 
-    rmSync(dir, { recursive: true, force: true })
-    await failed
+      rmSync(dir, { recursive: true, force: true })
+      await failed
 
-    // Put the file back and watch it again. A second construction proves the
-    // failed entry was dropped rather than reused.
-    mkdirSync(dir, { recursive: true })
-    writeFileSync(file, '{"a":2}')
-    await registry.watch('tab-2', file, () => {})
-    expect(watchCalls).toBe(2)
+      // Put the file back and watch it again. A second construction proves the
+      // failed entry was dropped rather than reused.
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(file, '{"a":2}')
+      await registry.watch('tab-2', file, () => {})
+      expect(watchCalls).toBe(2)
 
-    // And the key from the failed watch is gone, so releasing it is a no-op
-    // rather than a decrement against the *new* entry — which would tear down
-    // a healthy watcher that has nothing to do with the failure.
-    registry.unwatch('tab-1')
-    await registry.watch('tab-3', file, () => {})
-    expect(watchCalls).toBe(2) // 'tab-3' joined the live entry, so no new watcher
-  })
+      // And the key from the failed watch is gone, so releasing it is a no-op
+      // rather than a decrement against the *new* entry — which would tear down
+      // a healthy watcher that has nothing to do with the failure.
+      registry.unwatch('tab-1')
+      await registry.watch('tab-3', file, () => {})
+      expect(watchCalls).toBe(2) // 'tab-3' joined the live entry, so no new watcher
+    }
+  )
 })

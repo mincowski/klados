@@ -457,3 +457,12 @@ the shell's own `grep`/`sed`. Full account: `docs/plans/R47-repo-hygiene.md`.
   no-op, no event fired, and **the broken state was also the state that prevented recovery**. Any
   code that pairs "listen for the event" with "fall back to element zero" can deadlock this way.
   `registerPane` now adopts focus already inside the shell it is given.
+- **`fs.watch` reports a lost parent directory as an `'error'` event on Windows and says nothing
+  at all on macOS or Linux.** R171's trigger — delete the watched file's *directory*, get
+  `EPERM: operation not permitted, watch` — was probed on Windows and reproduces only there. Three
+  real-filesystem tests built on it passed on `windows-latest` and failed on the other two runners
+  with `no watcher error arrived`, and CI is what found it, not local testing. The general trap is
+  wider than watchers: **a test driving a real OS facility inherits every platform difference of that
+  facility**, so a trigger found on one platform is a finding about that platform until a second one
+  agrees. Gate the reproduction, never the guard — the listener R171 adds is attached on every
+  platform, and only the induced failure is Windows-only.

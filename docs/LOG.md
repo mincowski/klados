@@ -58,7 +58,63 @@ Dependabot alerts, in a third place.
 to touch it since it landed. The two that survive are a hang-to-failure timeout and the margin for a
 negative assertion, both now named.
 
-Suite 1887 → 1896.
+**And then CI found the part Windows could not.** The branch passed on `windows-latest` and failed
+on `macos-latest` and `ubuntu-latest` — all three error-inducing tests, both platforms, `no watcher
+error arrived`. Deleting the watched file's parent directory emits **no `'error'` event at all**
+outside Windows. The trigger §10a was so pleased to have found was a finding about one platform,
+generalised one step too far — the same shape as the mistake §10a itself corrects. The three tests
+are now gated on `process.platform === 'win32'`, verified by forcing the constant false (three
+skipped, one passed, green), and the plan says plainly what that costs: on the other two platforms
+acceptance 2 rests on the fake-driven tests rather than an induced real failure. **The gate is on
+the reproduction, never on the guard** — the listener is attached on every platform, and
+`windows-latest` in the matrix still reddens CI if it is removed. `FINDINGS.md` carries the general
+form, since it is about any test driving a real OS facility.
+
+Suite 1896 → 1905 — the baseline moved because R170 landed first; the round still adds nine.
+
+## R170 — a deeply nested tree had nowhere to scroll · built
+
+**Plan:** `docs/plans/R170-tree-horizontal-scroll.md`
+
+**The plan's diagnosis was half wrong, and measuring it changed the fix.** §1 said rows are pinned to
+the container width, so nothing overflows `.tree` and its `overflow: auto` has nothing to act on. The
+first clause holds; the rest does not. Against the original layout, 40 levels deep in a 400px pane:
+`clientWidth` 385 against `scrollWidth` **684**. The extent was always there — a row's fixed-width
+indent span overflows the pinned row box and extends the scroll area anyway. What was missing was any
+way to reach it, because `<Scrollbar>` was mounted `axis="vertical"` and never drew a horizontal
+track; and reaching it would not have helped, because the label was already **0px wide**.
+
+**The design question was settled by rendering it** (`PLANNING.md` §1). All three of §4's shapes went
+in front of the user first, and two things came out that the written arguments had not: horizontal
+scrolling looks *identical to the defect* at `scrollLeft: 0` on this fixture, because
+`deep-10k.json` is 10,000 singly-nested arrays and every row sits one level deeper than the last —
+and that is an argument about the fixture, which is a synthetic parser stress case, not about the
+tree. The capping shapes were dropped for having no prior art in this category: VS Code's Explorer
+truncates rather than scrolling, and cap-plus-depth-marker is a comment-thread pattern. The
+referenced answer for chains like this is a third thing entirely — collapsing single-child chains
+onto one line, as `explorer.compactFolders` does by default — and it composes with a scrollbar
+rather than replacing one.
+
+**`min-width: 100%` disposes of two of §2's three objections and hides a third.** A shallow row still
+measures the full pane, so its background spans and R33's overlay arrangement is untouched — but only
+at `scrollLeft: 0`. Scrolled to the right edge, a shallow row's selected background stopped **175px
+short**, which a first version of the test missed by asserting at the one position where it cannot
+fail. Fixed by flooring `min-width` at the measured content extent, and **getting that measurement
+right took three attempts**: feeding back `scrollWidth` latches (rows widen to it, so it can only
+grow, and a tree stayed scrollable forever after one deep document); measuring to a row's last child
+latches too, because `.tree-row-preview` is `flex: 1` and stretches to whatever the row is. Measuring
+to the *label* is both the fix and the right rule — the extent is what it takes to read the label,
+never the preview, which exists to be truncated.
+
+**The value is a CSS custom property, not React state** — routing it through state cost a render per
+measurement, and `documentPropsRenderCost.test.tsx` caught it going 10 → 15 across a typing burst.
+
+**One rule shipped and was then removed for being inert.** `width: max-content` looked obviously
+necessary beside the floor; mutating it away failed no test, because the measurement runs in a
+`useLayoutEffect` and the floor is therefore always set before first paint. It was also actively
+wrong — sizing to content lets a long preview widen the row and make the whole tree scrollable.
+
+Suite 1887 → 1896. Depth 10,000 remains unpleasant and the round says so.
 
 
 ## R169 — "Reload and Discard" looked like a dead button, and Keep Mine destroyed your edits · built
