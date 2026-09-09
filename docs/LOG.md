@@ -16,6 +16,51 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R170 — a deeply nested tree had nowhere to scroll · built
+
+**Plan:** `docs/plans/R170-tree-horizontal-scroll.md`
+
+**The plan's diagnosis was half wrong, and measuring it changed the fix.** §1 said rows are pinned to
+the container width, so nothing overflows `.tree` and its `overflow: auto` has nothing to act on. The
+first clause holds; the rest does not. Against the original layout, 40 levels deep in a 400px pane:
+`clientWidth` 385 against `scrollWidth` **684**. The extent was always there — a row's fixed-width
+indent span overflows the pinned row box and extends the scroll area anyway. What was missing was any
+way to reach it, because `<Scrollbar>` was mounted `axis="vertical"` and never drew a horizontal
+track; and reaching it would not have helped, because the label was already **0px wide**.
+
+**The design question was settled by rendering it** (`PLANNING.md` §1). All three of §4's shapes went
+in front of the user first, and two things came out that the written arguments had not: horizontal
+scrolling looks *identical to the defect* at `scrollLeft: 0` on this fixture, because
+`deep-10k.json` is 10,000 singly-nested arrays and every row sits one level deeper than the last —
+and that is an argument about the fixture, which is a synthetic parser stress case, not about the
+tree. The capping shapes were dropped for having no prior art in this category: VS Code's Explorer
+truncates rather than scrolling, and cap-plus-depth-marker is a comment-thread pattern. The
+referenced answer for chains like this is a third thing entirely — collapsing single-child chains
+onto one line, as `explorer.compactFolders` does by default — and it composes with a scrollbar
+rather than replacing one.
+
+**`min-width: 100%` disposes of two of §2's three objections and hides a third.** A shallow row still
+measures the full pane, so its background spans and R33's overlay arrangement is untouched — but only
+at `scrollLeft: 0`. Scrolled to the right edge, a shallow row's selected background stopped **175px
+short**, which a first version of the test missed by asserting at the one position where it cannot
+fail. Fixed by flooring `min-width` at the measured content extent, and **getting that measurement
+right took three attempts**: feeding back `scrollWidth` latches (rows widen to it, so it can only
+grow, and a tree stayed scrollable forever after one deep document); measuring to a row's last child
+latches too, because `.tree-row-preview` is `flex: 1` and stretches to whatever the row is. Measuring
+to the *label* is both the fix and the right rule — the extent is what it takes to read the label,
+never the preview, which exists to be truncated.
+
+**The value is a CSS custom property, not React state** — routing it through state cost a render per
+measurement, and `documentPropsRenderCost.test.tsx` caught it going 10 → 15 across a typing burst.
+
+**One rule shipped and was then removed for being inert.** `width: max-content` looked obviously
+necessary beside the floor; mutating it away failed no test, because the measurement runs in a
+`useLayoutEffect` and the floor is therefore always set before first paint. It was also actively
+wrong — sizing to content lets a long preview widen the row and make the whole tree scrollable.
+
+Suite 1887 → 1896. Depth 10,000 remains unpleasant and the round says so.
+
+
 ## R169 — "Reload and Discard" looked like a dead button, and Keep Mine destroyed your edits · built
 
 **Plan:** `docs/plans/R169-external-change-reload.md`

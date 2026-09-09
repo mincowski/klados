@@ -37,7 +37,37 @@
   margin-right: var(--scrubber-width);
 }
 
+/* R170 (`docs/plans/R170-tree-horizontal-scroll.md`): mirrors `margin-right`
+   above, but conditionally — the same shape `Grid.css`'s
+   `.grid-scroll-has-horizontal-track` already uses, and for the same reason.
+   Reserving the gutter unconditionally would cost every ordinary tree — which
+   never overflows horizontally, since a document nests tens of levels, not
+   thousands — 15px of vertical space for nothing. Without it, the horizontal
+   `<Scrollbar>` track (`.tree-viewport`'s absolutely-positioned child,
+   `bottom: 0`) sits directly on top of the last row instead of beside it:
+   R33's addendum 1 on the vertical axis, here on the axis R170 introduced.
+   `Tree.tsx` adds this class only while the scrollbar reports it is actually
+   drawing that track. */
+.tree-has-horizontal-track {
+  margin-bottom: var(--scrubber-width);
+}
+
 .tree-row {
+  /* R170: content width, floored at the pane and at the widest label in the
+     rendered window (`--tree-content-width`, written by `Tree.tsx`'s own
+     measurement). The floor is what keeps a row's hover and selected
+     background spanning the pane — the property `right: 0` used to provide,
+     and the reason §2 expected this to be more than a layout change.
+
+     **No `width: max-content` alongside it**, though that was the obvious
+     partner and was written first. It turned out inert — the measurement runs
+     in a `useLayoutEffect`, so the floor is always set before first paint, and
+     removing `max-content` failed no test. It also contradicted the rule the
+     measurement follows: sizing to content lets a long `.tree-row-preview`
+     widen the row, making the whole tree scrollable because of text that exists
+     to be truncated. Shrink-to-fit floored at the label-driven extent is both
+     smaller and the behaviour actually wanted. */
+  min-width: max(100%, var(--tree-content-width, 0px));
   display: flex;
   align-items: center;
   gap: var(--space-1);

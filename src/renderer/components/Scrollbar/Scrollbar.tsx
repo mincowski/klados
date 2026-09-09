@@ -91,12 +91,30 @@ interface ScrollbarProps {
    * track) — the track wasn't hidden, it was drawn and covered. `0`
    * (the default) is every other caller: nothing to inset past. */
   readonly horizontalInset?: number
+  /**
+   * R170 — called whenever the horizontal track appears or disappears.
+   *
+   * A host that overflows horizontally has to reserve a bottom gutter, or
+   * this overlay track sits on top of its last row (R33's addendum 1, on the
+   * axis R44b then fixed for the grid). Both hosts that need it were deriving
+   * that answer a second time: `Grid.tsx` recomputes the same comparison from
+   * its own column geometry, under a comment noting it "has no way to ask"
+   * this component — and the tree has no column geometry to recompute it from
+   * at all, because its widths come from the DOM.
+   *
+   * So this reports what it already knows. **The measurement is not repeated**:
+   * it comes from the same rAF-coalesced read above, which is deliberately at
+   * most one forced layout per frame no matter how many of its three sources
+   * fired.
+   */
+  readonly onHorizontalTrackChange?: (shown: boolean) => void
 }
 
 export function Scrollbar({
   target,
   axis = 'vertical',
-  horizontalInset = 0
+  horizontalInset = 0,
+  onHorizontalTrackChange
 }: ScrollbarProps): JSX.Element | null {
   const [metrics, setMetrics] = useState<Metrics>(EMPTY_METRICS)
 
@@ -144,6 +162,22 @@ export function Scrollbar({
 
   const showVertical = axis !== 'horizontal' && metrics.scrollHeight > metrics.clientHeight + 1
   const showHorizontal = axis !== 'vertical' && metrics.scrollWidth > metrics.clientWidth + 1
+
+  // R170: reported from an effect rather than during render — a host that
+  // reserves a gutter in response will re-render, and doing that from inside
+  // this render is the "cannot update a component while rendering a different
+  // component" case. The ref keeps the callback out of the notifying effect's
+  // dependency list, so an inline arrow at the call site does not re-fire it on
+  // every render; it is written in an effect of its own rather than during
+  // render, which is a rule this project's lint enforces.
+  const onTrackChangeRef = useRef(onHorizontalTrackChange)
+  useEffect(() => {
+    onTrackChangeRef.current = onHorizontalTrackChange
+  }, [onHorizontalTrackChange])
+  useEffect(() => {
+    onTrackChangeRef.current?.(showHorizontal)
+  }, [showHorizontal])
+
   if (!showVertical && !showHorizontal) return null
 
   return (
