@@ -9,3 +9,12 @@
 *.ico binary
 *.icns binary
 *.png binary
+
+# R179 — fixtures whose whole point is their line endings. `eol=lf` above would
+# rewrite these to LF on commit and on every checkout, leaving a file that reads
+# as a CRLF fixture, is named as one, and is not one: the tests built on it would
+# pass while asserting nothing. `-text` disables end-of-line conversion in both
+# directions so the bytes committed are the bytes checked out, on every platform.
+# `test/crlfFixture.test.ts` asserts that this rule is actually in force, because
+# a silently-normalized fixture is indistinguishable from a working one.
+test/fixtures/crlf/** -text

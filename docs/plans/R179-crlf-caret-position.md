@@ -170,10 +170,31 @@ follows `lineSeparator` and is deliberately pinned to `\n` by R168 so that split
 mixed files. So the command reads the ending of the line it is splitting (or the document's dominant
 ending) and inserts that.
 
-**The decision this needs, and it belongs to the round rather than to this plan:** what a document
-with mixed endings should get. Per-line matching is the least surprising and is what makes an
-existing CRLF file stay CRLF; a document-wide dominant ending is more predictable and is what most
-editors do. Both are defensible and the choice goes in `DECISIONS.md`.
+### 8a. What a mixed document gets — settled, with the measurement behind it
+
+Three candidates were weighed. **"Always insert `\n`" is rejected outright, because it is what the
+code does today and it is the defect**: it is the mechanism by which a CRLF file drifts to mixed.
+Its simplicity is real but it is simplicity purchased by corrupting the file.
+
+**"Document majority" is affordable, and the cost was measured rather than guessed.** Counting CRLF
+against LF across a whole buffer runs at **~820 MB/s** — 1.2 ms at 1 MB, 60 ms at 50 MB, **244 ms at
+the 200 MB ceiling**. Cheap enough to do once, far too slow to do on every Enter, so it would have
+to be computed once and cached. That cache is the real cost: it has to be invalidated when the
+buffer changes, and every edit changes the buffer.
+
+**Decided: match the line being split, and fall back to the majority only when there is no local
+evidence.** Pressing Enter splits a line that already has an ending; inserting *that* ending is
+`O(1)`, needs no scan, no cache and no invalidation, and gives an answer identical to the majority's
+on any uniform file — which is nearly every real file. It is also the answer most consistent with
+invariant 6's whole posture: preserve what is there rather than normalize toward what is common.
+
+The fallback covers the two cases with no local evidence — the last line when it has no ending, and
+a document containing no line break at all. There the document majority decides, computed over the
+loaded window rather than the whole file; if even that is empty, `\n`.
+
+This differs from a pure majority only on a mixed file, and only in that a stray LF line stays LF
+instead of being healed to CRLF. That is the more conservative of the two, and the round records it
+in `DECISIONS.md` with this reasoning and the measurements above.
 
 R181 is separable. If it is dropped, R179 and R180 still stand on their own and the plan loses
 nothing but the slow drift.
@@ -202,6 +223,26 @@ nothing but the slow drift.
 5. The caret is visible wherever it can now be placed — §3's `coordsAtPos` returning `NULL` was the
    visible half of this defect, and no reachable position may keep that property.
 6. An LF-only document behaves exactly as it does today, asserted rather than assumed.
+
+## 10a. The fixture, added with this plan
+
+`test/fixtures/crlf/small.json` — 206 bytes, eleven CRLF pairs, no bare LF, no bare CR. It is the
+repaired copy of the file the defect was found in, so the tests R179–R181 need have a real CRLF
+document to run against rather than one assembled in a string literal.
+
+**It needed a `.gitattributes` exemption to survive being committed.** R47 set `* text=auto eol=lf`
+across the repository, which rewrites every tracked text file to LF on commit and on every checkout.
+Without an exemption this fixture would be stored as LF, checked out as LF, and still be named
+`crlf/` — the tests built on it would pass while asserting nothing. `test/fixtures/crlf/** -text`
+disables the conversion in both directions.
+
+Verified rather than assumed, since a silent normalization is exactly what this guards against:
+`git check-attr` reports `text: unset` for the path, and the blob git actually stored is 206 bytes
+with all eleven pairs intact — checked by reading it back with `git cat-file`, not by looking at the
+working tree.
+
+`test/crlfFixture.test.ts` then asserts the endings as checked out on the machine running it, on all
+three CI platforms. Mutation-verified: rewriting the fixture to LF turns it red.
 
 ## 11. Out of scope
 
