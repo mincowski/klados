@@ -16,6 +16,40 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R168 — a Raw edit on a CRLF document landed at the wrong byte · built ⚠
+
+**Plan:** `docs/plans/R168-crlf-edit-offset.md`
+
+**Silent data corruption, found by hand.** A user running R164–R167's owed manual pass typed a
+character into a CRLF file and the buffer received it one byte early — reported twice, from two
+independent attempts, before anyone knew why. The drift equalled the number of line breaks before
+the edit point: one byte on line 2, nine on line 10, none at all on an LF-only file.
+
+**One disagreement, in four places.** CodeMirror's default line split (`/\r\n?|\n/`) treats a CRLF
+as one break and discards the `\r`, so its document was shorter than the window text every
+unit↔byte offset map in `Raw/` is built from. Every arithmetic step was individually correct; the
+two sides were measuring different strings. `EditorState.lineSeparator.of('\n')` — one line —
+leaves the `\r` in its line's own text and makes all four conversions agree at once.
+
+**Why the suite never caught it:** every Raw edit fixture in the project was LF-only, so the
+conversion had never once been exercised against the line ending most of the target platform uses.
+That is R151's finding in a new place — a whole dimension of the input space that no test varied —
+and it is why the round's acceptance included CRLF variants for the *existing* edit tests, not just
+a new test for the new fix. All five were verified to fail with the fix disabled.
+
+**One wrong turn, recorded in the plan's §10c because the code cannot contain it.** Checking §6a's
+question — can the caret land between the retained `\r` and the `\n`? — three CodeMirror APIs
+said yes, and a second fix was built on `EditorView.atomicRanges` to prevent it. Both the fix and
+the diagnosis were wrong: `atomicRanges` biases by direction of travel, so a range spanning a line
+break made a click jump to the next line; and those three APIs are on no input path here, because
+there is no `@codemirror/commands` dependency and therefore no keymap for Home, End or the arrows.
+Real keyboard motion is the browser's, resolved against rendered geometry, and the `\r` renders as
+nothing — so End already lands before it and types correctly. The module was deleted and the
+measurement kept as an assertion.
+
+Nine new tests plus five CRLF variants; suite 1874 passing. The pointer path is disclosed as owed.
+
+
 ## R164–R167 — security hardening before the first public release · built ⚠
 
 **Plan:** `docs/plans/R164-release-security-hardening.md`

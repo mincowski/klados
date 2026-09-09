@@ -63,6 +63,22 @@ drift on non-ASCII content is real. Converting between them is O(n) unless you u
 offset map — dropping an O(n) conversion into a hot loop is how J1's regression happened
 (`docs/LOG.md`, M5c).
 
+**The editor's document is byte-faithful only because `EditorState.lineSeparator.of('\n')` says so**
+(R168). CodeMirror's default split is `/\r\n?|\n/`, which treats a CRLF as one line break and
+**drops the `\r` from the document entirely** — so on a Windows file its text is one unit shorter
+per line break than the window text every offset map in `Raw/` is built from, and every unit→byte
+conversion undercounts by the number of breaks before it. That shipped as silent corruption: edits
+landed one byte early per preceding CRLF, visible only in the saved bytes, because the user sees
+CodeMirror's own rendering. **Do not remove that facet, and set it on any new editor surface.** The
+retained `\r` is invisible (nothing renders it; `highlightSpecialChars` is not installed) and the
+caret does not land inside the pair on the keyboard path — but a lone `\r` is no longer a line
+break, which is the deliberate price.
+
+**Every Raw edit fixture in this project was LF-only until R168**, which is why the above survived
+for the project's whole life. If you are adding a test that drives an edit, vary the line ending —
+the units and the bytes agree on LF and only on LF, so an LF fixture cannot see this class of bug
+at all.
+
 **CodeMirror does not remeasure `defaultLineHeight` on its own just because the page's zoom
 changed** — measured directly (R59, `docs/plans/R58-zoom.md` §4): a bare `EditorView`'s `defaultLineHeight`
 stayed completely stale after a CSS `zoom` change, with no auto-remeasure even ~100ms later, until
