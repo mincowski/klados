@@ -74,6 +74,15 @@ retained `\r` is invisible (nothing renders it; `highlightSpecialChars` is not i
 caret does not land inside the pair on the keyboard path — but a lone `\r` is no longer a line
 break, which is the deliberate price.
 
+**Verify that a mutation landed where you aimed it before believing what the suite says**
+(R169). This project proves tests non-vacuous by breaking the code and watching them go red — R159,
+R162, R168 and R169 all turn on it — and the failure mode has now happened once: a two-line
+`reloadAbort?.abort()` sequence was edited by text match, the same two lines existed in the
+document-close path, and the edit silently landed there instead. The suite stayed green, which reads
+as *"the test is vacuous"* when the truth was *"the mutation missed"* — and the two conclusions point
+in opposite directions. **A green suite after a mutation is the least trustworthy of the two
+readings**: check the diff, or target by line, before drawing anything from it.
+
 **Every Raw edit fixture in this project was LF-only until R168**, which is why the above survived
 for the project's whole life. If you are adding a test that drives an edit, vary the line ending —
 the units and the bytes agree on LF and only on LF, so an LF fixture cannot see this class of bug

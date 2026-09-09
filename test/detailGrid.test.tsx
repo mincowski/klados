@@ -80,6 +80,7 @@ function gridDocument(rows: number): { document: OpenDocument; selectedNode: num
     pendingParseError: null,
     dirty: false,
     externalChangeDetected: false,
+    reloadPending: false,
     pendingTransform: null,
     minifiedBannerDismissed: false,
     reparsePending: false,

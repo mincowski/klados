@@ -85,14 +85,40 @@ export function derivedNotifications(
   // own the next time the flag flips true, since `keepMine` only clears it
   // rather than latching a "don't ask again" of its own.
   if (document.externalChangeDetected) {
+    // R169 (`docs/plans/R169-external-change-reload.md`): while the reload the
+    // user just asked for is in flight, **the same banner says so** rather than
+    // sitting there unchanged.
+    //
+    // The reported symptom was that Reload looked like a dead button: the
+    // reload never leaves `phase: 'ready'`, so nothing on screen moved between
+    // the click and the parse completing, and the banner itself was the most
+    // visible thing insisting nothing had happened.
+    //
+    // **Changing the existing banner rather than showing a new indicator is
+    // what lets this have no threshold and no timer** (§5: "do not make the
+    // reload slower to make it visible"). A new element appearing would flash
+    // for the few milliseconds a small file takes, so it would have needed a
+    // delay before it could appear — and a delay is exactly what the plan
+    // forbids. An element already on screen changing its text cannot flash.
+    //
+    // **Keep Mine stays, and is now the cancel.** It reads correctly during a
+    // reload — the user is still choosing between disk and their own edits —
+    // and R169 made it genuinely revocable, so offering it here is not a
+    // decoration: clicking it aborts the in-flight read and keeps the buffer.
+    // Reload is dropped, because it is the thing already happening.
+    const reloading = document.reloadPending
     notifications.push({
       id: 'derived:externalChange',
       severity: 'warning',
-      message: `${document.fileName} changed on disk. Reload and discard your unsaved edits, or keep what you have?`,
-      actions: [
-        { label: 'Reload and Discard', commandId: 'klados.document.reloadExternalChange' },
-        { label: 'Keep Mine', commandId: 'klados.document.keepMine' }
-      ],
+      message: reloading
+        ? `Reloading ${document.fileName} from disk…`
+        : `${document.fileName} changed on disk. Reload and discard your unsaved edits, or keep what you have?`,
+      actions: reloading
+        ? [{ label: 'Keep Mine', commandId: 'klados.document.keepMine' }]
+        : [
+            { label: 'Reload and Discard', commandId: 'klados.document.reloadExternalChange' },
+            { label: 'Keep Mine', commandId: 'klados.document.keepMine' }
+          ],
       documentId
     })
   }

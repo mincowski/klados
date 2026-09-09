@@ -8,6 +8,8 @@
  * `commands/builtins.ts` — not from a view component, per D3.
  */
 import { registerCommand } from '../commands/registry'
+import { activeDocumentId } from './documentId'
+import { notify } from './notificationStore'
 import { focusNewestNotification } from './notificationFocusController'
 
 registerCommand({
@@ -52,7 +54,28 @@ registerCommand({
   category: 'File',
   when: 'hasExternalChange',
   surfaces: ['palette'],
-  run: (ctx) => void ctx.session.reloadAndDiscard()
+  // R169 (`docs/plans/R169-external-change-reload.md` §4.4): the outcome is
+  // acted on rather than discarded. This was `void ctx.session.
+  // reloadAndDiscard()`, so a reload of a file that had since been deleted
+  // failed silently and left the banner up with no explanation — the same
+  // "the button is dead" symptom the missing progress state caused, from an
+  // entirely different cause, which is why fixing one without the other would
+  // have left the report half-answered.
+  //
+  // `cancelled` is deliberately silent: it means "Keep Mine" (or a newer
+  // reload) superseded this one, which is the user getting what they asked
+  // for, not a failure worth a red banner.
+  run: (ctx) => {
+    void ctx.session.reloadAndDiscard().then((outcome) => {
+      if (outcome.ok) return
+      notify({
+        severity: 'error',
+        message: outcome.message,
+        documentId: activeDocumentId(),
+        dedupeKey: 'document.reloadFailed'
+      })
+    })
+  }
 })
 
 registerCommand({

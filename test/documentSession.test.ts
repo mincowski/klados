@@ -31,7 +31,8 @@ import {
   createDocumentSession,
   NO_SELECTION,
   type DocumentSession,
-  type DocumentSessionDeps
+  type DocumentSessionDeps,
+  type DocumentSessionState
 } from '../src/renderer/session/documentSession'
 
 /** Test-only extension of the real `KladosApi['document']` shape — `read`
@@ -2895,13 +2896,195 @@ describe('createDocumentSession (D6)', () => {
       expect(() => session.keepMine()).not.toThrow()
     })
 
-    it('reloadAndDiscard is a no-op with no document open', async () => {
+    it('reloadAndDiscard reports rather than silently doing nothing with no document open', async () => {
       const session = createDocumentSession({
         parse: fakeParse,
         parseFromUrl: fakeParseFromUrl,
         api: fakeApi()
       })
-      await expect(session.reloadAndDiscard()).resolves.toBeUndefined()
+      // R169: this resolved `undefined` before, which is exactly the shape of
+      // the defect — every failure path was indistinguishable from success.
+      await expect(session.reloadAndDiscard()).resolves.toEqual({
+        ok: false,
+        message: 'No document is open.'
+      })
+    })
+
+    /**
+     * R169 (`docs/plans/R169-external-change-reload.md`) — "Reload and
+     * Discard" looked like a dead button, and the button beside it destroyed
+     * the edits it exists to protect.
+     *
+     * **The reported sequence, reproduced before anything was changed:** the
+     * banner goes up, Reload is clicked and *nothing* about the state moves,
+     * the user concludes it is dead and clicks Keep Mine, the banner vanishes
+     * at that instant — and then the reload lands anyway and replaces their
+     * edit. The user guessed "maybe a temporal coincidence" in the report and
+     * was right; these tests pin both halves.
+     */
+    describe('R169 — a reload has a state, and Keep Mine can revoke it', () => {
+      /** Open a dirty document with the external-change banner up, exactly as
+       * the watcher path leaves it. Returns the pieces each test needs. */
+      async function openWithBannerUp(reloadedAs: string): Promise<{
+        session: ReturnType<typeof createDocumentSession>
+        read: ReturnType<typeof vi.fn>
+      }> {
+        const read = vi
+          .fn()
+          .mockResolvedValueOnce(utf8('{"a":1}'))
+          .mockResolvedValue(utf8(reloadedAs))
+        const { api, triggerChange } = fakeApiWithChangeCapture({ read })
+        const session = createDocumentSession({
+          parse: fakeParse,
+          parseFromUrl: fakeParseFromUrl,
+          api,
+          reparseDelayMs: 5,
+          watchKey: TEST_WATCH_KEY
+        })
+        await session.openPath('C:/docs/data.json')
+        session.applyEdit({ start: 5, end: 6, text: '2' }) // the unsaved edit
+        await flush(session)
+        triggerChange()
+        await flush(session)
+
+        const state = session.getSnapshot()
+        if (state.phase !== 'ready') throw new Error('unreachable')
+        expect(state.document.externalChangeDetected).toBe(true)
+        expect(state.document.dirty).toBe(true)
+        return { session, read }
+      }
+
+      function documentOf(
+        session: ReturnType<typeof createDocumentSession>
+      ): Extract<DocumentSessionState, { phase: 'ready' }>['document'] {
+        const state = session.getSnapshot()
+        if (state.phase !== 'ready') throw new Error(`phase ${state.phase}, not ready`)
+        return state.document
+      }
+
+      it('the reload is observable the moment it starts, and stays in phase ready', async () => {
+        const { session } = await openWithBannerUp('{"a":99}')
+
+        const inFlight = session.reloadAndDiscard()
+        // Read synchronously, before yielding to the microtask queue: the flag
+        // is raised before the first await, which is what lets the UI
+        // acknowledge the click within the same frame.
+        expect(documentOf(session).reloadPending).toBe(true)
+        // And **without a phase change** — a phase would swap the document out
+        // for DocumentArea's "Opening…" view, remounting every pane.
+        expect(session.getSnapshot().phase).toBe('ready')
+
+        await inFlight
+        expect(documentOf(session).reloadPending).toBe(false)
+      })
+
+      it('the banner clears in the same commit that swaps the content, not before', async () => {
+        const { session } = await openWithBannerUp('{"a":99}')
+
+        const inFlight = session.reloadAndDiscard()
+        // Still up while the work is in flight — the banner is the thing that
+        // told the user a decision was outstanding, and it still is.
+        expect(documentOf(session).externalChangeDetected).toBe(true)
+
+        await inFlight
+        const after = documentOf(session)
+        expect(after.externalChangeDetected).toBe(false)
+        expect(new TextDecoder().decode(after.sourceBuffer.bytes)).toBe('{"a":99}')
+      })
+
+      it('Keep Mine cancels a reload already in flight, and the unsaved edit survives', async () => {
+        // **The reproduction.** Without the fix this ends at '{"a":99}': the
+        // banner cleared at the click and the reload landed regardless, so the
+        // button offering to keep the user's work discarded it.
+        const { session } = await openWithBannerUp('{"a":99}')
+
+        const inFlight = session.reloadAndDiscard()
+        session.keepMine()
+        const outcome = await inFlight
+
+        expect(outcome).toEqual({ ok: true, cancelled: true })
+        const after = documentOf(session)
+        expect(new TextDecoder().decode(after.sourceBuffer.bytes)).toBe('{"a":2}')
+        expect(after.dirty).toBe(true)
+        expect(after.externalChangeDetected).toBe(false)
+        expect(after.reloadPending).toBe(false)
+      })
+
+      it('a cancelled reload stays cancelled after the microtask queue drains', async () => {
+        // Guards the narrower failure the fix could still have: bailing out of
+        // the commit but leaving a later continuation to write anyway.
+        const { session } = await openWithBannerUp('{"a":99}')
+
+        const inFlight = session.reloadAndDiscard()
+        session.keepMine()
+        await inFlight
+        await flush(session)
+
+        expect(new TextDecoder().decode(documentOf(session).sourceBuffer.bytes)).toBe('{"a":2}')
+      })
+
+      it('a reload whose file has gone reports it, and does not leave the flag up', async () => {
+        // The file opens, then vanishes: `mintReadToken` reads through this
+        // same mock, so a rejecting second read is the natural way to say the
+        // file is no longer there.
+        const { api, triggerChange } = fakeApiWithChangeCapture({
+          read: vi
+            .fn()
+            .mockResolvedValueOnce(utf8('{"a":1}'))
+            .mockRejectedValue(new Error('ENOENT: no such file or directory'))
+        })
+        const session = createDocumentSession({
+          parse: fakeParse,
+          parseFromUrl: fakeParseFromUrl,
+          api,
+          reparseDelayMs: 5,
+          watchKey: TEST_WATCH_KEY
+        })
+        await session.openPath('C:/docs/data.json')
+        session.applyEdit({ start: 5, end: 6, text: '2' })
+        await flush(session)
+        triggerChange()
+        await flush(session)
+
+        const outcome = await session.reloadAndDiscard()
+
+        expect(outcome.ok).toBe(false)
+        if (outcome.ok) throw new Error('unreachable')
+        expect(outcome.message).toContain('data.json')
+        const after = documentOf(session)
+        // The document is left exactly as it was — the failure must not also
+        // cost the user their edits.
+        expect(new TextDecoder().decode(after.sourceBuffer.bytes)).toBe('{"a":2}')
+        expect(after.reloadPending).toBe(false)
+        // And the banner stays up: the decision is still outstanding.
+        expect(after.externalChangeDetected).toBe(true)
+      })
+
+      it('a clean document reloading in the background also carries the flag', async () => {
+        // The auto-reload path (`handleExternalChange` on a clean document)
+        // runs the same function, so it gets the same state for free — worth
+        // asserting rather than assuming, since it is the path with no click
+        // behind it.
+        const read = vi
+          .fn()
+          .mockResolvedValueOnce(utf8('{"a":1}'))
+          .mockResolvedValue(utf8('{"a":7}'))
+        const { api, triggerChange } = fakeApiWithChangeCapture({ read })
+        const session = createDocumentSession({
+          parse: fakeParse,
+          parseFromUrl: fakeParseFromUrl,
+          api,
+          watchKey: TEST_WATCH_KEY
+        })
+        await session.openPath('C:/docs/data.json')
+
+        triggerChange()
+        await flush(session)
+
+        const after = documentOf(session)
+        expect(new TextDecoder().decode(after.sourceBuffer.bytes)).toBe('{"a":7}')
+        expect(after.reloadPending).toBe(false)
+      })
     })
   })
 })

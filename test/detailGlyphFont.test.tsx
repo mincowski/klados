@@ -79,6 +79,7 @@ function openDocumentOver(
     pendingParseError: null,
     dirty: false,
     externalChangeDetected: false,
+    reloadPending: false,
     pendingTransform: null,
     minifiedBannerDismissed: false,
     reparsePending: false,
