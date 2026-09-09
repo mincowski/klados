@@ -108,6 +108,27 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
+      # R182 (`docs/plans/R182-ci-apt-hardening.md`): drop vendor apt sources
+      # the runner image ships and this project does not use, before anything
+      # runs `apt-get update`.
+      #
+      # Both Linux steps below shell out to apt, and `apt-get update` refreshes
+      # *every* configured source — including Google's Chrome repository, which
+      # the image preinstalls and which nothing here needs, since Playwright
+      # downloads its own Chromium. On 2026-09-09 that repository served a
+      # `Release` file newer than its own `Packages.gz`, the hashes disagreed,
+      # apt exited 100, and `ubuntu-latest` failed twice in a row on a
+      # documentation-only pull request — before a single test ran.
+      #
+      # Matched on content rather than filename so a rename in a future runner
+      # image does not silently stop removing it. `-r` so an image that has
+      # already dropped the repository is a no-op rather than an error.
+      - name: Remove unused vendor apt sources
+        if: runner.os == 'Linux'
+        run: |
+          grep -rl 'dl\.google\.com' /etc/apt/sources.list.d/ 2>/dev/null | sudo xargs -r rm -f
+          echo "remaining sources:"; ls -1 /etc/apt/sources.list.d/ || true
+
       # The browser project (`vitest.config.ts`) drives real Chromium via
       # Playwright — needs the browser binary and its OS-level deps
       # installed before `npm test` (which now runs both projects, R48a).
@@ -127,7 +148,8 @@ jobs:
       # there is nowhere to show it.
       #
       # Windows and macOS runners have a desktop session already, so this is
-      # one of exactly two Linux-only steps.
+      # one of exactly three Linux-only steps — this one, the vendor-apt-source
+      # removal above, and the `xvfb-run` branch inside the test step below.
       - name: Install xvfb
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y xvfb
