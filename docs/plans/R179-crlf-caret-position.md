@@ -182,19 +182,43 @@ the 200 MB ceiling**. Cheap enough to do once, far too slow to do on every Enter
 to be computed once and cached. That cache is the real cost: it has to be invalidated when the
 buffer changes, and every edit changes the buffer.
 
-**Decided: match the line being split, and fall back to the majority only when there is no local
-evidence.** Pressing Enter splits a line that already has an ending; inserting *that* ending is
-`O(1)`, needs no scan, no cache and no invalidation, and gives an answer identical to the majority's
-on any uniform file — which is nearly every real file. It is also the answer most consistent with
-invariant 6's whole posture: preserve what is there rather than normalize toward what is common.
+**Decided: the ending of the line being split; failing that, the ending of the line before it;
+failing that, `\n`.** Majority is not needed at all — and that is the point of the rule rather than
+a detail of it. The measurement above becomes the record of an option **not** taken, and the 244 ms
+scan and the cache it would have required leave the design entirely.
 
-The fallback covers the two cases with no local evidence — the last line when it has no ending, and
-a document containing no line break at all. There the document majority decides, computed over the
-loaded window rather than the whole file; if even that is empty, `\n`.
+```
+endingOf(n)  = undefined                              if n is the last line (it has no ending)
+             = '\r\n'  if line n's text ends with \r
+             = '\n'    otherwise
 
-This differs from a pure majority only on a mixed file, and only in that a stray LF line stays LF
-instead of being healed to CRLF. That is the more conservative of the two, and the round records it
-in `DECISIONS.md` with this reasoning and the measurements above.
+insert       = endingOf(current) ?? endingOf(current - 1) ?? '\n'
+```
+
+Every case is `O(1)`: one line lookup, or two. No scan, no cache, no invalidation, and no question
+about whether the window or the whole file is the right population to measure — the last of which
+was the weakest part of the majority design and it is now moot.
+
+Each clause earns its place:
+
+- **The line being split** is the answer whenever the caret is anywhere but the final line, which is
+  nearly always. Splitting a CRLF line yields two CRLF lines.
+- **The line before** covers the last line, which by definition has no ending of its own. This is not
+  a rare case: a document ending in a trailing newline has an empty final line, so *pressing Enter at
+  the end of a file* lands here every time. Reading the previous line's ending gets it right, and a
+  majority would have had to be computed to answer the single most common Enter in the editor.
+- **`\n`** covers a document with no line break at all, where there is nothing to imitate and no
+  majority to consult either. Any choice is arbitrary; `\n` is the one that matches
+  `EditorState.lineBreak` and every other default in the codebase.
+
+The rule preserves a mixed file's local structure rather than healing it toward the dominant ending
+— the more conservative of the two behaviours, and the one consistent with invariant 6's posture of
+writing back what was there. `DECISIONS.md` records the rule, the majority measurement it displaced,
+and that "always `\n`" was the defect rather than an option.
+
+Verified while settling this: `leadingWhitespace` is `/^[ \t]*/`, so a trailing `\r` can never be
+captured into the indent the command copies. That was worth checking rather than assuming, since an
+indent containing a CR would have been a second corruption hiding inside the fix for the first.
 
 R181 is separable. If it is dropped, R179 and R180 still stand on their own and the plan loses
 nothing but the slow drift.
