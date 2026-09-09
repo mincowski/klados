@@ -14,20 +14,26 @@ interface FakeFs {
   /** Every `WatchHandle` `watch()` handed out, keyed by path, in creation
    * order — a test fires `[path][n].fire()` to simulate the OS noticing
    * something, and reads `.closed` to confirm teardown. */
-  watchersFor: Map<string, { fire: () => void; closed: boolean }[]>
+  watchersFor: Map<string, { fire: () => void; fail: (error: Error) => void; closed: boolean }[]>
 }
 
 function createFakeFs(): FakeFs & { deps: Parameters<typeof createDocumentWatcherRegistry>[0] } {
   const mtimes = new Map<string, number>()
-  const watchersFor = new Map<string, { fire: () => void; closed: boolean }[]>()
+  const watchersFor = new Map<
+    string,
+    { fire: () => void; fail: (error: Error) => void; closed: boolean }[]
+  >()
 
   const deps = {
     stat: async (path: string): Promise<{ mtimeMs: number } | null> => {
       const mtimeMs = mtimes.get(path)
       return mtimeMs === undefined ? null : { mtimeMs }
     },
-    watch: (path: string, onEvent: () => void): WatchHandle => {
-      const record = { fire: onEvent, closed: false }
+    watch: (path: string, onEvent: () => void, onError: (error: Error) => void): WatchHandle => {
+      // R171: `fail` is how a test says "the OS gave up on this watch" — the
+      // real `fs.watch` reaches it through an `'error'` event, which is
+      // exercised for real against the filesystem in `fsWatcherDeps.test.ts`.
+      const record = { fire: onEvent, fail: onError, closed: false }
       const list = watchersFor.get(path) ?? []
       list.push(record)
       watchersFor.set(path, list)
@@ -197,6 +203,101 @@ describe('createDocumentWatcherRegistry', () => {
     await drainTaskQueue()
 
     expect(onChange).not.toHaveBeenCalled()
+  })
+
+  /**
+   * R171 (`docs/plans/R171-watcher-error-handling.md`) — what the registry does
+   * once a watcher reports that it has failed.
+   *
+   * The crash itself is a `main` concern and is proved against a real
+   * filesystem in `fsWatcherDeps.test.ts`. What belongs here is the
+   * consequence: the registry must not go on believing it watches a path whose
+   * watcher is dead, or the next `unwatch` decrements a refcount that no longer
+   * exists and a re-watch joins a corpse.
+   */
+  describe('a watcher that fails is released (R171)', () => {
+    it('drops the path entry so a later watch builds a fresh watcher', async () => {
+      const fs = createFakeFs()
+      fs.mtimes.set('/a.json', 1)
+      const registry = createDocumentWatcherRegistry(fs.deps)
+      await registry.watch('tab-1', '/a.json', () => {})
+
+      fs.watchersFor.get('/a.json')![0]!.fail(new Error('EPERM'))
+
+      await registry.watch('tab-2', '/a.json', () => {})
+      // Two constructions, not one joined entry.
+      expect(fs.watchersFor.get('/a.json')).toHaveLength(2)
+    })
+
+    it('closes the failed watcher rather than leaking it', async () => {
+      const fs = createFakeFs()
+      fs.mtimes.set('/a.json', 1)
+      const registry = createDocumentWatcherRegistry(fs.deps)
+      await registry.watch('tab-1', '/a.json', () => {})
+
+      const watcher = fs.watchersFor.get('/a.json')![0]!
+      watcher.fail(new Error('EPERM'))
+      expect(watcher.closed).toBe(true)
+    })
+
+    it('forgets every key that was watching the failed path', async () => {
+      // Two tabs share one underlying watcher, so both registrations die with
+      // it. If `keyToPath` kept them, releasing one afterwards would reach into
+      // whatever entry later occupies that path.
+      const fs = createFakeFs()
+      fs.mtimes.set('/a.json', 1)
+      const registry = createDocumentWatcherRegistry(fs.deps)
+      await registry.watch('tab-1', '/a.json', () => {})
+      await registry.watch('tab-2', '/a.json', () => {})
+      expect(fs.watchersFor.get('/a.json')).toHaveLength(1)
+
+      fs.watchersFor.get('/a.json')![0]!.fail(new Error('EPERM'))
+
+      // A fresh watch on the same path, then release one of the *dead* keys.
+      await registry.watch('tab-3', '/a.json', () => {})
+      const fresh = fs.watchersFor.get('/a.json')![1]!
+      registry.unwatch('tab-1')
+      registry.unwatch('tab-2')
+      // The new watcher is untouched — the dead keys no longer refer to it.
+      expect(fresh.closed).toBe(false)
+    })
+
+    it('does not notify anyone, and does not re-arm', async () => {
+      // §6: a failing watcher must not spin. Releasing is the whole response —
+      // no retry, and no `onChange` fired at a renderer that would read it as
+      // "the file changed."
+      const fs = createFakeFs()
+      fs.mtimes.set('/a.json', 1)
+      const onChange = vi.fn()
+      const registry = createDocumentWatcherRegistry(fs.deps)
+      await registry.watch('tab-1', '/a.json', onChange)
+
+      fs.watchersFor.get('/a.json')![0]!.fail(new Error('EPERM'))
+
+      expect(onChange).not.toHaveBeenCalled()
+      // Still exactly one construction: nothing re-registered on the way out.
+      expect(fs.watchersFor.get('/a.json')).toHaveLength(1)
+    })
+
+    it('a stale failure from a replaced watcher cannot release the live one', async () => {
+      // The same staleness guard the change callback has: a watcher that was
+      // already torn down and replaced must not take its successor with it.
+      const fs = createFakeFs()
+      fs.mtimes.set('/a.json', 1)
+      const registry = createDocumentWatcherRegistry(fs.deps)
+      await registry.watch('tab-1', '/a.json', () => {})
+      const first = fs.watchersFor.get('/a.json')![0]!
+
+      registry.unwatch('tab-1') // tears the entry down
+      await registry.watch('tab-2', '/a.json', () => {}) // builds a new one
+      const second = fs.watchersFor.get('/a.json')![1]!
+
+      first.fail(new Error('EPERM')) // arrives late, for the old watcher
+
+      expect(second.closed).toBe(false)
+      await registry.watch('tab-3', '/a.json', () => {})
+      expect(fs.watchersFor.get('/a.json')).toHaveLength(2) // joined, not rebuilt
+    })
   })
 })
 

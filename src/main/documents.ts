@@ -34,8 +34,6 @@
  */
 import { dialog, protocol, BrowserWindow, app } from 'electron'
 import { basename } from 'path'
-import { stat } from 'fs/promises'
-import { watch as fsWatch } from 'fs'
 import { randomUUID } from 'crypto'
 import type { DocumentStat, OpenDialogResult } from '../preload/api'
 import { createReadTokenRegistry } from '../core/readTokenRegistry'
@@ -46,6 +44,7 @@ import { handleReadTokenRequest } from '../core/readTokenProtocol'
 import { secureHandle } from './trustedRenderer'
 import { statDocument, writeDocument } from '../core/mainDocumentIO'
 import { createDocumentWatcherRegistry } from '../core/documentWatchers'
+import { createFsWatcherDeps } from './fsWatcherDeps'
 
 /** M5-PLAN.md H12. Must match `core/parseClient.ts`'s own copy of this
  * string exactly — duplicated rather than shared through a module both
@@ -174,16 +173,24 @@ secureHandle(
  * its own (`test/documentWatchers.test.ts`); everything here is the thin
  * wiring that turns a notified key into a `webContents.send`.
  */
-const watchers = createDocumentWatcherRegistry({
-  stat: (path) =>
-    stat(path)
-      .then((info) => ({ mtimeMs: info.mtimeMs }))
-      .catch(() => null),
-  watch: (path, onEvent) => {
-    const fsWatcher = fsWatch(path, { persistent: false }, onEvent)
-    return { close: () => fsWatcher.close() }
-  }
-})
+const watchers = createDocumentWatcherRegistry(
+  // R171 (`docs/plans/R171-watcher-error-handling.md`): the `fs` half now lives
+  // in `fsWatcherDeps.ts`, which imports no Electron and so can be driven
+  // against a real filesystem by a test. It was previously inline here, where
+  // nothing could reach it — and what it was missing was an `'error'` listener,
+  // so every watcher error became an uncaught main-process exception and
+  // Electron's own crash dialog.
+  //
+  // **Logged, and only logged.** A failed watch means external-change detection
+  // stops for that document; nothing the user has done is lost or wrong, and
+  // the file itself is usually gone (the confirmed trigger is the parent
+  // directory being deleted or renamed). Telling the renderer would need a new
+  // IPC signal and a UI decision — recorded in `DECISIONS.md` as considered and
+  // deferred, not overlooked.
+  createFsWatcherDeps((path, error) => {
+    console.warn(`[watch] released ${path} after a watcher error: ${error.message}`)
+  })
+)
 
 // Which window each currently-registered key belongs to, so a closing
 // window can release every watch it owns (the plan's own "teardown on

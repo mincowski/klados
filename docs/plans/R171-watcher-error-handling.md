@@ -1,10 +1,13 @@
 # R171 — a file watcher error crashes the main process
 
-<!-- status: open -->
+<!-- status: built -->
 
-**Open.** Register: `docs/TASKS.md`. A user hit an Electron *"A JavaScript error occurred in the
-main process"* dialog while exercising the app by hand. The cause is a missing three-line listener,
-and its absence means **any** watcher error is an uncaught main-process exception.
+**Built.** Register: `docs/TASKS.md`. Results in §10; the decisions are D-089.
+**§3 was wrong about the trigger and §10a corrects it:** deleting the watched *file* is quiet,
+but deleting its parent **directory** raises the reported `EPERM` every time.
+A user hit an Electron *"A JavaScript error occurred in the main process"* dialog while exercising
+the app by hand. The cause is a missing three-line listener, and its absence meant **any** watcher
+error was an uncaught main-process exception.
 
 ---
 
@@ -135,3 +138,165 @@ from the same manual pass, each with its own document. Also out of scope: the te
 made this surface during a test run (watchers leaked onto deleted temp files), already fixed in
 R164–R167's branch, since a test that can pop a modal dialog on a CI runner is a separate problem
 from a product that can pop one at all.
+
+---
+
+## 10. Results
+
+**Built.** The trigger §3 said it could not find was found, the missing listener is in place, and
+both §4's and §5's decisions are recorded in `DECISIONS.md` as D-089.
+
+### 10a. The trigger, which §3 got wrong in both directions
+
+§3 reported that a probe deleting the watched file *and its directory* produced no error at all, and
+concluded the obvious hypothesis was wrong. Re-probed across seven scenarios:
+
+```
+   delete the watched file                    error=(none)
+>> delete file and its directory              error=EPERM: operation not permitted, watch
+   rename the watched file away, recreate it  error=(none)
+   deny all access to the file (icacls)       error=(none)
+   deny all access to the directory (icacls)  error=(none)
+   rapid write burst then delete              error=(none)
+```
+
+**Deleting the file alone is quiet; losing its parent directory is what raises `EPERM`** — the
+reported error, matching on `code`, `syscall` and message. So §3 was half right: the hypothesis it
+tested ("delete the watched file") really is wrong, and the conclusion it drew from that — that the
+directory case produces nothing either — was wrong too. The earlier probe most likely closed its
+watcher before the event arrived, or never attached a listener to observe it.
+
+**One candidate was credited and then withdrawn.** *Renaming* the parent directory appeared to
+reproduce, until it was noticed that the probe went on to delete the renamed directory — the
+deletion was doing the work. Driven alone it produces nothing within four seconds, so it is not
+claimed and not tested: a scenario that reproduces once and then does not is a flaky test, not a
+finding.
+
+### 10b. What landed
+
+- **`src/main/fsWatcherDeps.ts`**, new. The `fs`-backed `DocumentWatcherDeps`, moved out of
+  `main/documents.ts` — which imports `electron` at module scope, so the one place `fs.watch` was
+  actually constructed was the one place no test could reach. The same split `mainSecurity.ts`,
+  `mainQuitFlow.ts` and `mainDocumentIO.ts` already use, for the same reason.
+- **The `'error'` listener**, three lines, in that module.
+- **`DocumentWatcherDeps.watch` gains a required `onError`**, and the registry handles it by
+  releasing the path entry: the handle closed, every key that was watching it dropped from
+  `keyToPath`, the entry removed from `pathEntries`.
+- **`PathEntry.handle` becomes `WatchHandle | null`.** It was `null as unknown as WatchHandle`, a
+  lie that worked only because nothing could observe the window between constructing the entry and
+  `deps.watch` returning. The error callback *can* fire inside that window, so the type is now
+  honest and `closeQuietly` tolerates it.
+- **`closeQuietly`**, because closing an already-failed watcher can itself throw — which would be
+  the same uncaught exception in a new place.
+
+### 10c. Verified by inducing the real failure, not by reading the code
+
+Acceptance 2 asked for exactly this, and it is the difference between the two test files.
+`test/fsWatcherDeps.test.ts` drives the real `fs.watch` against a real directory. With the listener
+removed again, the suite does not merely fail — it reports the defect verbatim:
+
+```
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+Error: EPERM: operation not permitted, watch
+Serialized Error: { errno: -4048, syscall: 'watch', code: 'EPERM', filename: null }
+```
+
+That is the reported crash, reproduced inside the test runner. Three of the four tests go red.
+
+**On Windows.** Those same three tests fail on macOS and Linux for the opposite reason — the error
+never arrives at all — and they are now gated. §10h has the measurement and what it does and does
+not qualify.
+
+`test/documentWatchers.test.ts` covers the consequence with fakes — that a failed watcher is
+released, closed, its keys forgotten, nobody notified, nothing re-armed, and that a *stale* failure
+from a replaced watcher cannot take its successor down. Removing the registry's release turns the
+end-to-end case red.
+
+**One of those tests was vacuous and was rewritten.** The first version asserted that `unwatch` did
+not throw after a failure — which it never does, released or not, so it passed either way and proved
+nothing. The release *is* observable: a released path builds a fresh watcher next time, where a
+surviving entry would simply be joined. Counting constructions is the assertion that distinguishes
+them.
+
+### 10d. §4 and §5, decided rather than defaulted (D-089)
+
+**§4 — release and log.** External-change detection stops for that document; nothing else changes.
+"Tell the renderer" was rejected as deferred work, not dismissed: it is the more honest answer and
+needs an IPC signal, a preload surface, a session hook and a UI decision `PLANNING.md` §1 would want
+rendered. What makes deferring defensible is that the confirmed trigger is the directory being
+deleted — the document is gone, the user finds out at save, and the watcher is reporting the world
+rather than a fault. "Retry with backoff" was rejected outright: nothing to retry against, and §6
+forbids the spin.
+
+**§5 — no global `uncaughtException` handler, and the reason is this defect.** The crash is *how the
+bug was found*. Nothing in the suite covered watcher failure, no test would have caught it, and a
+catch-all installed earlier would have turned a loud, dated, screenshotted report into a watcher that
+silently stopped working forever. That is R47's buried lint signal and R155's buried Dependabot
+alerts in a third place. Handle failures at the seam that knows what they mean; leave the process's
+own error behaviour alone.
+
+### 10e. Acceptance, criterion by criterion
+
+1. **A reliable trigger** — found (§10a), and the withdrawn candidate is recorded too.
+2. **A watcher error cannot produce an uncaught exception, demonstrated by inducing one** — §10c,
+   **on Windows only**; §10h has the measurement and what carries this elsewhere.
+3. **The failed watch is released and the bookkeeping matches** — asserted by re-watching, which is
+   what makes it observable.
+4. **§4's choice written down with what was rejected** — D-089.
+5. **§5 answered explicitly** — D-089.
+6. **No retry loop** — asserted: after a failure the watcher count stays at one, and nothing is
+   notified.
+
+Suite **1896 → 1905** on Windows, lint at its 3-warning ratchet, typecheck clean. The baseline is
+1896 rather than the 1887 this branch started from because R170 merged first; the round's own
+contribution is nine either way. On macOS and Linux three of those nine are skipped (§10h).
+
+### 10f. Review pass
+
+Reviewed as a separate pass over `git diff`. Two findings, both fixed:
+
+- R163's own lint rule rejected four bare durations in the new test — the rule working exactly as
+  intended on the first file to touch it since it landed. Both surviving durations are legitimate (a
+  timeout that turns a hang into a failure; the margin for the one negative assertion) and now have
+  names saying so.
+- Removing the watcher deps from `main/documents.ts` left `stat` imported and unused; removed.
+
+### 10g. Not done
+
+**The renderer is not told.** D-089 records why, and the alternative with it. If the "changed on
+disk" banner silently never appearing turns out to matter, that is a follow-up with a UI decision in
+it, not a line of code.
+
+### 10h. The trigger is Windows-only, and CI is what established that
+
+The first CI run of this branch passed on `windows-latest` and failed on `macos-latest` and
+`ubuntu-latest` — all three error-inducing tests, both platforms, the same message:
+
+```
+FAIL test/fsWatcherDeps.test.ts > deleting the watched directory reports EPERM instead of raising it
+FAIL test/fsWatcherDeps.test.ts > the injected reporter sees the path and the error
+FAIL test/fsWatcherDeps.test.ts > end to end: the registry releases the path after a real failure
+Error: no watcher error arrived
+```
+
+**Deleting the watched file's parent directory emits no `'error'` event at all on macOS or Linux.**
+The negative test — deleting the file alone raises nothing — passed everywhere, and
+`documentWatchers.test.ts`'s injected-failure cases passed everywhere, so the divergence is precisely
+and only the real OS trigger.
+
+**§10a's probing was done on Windows, and §10a does not say so.** That is the error, and it is the
+same shape as the one §10a itself corrects: a scenario that reproduces under the conditions it was
+found in, generalised one step too far. A real-filesystem test inherits every platform difference of
+the thing it drives, and this one drove `fs.watch` on one platform.
+
+The three tests are now gated on `process.platform === 'win32'` behind a named constant. **The gate
+is not a workaround for a failing test**, and the distinction matters: the defect is
+platform-independent — `fs.FSWatcher` is an `EventEmitter` on every platform and the listener is
+attached unconditionally — while the *reproduction* is not. `windows-latest` is in the CI matrix, so
+removing the listener still turns CI red. Verified by forcing the constant to `false` and re-running:
+three skipped, one passed, file green — so the gate produces a clean run rather than a silently
+broken one.
+
+**What this costs, stated plainly:** on macOS and Linux, acceptance 2 is carried by the fake-driven
+tests in `documentWatchers.test.ts` rather than by an induced real failure. It is not carried on
+those platforms by nothing, and it is not carried on those platforms by an induced error either.

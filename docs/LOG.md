@@ -16,6 +16,62 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R171 — a file watcher error crashed the main process · built
+
+**Plan:** `docs/plans/R171-watcher-error-handling.md` · **Decisions:** D-089
+
+**Found by a person, not a test.** A user hit Electron's "A JavaScript error occurred in the main
+process" dialog by hand — `EPERM: operation not permitted, watch`. `fs.FSWatcher` is an
+`EventEmitter`, an `'error'` event with no listener throws, and nothing anywhere in `src/` listened
+for one.
+
+**The plan said the trigger could not be reproduced; it can.** §3 reported that deleting the watched
+file and its directory produced nothing, and concluded the obvious hypothesis was wrong. Re-probing
+seven scenarios: deleting the *file* alone is indeed quiet, but **deleting its parent directory
+raises `EPERM` every time**, matching the report on code, syscall and message. One candidate was
+credited and then withdrawn — *renaming* the directory appeared to work until it turned out the probe
+also deleted the renamed directory afterwards, so the deletion was doing the work.
+
+**The fix is three lines, in a file that had to be created to hold them.** `main/documents.ts`
+imports `electron` at module scope, so the one place `fs.watch` was constructed was the one place no
+test could reach — which is precisely where the defect lived. `src/main/fsWatcherDeps.ts` now holds
+the `fs`-backed deps and imports nothing from Electron, so `test/fsWatcherDeps.test.ts` drives the
+real watcher against a real directory. Remove the listener again and the suite reports the original
+crash verbatim: `Unhandled Errors — Error: EPERM: operation not permitted, watch`.
+
+The registry side releases the failed path: handle closed, keys forgotten, entry dropped. `PathEntry.
+handle` stops being `null as unknown as WatchHandle` — a lie that held only while nothing could
+observe the window between building the entry and `deps.watch` returning, which is exactly the window
+an immediate failure fires in.
+
+**One test was vacuous and was rewritten.** It asserted `unwatch` did not throw after a failure,
+which it never does either way. The release is observable by re-watching — a released path builds a
+fresh watcher, a surviving one is joined — so counting constructions is the assertion that actually
+distinguishes them.
+
+**§5 answered: no global `uncaughtException` handler**, and the reason is this defect. The crash is
+how the bug was found; a catch-all installed earlier would have turned a loud, screenshotted report
+into a watcher that silently stopped working forever. R47's buried lint signal and R155's buried
+Dependabot alerts, in a third place.
+
+**R163's lint rule earned its keep**, rejecting four bare durations in the new test — the first file
+to touch it since it landed. The two that survive are a hang-to-failure timeout and the margin for a
+negative assertion, both now named.
+
+**And then CI found the part Windows could not.** The branch passed on `windows-latest` and failed
+on `macos-latest` and `ubuntu-latest` — all three error-inducing tests, both platforms, `no watcher
+error arrived`. Deleting the watched file's parent directory emits **no `'error'` event at all**
+outside Windows. The trigger §10a was so pleased to have found was a finding about one platform,
+generalised one step too far — the same shape as the mistake §10a itself corrects. The three tests
+are now gated on `process.platform === 'win32'`, verified by forcing the constant false (three
+skipped, one passed, green), and the plan says plainly what that costs: on the other two platforms
+acceptance 2 rests on the fake-driven tests rather than an induced real failure. **The gate is on
+the reproduction, never on the guard** — the listener is attached on every platform, and
+`windows-latest` in the matrix still reddens CI if it is removed. `FINDINGS.md` carries the general
+form, since it is about any test driving a real OS facility.
+
+Suite 1896 → 1905 — the baseline moved because R170 landed first; the round still adds nine.
+
 ## R170 — a deeply nested tree had nowhere to scroll · built
 
 **Plan:** `docs/plans/R170-tree-horizontal-scroll.md`

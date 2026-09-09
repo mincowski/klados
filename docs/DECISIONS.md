@@ -2975,3 +2975,48 @@ descent's `wrapperCompositeChild`, in particular) would need re-auditing for whe
 suddenly including attribute-only nodes changes *its* behaviour too, for no benefit grid detection
 needs. `wrapperCompositeChild` stays exactly as written: a wrapper's one child must still have
 actual child *nodes*, since a facet-only node has nothing to descend into.
+
+### D-089 — a failed file watcher is released and logged, not surfaced to the renderer or retried (R171) · `settled`
+
+`fs.FSWatcher` is an `EventEmitter`, and until R171 nothing anywhere in `src/` listened for its
+`'error'` event. An `'error'` with no listener *throws*, so in the main process every watcher
+failure was an uncaught exception and Electron's own "A JavaScript error occurred in the main
+process" dialog — which is how a user found it, by hand, while doing something else.
+
+**Reproduced before deciding what to do about it.** Deleting the watched *file* is quiet; deleting
+its parent **directory** raises `EPERM: operation not permitted, watch`, matching the report by code
+and message. `test/fsWatcherDeps.test.ts` induces it against a real filesystem, and removing the
+listener again turns that test red with the identical unhandled error — so the fix is load-bearing
+rather than defensive.
+
+**Decided:** the watcher is released — its path entry dropped, every key that was watching it
+forgotten, the handle closed — and the failure is written to the main-process log. External-change
+detection stops for that document and nothing else changes.
+
+**Rejected: telling the renderer.** The most honest answer, and the most work: a new IPC signal, a
+preload surface, a session hook, and a decision about what the UI says, which `PLANNING.md` §1 would
+require rendering before settling. Deferred rather than dismissed — the argument for it is that a
+silently-dead watcher means the "changed on disk" banner never appears again for that document, and
+this project's culture is hostile to buried signals (R47's lint, R155's Dependabot alerts). What
+makes deferral defensible is that the confirmed trigger is the file's directory being deleted: the
+document is gone, the user will discover that at save, and the watcher is reporting a fact about the
+world rather than a fault in the app.
+
+**Rejected: retry with backoff.** Right for a transient lock, wrong for the failure that actually
+occurs. There is nothing to retry against when the directory has been removed, and R171 §6 is
+explicit that a failing watcher must not spin.
+
+**Rejected: a global `process.on('uncaughtException')` handler in main.** Considered because
+Electron's default — a modal dialog blaming the application — is the worst outcome for a file
+viewer, and a last-resort handler that logs and survives would be kinder.
+
+**The argument against it is this defect itself.** The crash is *how this bug was found*. Nothing in
+the suite covered watcher failure modes, no test would have caught it, and a catch-all installed
+earlier would have converted a loud, dated, screenshotted report into a watcher that silently stopped
+working forever. That is R47's buried lint signal and R155's buried Dependabot alerts in a third
+place, and it is the pattern this project exists to avoid.
+
+The position is therefore: **handle failures where they arise, at the seam that knows what they
+mean**, and leave the process's own error behaviour alone. If a global handler is ever added it
+should log loudly and still fail the process in development, never suppress silently — but no such
+handler is added here, and none is needed for R171's own defect.
