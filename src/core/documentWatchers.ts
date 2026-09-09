@@ -34,8 +34,22 @@ export interface DocumentWatcherDeps {
    * underlying filesystem event — unfiltered; this registry is what turns
    * "the OS noticed something" into "the content actually changed"
    * (mtime comparison), the same job the predecessor's own `fs.watch`
-   * callback did, now scoped per path-entry rather than per module. */
-  watch(path: string, onEvent: () => void): WatchHandle
+   * callback did, now scoped per path-entry rather than per module.
+   *
+   * **R171 — `onError` is not optional, and its absence was a crash.**
+   * `fs.FSWatcher` is an `EventEmitter`, so an `'error'` event with no
+   * listener *throws*; in the main process that is an uncaught exception and
+   * Electron's own "A JavaScript error occurred in the main process" dialog,
+   * which is what a user hit by hand. Reproduced since: deleting a watched
+   * file is fine, but **deleting or renaming its parent directory raises
+   * `EPERM: operation not permitted, watch`** — the reported error exactly.
+   *
+   * The implementation must call `onError` instead of letting the event
+   * escape. The registry's own handler is what keeps its bookkeeping honest
+   * afterwards; an implementation that merely swallowed the event would stop
+   * the crash and leave the registry believing it still watches a path whose
+   * watcher is dead. */
+  watch(path: string, onEvent: () => void, onError: (error: Error) => void): WatchHandle
 }
 
 export interface DocumentWatcherRegistry {
@@ -59,7 +73,7 @@ export interface DocumentWatcherRegistry {
 }
 
 interface PathEntry {
-  handle: WatchHandle
+  handle: WatchHandle | null
   lastKnownMtimeMs: number
   /** Every key currently watching this path, each with its own
    * `onChange` — two tabs on the same file each get their own
@@ -72,6 +86,18 @@ export function createDocumentWatcherRegistry(deps: DocumentWatcherDeps): Docume
   const pathEntries = new Map<string, PathEntry>()
   const keyToPath = new Map<string, string>()
 
+  /** R171: closing a watcher that has already failed can itself throw — the
+   * handle is being discarded either way, and a throw here would re-raise the
+   * very uncaught exception this round exists to remove. */
+  function closeQuietly(handle: WatchHandle | null): void {
+    if (handle === null) return
+    try {
+      handle.close()
+    } catch {
+      // Nothing to do: the watcher is being abandoned regardless.
+    }
+  }
+
   function releaseKey(key: string): void {
     const path = keyToPath.get(key)
     if (path === undefined) return
@@ -80,7 +106,7 @@ export function createDocumentWatcherRegistry(deps: DocumentWatcherDeps): Docume
     if (entry === undefined) return
     entry.keys.delete(key)
     if (entry.keys.size === 0) {
-      entry.handle.close()
+      closeQuietly(entry.handle)
       pathEntries.delete(path)
     }
   }
@@ -104,20 +130,47 @@ export function createDocumentWatcherRegistry(deps: DocumentWatcherDeps): Docume
         // watching entry," since a path can now be re-watched under a
         // fresh entry while an old callback for it is still in flight.
         const fresh: PathEntry = {
-          handle: null as unknown as WatchHandle,
+          // R171: genuinely `null` until `deps.watch` returns, because the error
+          // callback below can fire *during* that call — a watch that fails
+          // immediately. `closeQuietly` tolerates it; the previous
+          // `null as unknown as WatchHandle` would have thrown on a property
+          // access, which is the same crash in a new place.
+          handle: null,
           lastKnownMtimeMs: info.mtimeMs,
           keys: new Map()
         }
-        fresh.handle = deps.watch(path, () => {
-          void (async () => {
+        fresh.handle = deps.watch(
+          path,
+          () => {
+            void (async () => {
+              if (pathEntries.get(path) !== fresh) return
+              const current = await deps.stat(path)
+              if (pathEntries.get(path) !== fresh) return
+              if (current === null || current.mtimeMs === fresh.lastKnownMtimeMs) return
+              fresh.lastKnownMtimeMs = current.mtimeMs
+              for (const [watchingKey, notify] of fresh.keys) notify(watchingKey)
+            })()
+          },
+          // R171 — the watcher for this path has failed and will not recover.
+          //
+          // **Released, not re-armed** (§6: "a failing watcher must not spin").
+          // The confirmed trigger is the parent directory going away, so there
+          // is nothing to retry against — and a watcher that re-registered on
+          // every error would log and fail on every filesystem tick.
+          //
+          // Every key watching this path is dropped from `keyToPath` as well as
+          // from the entry, so the registry's own bookkeeping matches reality:
+          // a later `unwatch` for one of those keys is then a no-op rather than
+          // a decrement of a refcount that no longer exists, and re-watching the
+          // same path builds a fresh entry instead of joining a dead one.
+          () => {
             if (pathEntries.get(path) !== fresh) return
-            const current = await deps.stat(path)
-            if (pathEntries.get(path) !== fresh) return
-            if (current === null || current.mtimeMs === fresh.lastKnownMtimeMs) return
-            fresh.lastKnownMtimeMs = current.mtimeMs
-            for (const [watchingKey, notify] of fresh.keys) notify(watchingKey)
-          })()
-        })
+            for (const watchingKey of fresh.keys.keys()) keyToPath.delete(watchingKey)
+            fresh.keys.clear()
+            pathEntries.delete(path)
+            closeQuietly(fresh.handle)
+          }
+        )
         pathEntries.set(path, fresh)
         entry = fresh
       }

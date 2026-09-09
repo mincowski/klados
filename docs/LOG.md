@@ -16,6 +16,51 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R171 — a file watcher error crashed the main process · built
+
+**Plan:** `docs/plans/R171-watcher-error-handling.md` · **Decisions:** D-089
+
+**Found by a person, not a test.** A user hit Electron's "A JavaScript error occurred in the main
+process" dialog by hand — `EPERM: operation not permitted, watch`. `fs.FSWatcher` is an
+`EventEmitter`, an `'error'` event with no listener throws, and nothing anywhere in `src/` listened
+for one.
+
+**The plan said the trigger could not be reproduced; it can.** §3 reported that deleting the watched
+file and its directory produced nothing, and concluded the obvious hypothesis was wrong. Re-probing
+seven scenarios: deleting the *file* alone is indeed quiet, but **deleting its parent directory
+raises `EPERM` every time**, matching the report on code, syscall and message. One candidate was
+credited and then withdrawn — *renaming* the directory appeared to work until it turned out the probe
+also deleted the renamed directory afterwards, so the deletion was doing the work.
+
+**The fix is three lines, in a file that had to be created to hold them.** `main/documents.ts`
+imports `electron` at module scope, so the one place `fs.watch` was constructed was the one place no
+test could reach — which is precisely where the defect lived. `src/main/fsWatcherDeps.ts` now holds
+the `fs`-backed deps and imports nothing from Electron, so `test/fsWatcherDeps.test.ts` drives the
+real watcher against a real directory. Remove the listener again and the suite reports the original
+crash verbatim: `Unhandled Errors — Error: EPERM: operation not permitted, watch`.
+
+The registry side releases the failed path: handle closed, keys forgotten, entry dropped. `PathEntry.
+handle` stops being `null as unknown as WatchHandle` — a lie that held only while nothing could
+observe the window between building the entry and `deps.watch` returning, which is exactly the window
+an immediate failure fires in.
+
+**One test was vacuous and was rewritten.** It asserted `unwatch` did not throw after a failure,
+which it never does either way. The release is observable by re-watching — a released path builds a
+fresh watcher, a surviving one is joined — so counting constructions is the assertion that actually
+distinguishes them.
+
+**§5 answered: no global `uncaughtException` handler**, and the reason is this defect. The crash is
+how the bug was found; a catch-all installed earlier would have turned a loud, screenshotted report
+into a watcher that silently stopped working forever. R47's buried lint signal and R155's buried
+Dependabot alerts, in a third place.
+
+**R163's lint rule earned its keep**, rejecting four bare durations in the new test — the first file
+to touch it since it landed. The two that survive are a hang-to-failure timeout and the margin for a
+negative assertion, both now named.
+
+Suite 1887 → 1896.
+
+
 ## R169 — "Reload and Discard" looked like a dead button, and Keep Mine destroyed your edits · built
 
 **Plan:** `docs/plans/R169-external-change-reload.md`
