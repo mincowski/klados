@@ -1,0 +1,192 @@
+# R172–R174 — freeze the published identity before the first release
+
+<!-- status: open -->
+
+**Open.** Register: `docs/TASKS.md`. **No winget submission happens here.** The goal is that when
+one is decided on, it needs *zero changes to this repository* — every field a package manager
+correlates against is already correct and already frozen.
+
+---
+
+## 1. Why this is a round, and why now
+
+A package manager does not install a file; it adopts an *identity*. Once a release ships, four
+strings become the handle everything downstream uses to recognise Klados as Klados: the uninstall
+registry key, the Publisher and DisplayName written beside it, and the installer's URL. Change any
+of them afterwards and existing installs are orphaned — no upgrade detection, no matching uninstall
+entry, and a package manager that believes the old and new versions are different products.
+
+**This project has already had that thought once and acted on it.** `electron-builder.yml`'s
+`nsis.guid` is pinned rather than derived, under a comment that says exactly why: *"Package
+managers and updaters key installed state off that name, so changing `appId` later would silently
+orphan every existing install."* R172 is the rest of that same argument applied to the fields the
+GUID comment did not reach.
+
+The trigger was a question about winget's `PackageIdentifier` — whether to be `klados.Klados`
+(project as publisher, the common convention) or `mincowski.Klados`. That question turned out to be
+the least binding part of it: **the identifier is not a repository artifact at all**, it lives in
+`microsoft/winget-pkgs`. What binds is everything the identifier has to correlate with, and that is
+all in here.
+
+**No release has shipped yet, so all of this is free today and expensive after.** That asymmetry is
+the whole reason to do it now rather than when a submission is actually wanted.
+
+## 2. What a package manager actually keys off — verified, not assumed
+
+Resolved by constructing electron-builder's own `AppInfo` against this repository's real
+`package.json` and reading the values it computes, rather than by reading its source and inferring
+(`PLANNING.md` §2). The NSIS registry write was traced to
+`app-builder-lib/templates/nsis/include/installer.nsh:133`.
+
+| What lands on the user's machine | Current value | Where it comes from |
+|---|---|---|
+| Uninstall registry key name | `318f6304-c1a1-5b48-8b0d-d9b77e332a6b` | `nsis.guid` — **already pinned** |
+| ARP `DisplayName` | `Klados` | `nsis.uninstallDisplayName` ← `productName` |
+| ARP `Publisher` | **`mincowski`** | `AppInfo.companyName` ← `package.json` `author.name` |
+| Debian `Maintainer` | `mincowski <8300485+mincowski@users.noreply.github.com>` | `author.name` + `author.email` |
+| Copyright resource | `Copyright © 2026 mincowski` | `AppInfo.copyright` ← `author.name` |
+| Installer URL | `klados-<version>-setup.exe` | `nsis.artifactName` — **already stable by construction** |
+| Install scope | per-user (`%LOCALAPPDATA%`, HKCU) | `oneClick` defaults true, `perMachine` defaults false |
+
+**The finding that makes this round non-trivial: `author.name` has three consumers, not one.** It is
+simultaneously the Windows Publisher, the Debian Maintainer, and the copyright holder. Those are
+three different questions with three different right answers, and one field is currently answering
+all of them. That is the actual problem R172 solves; the winget question merely exposed it.
+
+## 3. The decisions to settle
+
+### R172a — the publisher string
+
+**`Publisher` should be `Klados`, not `mincowski`.** The project is what publishes the software;
+this repository already made that call once, in `appId: com.klados.app`, which is namespaced to the
+project rather than the maintainer. A user reading Add/Remove Programs is looking for the thing they
+installed.
+
+It also matches where a winget identifier would land (`klados.Klados`), which removes the one
+inconsistency a reviewer would otherwise ask about.
+
+### R172b — the maintainer string, which must *not* follow it
+
+Debian's `Maintainer` field means *the person responsible for the package*, and its grammar is
+`Name <email>`. It is correct today and would be quietly degraded by R172a, because both read the
+same source. **`linux.maintainer` must therefore be set explicitly** to
+`mincowski <8300485+mincowski@users.noreply.github.com>`, decoupling it from `author.name` before
+that field changes meaning.
+
+`FpmTarget.js:85` reads `options.maintainer` in preference to deriving one, so the override exists
+and is the supported path. Note that `electron-builder.yml` currently carries a comment explaining
+why `maintainer:` is deliberately *absent* — **that comment becomes wrong and must be rewritten**,
+not left standing next to a line it now contradicts.
+
+### R172c — the copyright string
+
+Falls out of R172a: it becomes `Copyright © <year> Klados`. This is the desired answer rather than
+an accident — the copyright holder for an MIT project published under the project's name is the
+project. Called out because it is a third consumer that would otherwise change silently, which is
+how an unreviewed change becomes a surprise in a version resource nobody looks at.
+
+### R172d — install scope and installer shape, which are also permanent
+
+Not raised by the winget question, but in scope by the same argument, and **this is the item most
+likely to be regretted if it is not decided deliberately**:
+
+- **`perMachine`** — per-user today. Moving it later relocates the uninstall key from `HKCU` to
+  `HKLM`, which is precisely the orphaning the GUID pin exists to prevent, and would additionally
+  require winget's `Scope` to change.
+- **`oneClick`** — a one-click installer today. Turning it off later changes the install directory
+  from `%LOCALAPPDATA%\Programs` to `Program Files`.
+
+The recommendation is to **keep both defaults** — per-user, one-click — because a file viewer does
+not need administrative rights and per-user install is what lets `winget install` work without
+elevation. What R172 asks for is that this is *recorded as a decision* in `DECISIONS.md` rather than
+remaining an unexamined default, since its cost is entirely in changing it later.
+
+### R172e — the identifier itself
+
+`klados.Klados`. **Nothing in this repository changes for it**, which is the point worth recording:
+it lives in the winget-pkgs manifest, matching is case-insensitive, and the exact casing is
+confirmed against that repository at submission time. It is written down here so the decision is not
+re-litigated later.
+
+## 4. R173 — lock the values with a test
+
+Every value in §2 is a string in a config file that reads like a formatting preference and is
+actually a compatibility contract. `nsis.guid` has a four-line comment saying "**Never change it**"
+and nothing enforces it.
+
+**This project's own rule is "enforced by test, not discipline"** (invariant 10's wording), and
+`test/docsStatus.test.ts` is the precedent for a test whose whole job is to stop documentation and
+configuration drifting apart. R173 is the same shape for the identity fields: a node-project test
+asserting the pinned GUID, the artifact-name patterns, `productName`, the resolved publisher and
+maintainer strings, and the install-scope flags — each with the consequence of changing it named in
+the failure message, so someone who breaks one is told why it matters rather than being told a
+string does not match.
+
+**It must assert the *resolved* values, not the literal config.** Reading `author.name` back out of
+`package.json` proves nothing about what the installer writes; the assertion has to go through
+`AppInfo` the way §2's verification did, or it is a test of its own fixture.
+
+## 5. R174 — record the mapping, so submission is mechanical
+
+A short section appended to this document — **not a new file, and not `FINDINGS.md`**, which is for
+traps rather than reference — giving the winget manifest field → repo source mapping, so that
+whoever writes the manifest transcribes it instead of re-deriving it:
+
+`PackageIdentifier`, `Publisher`, `PackageName`, `License`, `InstallerType`, `Scope`,
+`InstallerUrl`, `InstallerSha256`, and `AppsAndFeaturesEntries.ProductCode`.
+
+**`ProductCode` is the one that matters and the one most often left out.** Set to the pinned GUID it
+gives winget exact install-and-upgrade correlation, independent of every display string above it —
+which means even if the Publisher decision is revisited some day, correlation does not break. It is
+the belt to §3's braces.
+
+## 6. What this round does not change
+
+- **`appId` (`com.klados.app`)** — reviewed and kept. It is the macOS bundle identifier as well, the
+  GUID pin has already made the uninstall key independent of it, and the `com.` prefix implying a
+  domain is a cosmetic objection not worth an orphaning risk.
+- **`nsis.guid`, `artifactName`, `differentialPackage`, the target lists** — already correct and
+  already reasoned about in place.
+- **`productName` (`Klados`)** — already the right answer.
+- **The version.** `package.json` stays at `1.0.0` unless decided otherwise; this round implies no
+  bump, and the standing decision is to hold `1.0.0` until the first release.
+
+## 7. Not in scope
+
+- **Submitting to winget.** No manifest is written, no PR is opened to `microsoft/winget-pkgs`, and
+  nothing here commits the project to doing so.
+- **Code signing.** Unsigned artifacts are a real winget consideration and a much larger decision
+  (a certificate, its cost, its renewal); R167's checksums are the integrity story for now.
+- **Moving the `v1.0.0` tag**, which is an operational step outside the repository's contents.
+- **Other package managers** (Homebrew, Scoop, Flatpak). The fields R172 freezes are the ones they
+  would want too, but none of their specifics are researched here and the plan should not imply they
+  were.
+
+## 8. Non-functional expectation
+
+`PLANNING.md` §1 does not apply — nothing here is a visual decision. §3 does not apply — nothing
+here is on a hot path; the entire round is build-time configuration and one test.
+
+§2 is the substance of §2 above, and it is worth naming what it caught: the claim *"the Publisher
+comes from `author.name`"* was verified by resolving it through electron-builder's own `AppInfo`,
+which is also what revealed the copyright string as a third consumer. Reading the source alone
+would have produced a plan that changed one field and silently changed two others.
+
+## 9. Acceptance criteria
+
+1. A fresh Windows install writes ARP `Publisher` = `Klados` and `DisplayName` = `Klados`, under the
+   uninstall key named for the pinned GUID. **Verified against a real built installer**, not against
+   the config — §2's whole lesson is that the config is one resolution step away from the truth.
+2. The `.deb`'s `Maintainer` field is unchanged from today's value and is well-formed
+   `Name <email>`.
+3. The copyright resource reads `Copyright © <year> Klados`.
+4. `electron-builder.yml`'s comment about deliberately omitting `maintainer:` is rewritten to
+   describe what the file now does.
+5. R173's test fails if any of the pinned values changes, and its failure message names the
+   consequence rather than only the mismatch.
+6. `DECISIONS.md` carries the per-user / one-click decision with its reasoning, and the publisher
+   decision with the `author.name`-has-three-consumers finding.
+7. §5's mapping table exists and every row cites its source in this repository.
+8. **The whole suite still passes and the packaged app still installs and runs** — this round
+   touches the identity of a shipped artifact, and the one failure mode that would be embarrassing
+   is an installer that no longer builds.
