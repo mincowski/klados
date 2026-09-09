@@ -1,0 +1,11 @@
+{
+  "name": "Jantte Doe",
+  "age": 28,
+  "isEmployed": true,
+  "skills": ["JavaScript", "Python", "JSON"],
+  "address": {
+    "city": "Frankfurt",
+    "country": "Germany"
+  },
+  "phone": null
+}
