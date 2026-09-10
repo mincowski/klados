@@ -344,6 +344,50 @@ a rejected write, skipping the reload abort, leaving `externalChangeDetected` se
 `reloadPending` raised, not clearing at all, dropping R177's re-watch, and moving that re-watch
 before the dialog result is checked so a *cancelled* Save As re-watches anyway.
 
+### CI was red three times, and the cause was the test harness, not the code
+
+The round's own pull request went red on **all three platforms** at
+`expect(getContext().canUndo).toBe(false)` in R178's reproduction, while every local configuration
+stayed green: Node 22 and Node 24, the test isolated (12 runs), the whole file (5), the whole node
+project (1), and under CPU starvation (4). That signature reads like a platform difference and R171
+had just produced a real one, which is the trap.
+
+**It was not.** Ruled out by measuring or reading rather than assuming: format-on-open
+(`getFormatMinifiedOnOpen` returns `false` with no `localStorage`, and the fixture is 7 bytes over
+1 row), a gap between the reload's `setState` and its undo clear (no `await` separates them; the only
+statement between is `requestReveal`, a bare assignment), `setCtx` being gated off (`isActive`
+defaults to always-true), the Node version, and a reload too slow for the wait (the test failed in
+128–177 ms, so the `waitFor` was resolving, not timing out).
+
+**The answer came from instrumenting the assertion and letting CI report it** — R171's own pattern,
+at the cost of one more red run:
+
+```json
+{ "undoEntryCount": 0, "undoBytes": 0, "externalRewrites": 1, "reloadPending": false,
+  "dirty": false, "reads": 2, "canUndo": true, "canRedo": false }
+```
+
+**The reload had cleared the undo stack correctly. Only the shared flag disagreed.**
+`commands/context` is a projection of the *active* session, not per-session storage, and
+`documentSession.test.ts` creates ~50 sessions, disposes none, and gives most of them the default
+200 ms undo-burst debounce while awaiting ~50 ms of reparse quiescence. A burst timer outlives the
+test that armed it and rewrites `canUndo` from a different session's stack. Whether it lands inside a
+later test is pure timing, which is why it was uniform on CI and absent locally.
+
+The tests now assert `undoEntryCount` — this session's own state, which nothing else can write — and
+call `resyncContext()` before reading the context key where the key itself is the claim.
+
+**Verified in both directions rather than assumed**, by injecting the exact clobber CI observed
+(`setContext('canUndo', true)`) immediately before the assertion: with `resyncContext()` the test
+passes; without it, it fails with CI's message verbatim, *"expected true to be false"*. That is the
+CI failure reproduced locally and the fix shown to be what closes it.
+
+The trap is in `docs/FINDINGS.md`, because it will bite any session test that asserts a context key.
+
+**Out of scope and reported rather than fixed**: the file has 54 `applyEdit` calls, 12
+`undoDelayMs` overrides and **zero** `dispose()` calls. Every session without the override leaves a
+200 ms timer running past its own test.
+
 ### One honest limit on the real-filesystem test
 
 Removing the drop from the registry turns the session tests red and leaves

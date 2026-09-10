@@ -58,6 +58,17 @@ the write resolves and the second after. And a mutation run found one claim in a
 test held: that the mark must outlive the re-stat. Closing it needed the registry's fake `stat` to
 grow a hook so a test could act while a stat was in flight.
 
+**CI then went red three times, and the cause was the harness.** R178's reproduction failed on all
+three platforms at one assertion and passed on every local configuration — Node 22 and 24, isolated,
+whole-file, whole-project, under CPU starvation. That is what a platform difference looks like, and
+R171 had just produced a real one. Instrumenting the assertion and letting CI print the state settled
+it: the reload had cleared the undo stack correctly (`undoEntryCount: 0`) and only `getContext()`'s
+`canUndo` disagreed. `commands/context` is a projection of the *active* session, and this test file
+creates ~50 sessions, disposes none, and leaves most of them a 200 ms undo-burst timer that outlives
+its own test. The fix asserts per-session state and calls `resyncContext()` where the context key is
+the claim — verified by injecting the exact clobber and confirming the test fails without it and
+passes with it. In `docs/FINDINGS.md`, because it will bite any session test that reads a context key.
+
 **The race that stays open is D-092**, not a silence: a third-party write landing inside our own
 sub-10 ms window is absorbed. The plan's suggested free mitigation — compare the post-write size —
 turns out not to work as described, because events inside the window are dropped rather than

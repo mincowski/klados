@@ -3358,16 +3358,33 @@ describe('createDocumentSession (D6)', () => {
       }
 
       /**
-       * Opens, makes one edit, and waits for the undo entry to exist — the
-       * condition, not a duration (R159).
+       * **Why these tests read `undoEntryCount` and not `getContext().canUndo`.**
        *
-       * **It asserts its own postconditions**, so neither test below can pass
-       * without the state it assumes. The first version of this block did not,
-       * and the reproduction test asserted `externalRewrites > 0` — which four
-       * separate paths raise (undo/redo, Transform, Replace All, and the
-       * reload), so it was not evidence of a reload at all. It went green on
-       * one machine and red on all three CI platforms, and the message could
-       * not say which half was wrong.
+       * `commands/context` is a projection of the *active* session, not
+       * per-session storage — and this file creates 50-odd sessions, disposes
+       * none of them, and gives most of them the default 200 ms undo-burst
+       * debounce while awaiting only the ~50 ms reparse quiescence. A burst
+       * timer therefore outlives the test that armed it, fires during a later
+       * one, and rewrites the shared `canUndo` from a **different** session's
+       * stack.
+       *
+       * That is exactly what happened here: this block was green on every local
+       * configuration (Node 22 and 24, isolated, whole-file, whole-project, and
+       * under CPU starvation) and red on all three CI platforms, and the
+       * diagnostic said why —
+       * `{"undoEntryCount":0,"undoBytes":0,"externalRewrites":1,"reads":2,"canUndo":true}`.
+       * The reload had cleared the stack correctly; only the shared flag
+       * disagreed. Pure timing, and nothing to do with the code under test.
+       *
+       * `undoEntryCount` is this session's own state and cannot be clobbered.
+       * Where the *flag* is the claim — it is what enables Ctrl+Z — the test
+       * calls `resyncContext()` first, which is the method that exists to
+       * rewrite the projection from this session before it is read.
+       *
+       * Opens, makes one edit, and waits for the undo entry to exist — the
+       * condition, not a duration (R159). **It asserts its own
+       * postconditions**, so neither test below can pass without the state it
+       * assumes.
        */
       async function openAndEdit(
         session: ReturnType<typeof createDocumentSession>,
@@ -3376,7 +3393,7 @@ describe('createDocumentSession (D6)', () => {
         await session.openPath('C:/docs/data.json')
         session.applyEdit({ start: 5, end: 6, text: '2' })
         await flush(session)
-        await vi.waitFor(() => expect(getContext().canUndo).toBe(true), {
+        await vi.waitFor(() => expect(documentOf(session).undoEntryCount).toBe(1), {
           interval: POLL_MS,
           timeout: TIMEOUT_MS
         })
@@ -3410,31 +3427,10 @@ describe('createDocumentSession (D6)', () => {
 
         // The document was re-read and re-parsed, the Raw editor rebuilt (R100
         // keys off `externalRewrites`), and the undo stack went with it.
-        //
-        // The message is here because this assertion failed on all three CI
-        // platforms and on none of eight local configurations (Node 22 and 24,
-        // isolated, whole-file, whole-project, and under CPU starvation). The
-        // discriminating value is `undoEntryCount`: **0 means the stack was
-        // cleared and only the context flag disagrees** — a real divergence,
-        // since the UI enables Ctrl+Z from that flag — while **1 means the
-        // reload committed without clearing the stack**, which the source says
-        // is impossible because no `await` separates the two.
-        const diagnostic = (): string => {
-          const d = documentOf(session)
-          return JSON.stringify({
-            undoEntryCount: d.undoEntryCount,
-            undoBytes: d.undoBytes,
-            externalRewrites: d.externalRewrites,
-            reloadPending: d.reloadPending,
-            externalChangeDetected: d.externalChangeDetected,
-            dirty: d.dirty,
-            reads: (api.document.mintReadToken as ReturnType<typeof vi.fn>).mock.calls.length,
-            canUndo: getContext().canUndo,
-            canRedo: getContext().canRedo
-          })
-        }
-        expect(documentOf(session).externalRewrites, diagnostic()).toBe(1)
-        expect(getContext().canUndo, diagnostic()).toBe(false)
+        expect(documentOf(session).externalRewrites).toBe(1)
+        expect(documentOf(session).undoEntryCount).toBe(0)
+        session.resyncContext()
+        expect(getContext().canUndo).toBe(false)
       })
 
       it('a save leaves the document, the undo stack and the selection alone', async () => {
@@ -3462,6 +3458,8 @@ describe('createDocumentSession (D6)', () => {
         expect(after.externalRewrites).toBe(before.externalRewrites)
         expect(after.sourceBuffer).toBe(before.sourceBuffer)
         // Acceptance 2 — the symptom that matters most.
+        expect(after.undoEntryCount).toBe(1)
+        session.resyncContext()
         expect(getContext().canUndo).toBe(true)
         expect(readyOf(session).selection).toEqual(selectionBefore)
       })
