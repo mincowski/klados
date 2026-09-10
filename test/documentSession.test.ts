@@ -3190,6 +3190,53 @@ describe('createDocumentSession (D6)', () => {
         expect(after.externalChangeDetected).toBe(true)
         expect(after.dirty).toBe(true)
       })
+      it('Save As re-watches the new path, and stops watching the old one', async () => {
+        // **The defect R177 fixes:** `api.document.watch` had exactly one call
+        // site in the whole renderer, in `openPath`. After a Save As the
+        // session went on watching the file it was opened from — so a change
+        // to the file being edited was never noticed, and a change to the
+        // *old* file reloaded the *new* path.
+        const { api } = fakeApiWithChangeCapture({
+          saveAsDialog: vi
+            .fn()
+            .mockResolvedValue({ path: 'C:/docs/copy.json', fileName: 'copy.json' })
+        })
+        const session = createDocumentSession({
+          parse: fakeParse,
+          parseFromUrl: fakeParseFromUrl,
+          api,
+          watchKey: TEST_WATCH_KEY
+        })
+        await session.openPath('C:/docs/data.json')
+        expect(api.document.watch).toHaveBeenCalledWith('C:/docs/data.json', TEST_WATCH_KEY)
+
+        await session.saveAs()
+
+        expect(api.document.watch).toHaveBeenLastCalledWith('C:/docs/copy.json', TEST_WATCH_KEY)
+        // One key watches one path: main's own `watch` releases this key's
+        // previous registration first, so re-watching *is* how the old path
+        // stops being watched on this session's behalf. Asserting the call
+        // rather than an `unwatch` that deliberately does not happen.
+        expect(documentOf(session).filePath).toBe('C:/docs/copy.json')
+      })
+
+      it('a cancelled Save As does not move the watch', async () => {
+        const { api } = fakeApiWithChangeCapture({
+          saveAsDialog: vi.fn().mockResolvedValue(null)
+        })
+        const session = createDocumentSession({
+          parse: fakeParse,
+          parseFromUrl: fakeParseFromUrl,
+          api,
+          watchKey: TEST_WATCH_KEY
+        })
+        await session.openPath('C:/docs/data.json')
+
+        await session.saveAs()
+
+        expect(api.document.watch).toHaveBeenCalledTimes(1)
+        expect(api.document.watch).toHaveBeenLastCalledWith('C:/docs/data.json', TEST_WATCH_KEY)
+      })
     })
   })
 })

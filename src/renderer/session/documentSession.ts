@@ -2165,6 +2165,23 @@ export function createDocumentSession(deps: DocumentSessionDeps = {}): DocumentS
           dirty: false
         }
       })
+      // R177 (`docs/plans/R175-self-write-suppression.md` §9) — the watch has
+      // to follow the document to its new path.
+      //
+      // Found while verifying §2: **`api.document.watch` had exactly one call
+      // site in the whole renderer**, in `openPath`. `saveAs` updated
+      // `filePath` in place and never re-watched, so afterwards the session was
+      // still watching the file it was opened from — an external change to the
+      // file now being edited went undetected, and an external change to the
+      // *old* file triggered a reload of the *new* path, because
+      // `reloadFromDisk` reads `state.document.filePath`.
+      //
+      // A missing call, not a missing mechanism: main's `watch` releases this
+      // key's previous registration first, so this both starts watching the new
+      // path and stops watching the old one on this session's behalf.
+      // Fire-and-forget for the same reason `openPath`'s call is — a watch that
+      // fails must not turn a successful save into a failed one.
+      void api.document.watch(picked.path, watchKey)
       // R95 (`R95-recent-files.md` §2): after a Save As the document being
       // edited *is* that path — a recent list missing the most recent file
       // of all would be wrong. `formatId` doesn't change on a Save As.
