@@ -2053,6 +2053,39 @@ export function createDocumentSession(deps: DocumentSessionDeps = {}): DocumentS
     syncUndoContext()
   }
 
+  /**
+   * R176 (`docs/plans/R175-self-write-suppression.md` §8) — a successful save
+   * resolves any pending external-change state.
+   *
+   * Independent of R175's suppression and still needed once it lands. If a
+   * *genuine* external change is pending and the user answers it by saving,
+   * their bytes are now the file's contents: the prompt asking whether to
+   * discard "your unsaved edits" is stale, there are no unsaved edits, and
+   * **Reload and Discard** would reload their own content over the top of it.
+   *
+   * **The abort is the load-bearing half**, and it is R169's finding in the
+   * one other place a reload can be superseded. `keepMine` had to learn this:
+   * clearing the banner does not stop a reload already in flight, so the
+   * button that exists to protect unsaved edits let them be destroyed a
+   * moment later. Dropping the controller is what makes `reloadFromDisk`'s own
+   * `reloadAbort !== controller` checks bail before committing; `abort()`
+   * additionally rejects the in-flight `parseFromUrl` rather than letting it
+   * run to completion and be discarded.
+   *
+   * Callers apply this only inside their own post-`await` guards — still
+   * `ready`, still the same `filePath`, still the same `sourceBuffer`.
+   *
+   * Side-effecting as well as returning: it aborts the in-flight reload and
+   * lowers the context key, then hands back the document fields to spread —
+   * the same shape and the same order `keepMine` uses.
+   */
+  function clearExternalChangeAfterSave(document: OpenDocument): OpenDocument {
+    reloadAbort?.abort()
+    reloadAbort = null
+    setCtx('hasExternalChange', false)
+    return { ...document, externalChangeDetected: false, reloadPending: false }
+  }
+
   async function save(): Promise<SaveOutcome> {
     if (state.phase !== 'ready') {
       return { ok: false, message: 'No document is open.' }
@@ -2080,7 +2113,10 @@ export function createDocumentSession(deps: DocumentSessionDeps = {}): DocumentS
       state.document.sourceBuffer === sourceBuffer
     ) {
       setCtx('isDirty', false)
-      setState({ ...state, document: { ...state.document, dirty: false } })
+      setState({
+        ...state,
+        document: { ...clearExternalChangeAfterSave(state.document), dirty: false }
+      })
     }
     return outcome
   }
@@ -2122,7 +2158,7 @@ export function createDocumentSession(deps: DocumentSessionDeps = {}): DocumentS
       setState({
         ...state,
         document: {
-          ...state.document,
+          ...clearExternalChangeAfterSave(state.document),
           filePath: picked.path,
           fileName: picked.fileName,
           readOnly: false,

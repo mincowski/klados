@@ -3086,5 +3086,110 @@ describe('createDocumentSession (D6)', () => {
         expect(after.reloadPending).toBe(false)
       })
     })
+
+    describe('R176/R177 — a save resolves the external-change state, and follows the path', () => {
+      function documentOf(
+        session: ReturnType<typeof createDocumentSession>
+      ): Extract<DocumentSessionState, { phase: 'ready' }>['document'] {
+        const state = session.getSnapshot()
+        if (state.phase !== 'ready') throw new Error(`phase ${state.phase}, not ready`)
+        return state.document
+      }
+
+      /** A dirty document with a *genuine* external change pending — the
+       * banner up and a decision outstanding, exactly as the watcher path
+       * leaves it. R175 stops a save from ever reaching this state on its own;
+       * this is the state a real third-party write still produces. */
+      async function openWithBannerUp(): Promise<ReturnType<typeof createDocumentSession>> {
+        const { api, triggerChange } = fakeApiWithChangeCapture({
+          read: vi.fn().mockResolvedValueOnce(utf8('{"a":1}')).mockResolvedValue(utf8('{"a":99}'))
+        })
+        const session = createDocumentSession({
+          parse: fakeParse,
+          parseFromUrl: fakeParseFromUrl,
+          api,
+          reparseDelayMs: 5,
+          watchKey: TEST_WATCH_KEY
+        })
+        await session.openPath('C:/docs/data.json')
+        session.applyEdit({ start: 5, end: 6, text: '2' })
+        await flush(session)
+        triggerChange()
+        await flush(session)
+        expect(documentOf(session).externalChangeDetected).toBe(true)
+        return session
+      }
+
+      it('a save answers the pending prompt instead of leaving it up', async () => {
+        const session = await openWithBannerUp()
+
+        await session.save()
+
+        // The user answered by saving: their bytes *are* the file's contents
+        // now, so "reload and discard your unsaved edits" is asking about
+        // edits that no longer exist, and Reload and Discard would fetch back
+        // what they just wrote.
+        const after = documentOf(session)
+        expect(after.externalChangeDetected).toBe(false)
+        expect(after.dirty).toBe(false)
+        expect(getContext().hasExternalChange).toBe(false)
+      })
+
+      it('a save cancels a reload already in flight', async () => {
+        // R169's finding in the one other place a reload can be superseded.
+        // Clearing the banner does not stop work already running: without the
+        // abort this ends at '{"a":99}', the reload landing after the save and
+        // replacing the just-saved content with the pre-save file.
+        const session = await openWithBannerUp()
+
+        const inFlight = session.reloadAndDiscard()
+        await session.save()
+        const outcome = await inFlight
+
+        expect(outcome).toEqual({ ok: true, cancelled: true })
+        const after = documentOf(session)
+        expect(new TextDecoder().decode(after.sourceBuffer.bytes)).toBe('{"a":2}')
+        expect(after.reloadPending).toBe(false)
+        expect(after.externalChangeDetected).toBe(false)
+      })
+
+      it('a cancelled reload stays cancelled after the queue drains', async () => {
+        // The narrower failure the abort could still have: bailing out of the
+        // commit but leaving a later continuation to write anyway.
+        const session = await openWithBannerUp()
+
+        const inFlight = session.reloadAndDiscard()
+        await session.save()
+        await inFlight
+        await flush(session)
+
+        expect(new TextDecoder().decode(documentOf(session).sourceBuffer.bytes)).toBe('{"a":2}')
+      })
+
+      it('a failed save leaves the prompt up, because nothing was answered', async () => {
+        const { api, triggerChange } = fakeApiWithChangeCapture({
+          write: vi.fn().mockRejectedValue(new Error('EACCES: permission denied'))
+        })
+        const session = createDocumentSession({
+          parse: fakeParse,
+          parseFromUrl: fakeParseFromUrl,
+          api,
+          reparseDelayMs: 5,
+          watchKey: TEST_WATCH_KEY
+        })
+        await session.openPath('C:/docs/data.json')
+        session.applyEdit({ start: 5, end: 6, text: '2' })
+        await flush(session)
+        triggerChange()
+        await flush(session)
+
+        const outcome = await session.save()
+
+        expect(outcome.ok).toBe(false)
+        const after = documentOf(session)
+        expect(after.externalChangeDetected).toBe(true)
+        expect(after.dirty).toBe(true)
+      })
+    })
   })
 })
