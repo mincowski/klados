@@ -69,6 +69,13 @@ its own test. The fix asserts per-session state and calls `resyncContext()` wher
 the claim — verified by injecting the exact clobber and confirming the test fails without it and
 passes with it. In `docs/FINDINGS.md`, because it will bite any session test that reads a context key.
 
+**Then a fourth red run, on Windows alone**, at the real-filesystem test's own premise: Windows
+advances file timestamps on the ~15.6 ms clock tick, so the runner created and rewrote the fixture
+inside one tick and the mtime never moved — which is the registry's whole criterion. The fixture is
+now backdated. The assertion that caught it was there because the plan asked for the reproduction to
+be asserted rather than assumed; without it the guarded half would have reported zero notifications
+for the wrong reason and passed.
+
 **The race that stays open is D-092**, not a silence: a third-party write landing inside our own
 sub-10 ms window is absorbed. The plan's suggested free mitigation — compare the post-write size —
 turns out not to work as described, because events inside the window are dropped rather than

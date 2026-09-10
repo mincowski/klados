@@ -22,9 +22,14 @@
  * not move would have had nothing to detect and nothing to suppress, and
  * finding that out from the assertion that failed is worth more than a green
  * test that proved nothing.
+ *
+ * **That assertion earned itself on the first CI run**: it failed on
+ * `windows-latest`, where the runner created and rewrote the fixture inside one
+ * ~15.6 ms clock tick and the timestamp never moved. `tempFile` now backdates
+ * the fixture so the premise holds on any machine — see its comment.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -49,11 +54,30 @@ afterEach(() => {
   }
 })
 
+/** How far back a fresh fixture's timestamp is pushed. Any value past one
+ * clock tick works; a minute is unmistakable in a failure message. */
+const BACKDATE_SECONDS = 60
+
 function tempFile(): string {
   const dir = mkdtempSync(path.join(tmpdir(), 'klados-r178-'))
   created.push(dir)
   const file = path.join(dir, 'watched.json')
   writeFileSync(file, '{"a":1}')
+  // **Backdated so the write under test is guaranteed to move the mtime.**
+  //
+  // Windows advances file timestamps on the system clock tick (~15.6 ms), so a
+  // file created and rewritten inside one tick keeps the same `mtimeMs` — and
+  // the registry decides "the content changed" by comparing exactly that. The
+  // Windows CI runner hit it: `mtimeMoved` came back `false` for the guarded
+  // half of the measurement below, which made its premise untrue rather than
+  // its conclusion wrong.
+  //
+  // Pushing the baseline back a minute makes the comparison independent of how
+  // fast the machine is, without waiting for a tick. It changes nothing about
+  // what is being measured: the watcher fires on the write either way, and the
+  // question is only whether the registry forwards it.
+  const backdated = new Date(Date.now() - BACKDATE_SECONDS * 1000)
+  utimesSync(file, backdated, backdated)
   return file
 }
 

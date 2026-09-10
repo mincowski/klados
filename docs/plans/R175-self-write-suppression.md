@@ -388,6 +388,20 @@ The trap is in `docs/FINDINGS.md`, because it will bite any session test that as
 `undoDelayMs` overrides and **zero** `dispose()` calls. Every session without the override leaves a
 200 ms timer running past its own test.
 
+### And a fourth red run, on Windows only, which was the other test's premise
+
+With the isolation fixed, macOS and ubuntu went green and `windows-latest` failed alone — at
+`expect(guarded.mtimeMoved).toBe(true)` in `selfWriteSuppression.test.ts`. **Windows advances file
+timestamps on the system clock tick (~15.6 ms)**, so the runner created and rewrote the fixture
+inside one tick and the timestamp never moved. The registry decides "the content changed" by
+comparing exactly that, so the measurement's premise was untrue rather than its conclusion wrong.
+
+That assertion exists because the plan's §10 asked for the reproduction to be asserted rather than
+assumed, and it earned its place on the first run that could exercise it: without it the guarded half
+would have reported zero notifications for the wrong reason and passed. `tempFile` now backdates the
+fixture a minute, which makes the comparison independent of machine speed without waiting for a tick
+and changes nothing about what is measured.
+
 ### One honest limit on the real-filesystem test
 
 Removing the drop from the registry turns the session tests red and leaves
