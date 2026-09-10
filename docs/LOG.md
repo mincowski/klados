@@ -16,6 +16,50 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R179–R181 — the caret could rest between the CR and the LF · built
+
+**Plan:** `docs/plans/R179-crlf-caret-position.md` · **Decisions:** D-093
+
+**Found by a person, typing into a real file.** Clicking past the end of a line in a CRLF document
+put the caret somewhere with no visible box; typing there produced `"Frankfurt",\r` **`ds`**
+`\n` — the CR terminating a line by itself and the LF starting the next. VS Code showed `ds` on its
+own line, which is how the user noticed.
+
+**R168 created the position and its own round argued it was unreachable.** That round considered this
+exact failure, built a module to prevent it, and deleted the module after establishing that the
+CodeMirror APIs it relied on were on no input path — which was true, and is still true. The inference
+was not: *"motion is native, and native motion resolves against rendered geometry"* was taken to mean
+the caret could not land on a character that paints as nothing. **The evidence was about the keyboard
+API surface; the conclusion was about the browser's behaviour, which was never measured.** Measured
+now, in real Chromium: `ArrowRight`, `ArrowUp` and two kinds of click all land there.
+
+**A transaction filter is the seam**, because every way the selection moves is a transaction —
+including the ones nobody enumerated, which is the whole point after an enumeration got it wrong.
+
+**The plan's own open question turned out to matter.** It asked, without assuming, whether an
+insertion could reach the gap with no selection transaction to clamp. A drop can: CodeMirror takes
+its position from `posAtCoords` and dispatches directly, so the selection clamp never sees it. The
+round therefore has two filters, ordered — and the correction is *appended* rather than rewriting the
+transaction, because a rebuilt spec drops annotations and two of them are what stop the app's own
+replays being treated as user edits.
+
+**R180** binds Backspace and Delete for the one case where native deletion splits a pair, and falls
+through everywhere else — the scope is not to reimplement deletion. **R181** stops Enter inserting a
+literal LF into a CRLF file; the rule is the line's own ending, then the line before, then `\n`,
+every case O(1). D-093 keeps the rejected alternative and its measurement: a document majority runs
+at ~820 MB/s, 244 ms at the 200 MB ceiling, so it would have needed a cache invalidated on every
+edit — and the second clause of the rule answers the most common Enter in the editor, which is
+exactly the one a majority would have been computed for.
+
+**Fourteen mutations, all red**, and the reproduction is exact: without R179 the browser test
+produces the user's own bytes. One mutation stayed green and is equivalent rather than uncovered —
+removing a bounds check that CodeMirror's rope makes redundant — which the module and the test now
+say instead of claiming otherwise.
+
+**No version bump**; defect fixes against unreleased `1.0.0`.
+
+---
+
 ## R175–R178 — the app's own save was detected as an external change · built
 
 **Plan:** `docs/plans/R175-self-write-suppression.md` · **Decisions:** D-092
