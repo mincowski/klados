@@ -16,6 +16,45 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R187–R189 — `npm run test:large` failed, and what it was hiding · built ⚠ (one item owed)
+
+**Plan:** `docs/plans/R187-large-suite-honesty.md`
+
+**Found by asking what was actually wrong with a line in the Owed table** rather than repeating its
+summary. The answer was not what the table said.
+
+**Ten failures, not eight, and two of them were assertions.** `4. subtree reparse equivalence` failed
+in 5 ms on the 100 MB JSON fixtures, while eight truncation-fuzz timeouts made the run take 25
+minutes — so a real failure sat behind a wall of noise in a command nobody could execute. Probing it:
+**61 of 100 samples mismatched, every one a `NodeKind.Property`.**
+
+**It was a test defect, and the product already said so.** `findSpliceNode` walks *up* past a Property
+before ever calling `parseRange`, under a comment explaining that a `"key":value` pair "has no grammar
+production of its own to reparse standalone". The invariant was asserting something the product
+documents as impossible. An earlier reading of this round called it a possible correctness bug in the
+edit path; it is not, and the plan says so at the point where the wrong reading was made.
+
+**Why nothing caught it is the part worth keeping.** A census found the default fixture corpus held
+**zero Property nodes and zero Object nodes** — not few, none. The suggestion to add a small JSON
+fixture came from the project lead; added before the fix, it **reproduced the failure in the default
+suite in 13 ms**. `FINDINGS.md` gains **node kind distribution** to its list of axes, beside R168's
+line endings and R170's depth.
+
+**Three of this round's own hypotheses were wrong**, all the same mistake — measured in one
+condition, concluded about another. The byte budget was sized from a single parse in a fresh process
+(~79 MB/s) when the in-loop rate is ~14 MB/s for XML and ~7 for JSON, so the first attempt timed out
+at 136 s against a projected 27 s. The browser project and worker parallelism were then both wrongly
+blamed for the remaining RPC error. That is R168's, R171's and R185's error again, and the plan
+records the instances together because the pattern is the finding rather than any one of them.
+
+**Result: 10 failures in 10m6s → 0 failures in 5m50s.** The command still exits 1 on one unhandled
+Vitest RPC error with all 2038 tests passing; three causes are ruled out by measurement and it is in
+the Owed table rather than guessed at a fourth time.
+
+**No version bump**; test-suite work, nothing shipped changes.
+
+---
+
 ## R183–R186 — a red CI run had stopped meaning anything · built ⚠ (two items owed)
 
 **Plan:** `docs/plans/R183-ci-flakes.md`
