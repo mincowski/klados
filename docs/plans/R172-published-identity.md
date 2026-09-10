@@ -1,10 +1,14 @@
 # R172–R174 — freeze the published identity before the first release
 
-<!-- status: open -->
+<!-- status: built-caveat -->
 
-**Open.** Register: `docs/TASKS.md`. **No winget submission happens here.** The goal is that when
-one is decided on, it needs *zero changes to this repository* — every field a package manager
-correlates against is already correct and already frozen.
+**Built, with one check owed.** Register: `docs/TASKS.md`. **No winget submission happened here**,
+and none is implied.
+The goal was that when one is decided on it needs *zero changes to this repository* — every field a
+package manager correlates against already correct, already frozen, and now enforced by
+`test/publishedIdentity.test.ts` rather than by a comment. §11 records what landed, including the
+one thing this plan got wrong about itself — and what it owes: nobody has run the installer and read
+the values back out of a real machine's registry, which is what acceptance 1 asks for.
 
 ---
 
@@ -265,3 +269,219 @@ version resource naming a copyright holder that does not exist, in a field nobod
 8. **The whole suite still passes and the packaged app still installs and runs** — this round
    touches the identity of a shipped artifact, and the one failure mode that would be embarrassing
    is an installer that no longer builds.
+
+## 10. R174 — the winget manifest, field by field
+
+**Nothing here is a commitment to submit.** This section exists so that whoever writes the manifest
+one day transcribes it instead of re-deriving it, and so that a field whose value lives in this
+repository cannot be filled in from memory and quietly disagree with what the installer writes.
+
+Every row cites where the value comes from. Three of them are *correlation* fields — the ones winget
+uses to decide that an installed Klados is this Klados — and those are the rows that must be copied
+exactly rather than approximated.
+
+### The version manifest (`klados.Klados.locale.en-US.yaml`, `klados.Klados.yaml`)
+
+| winget field | Value | Source in this repository |
+|---|---|---|
+| `PackageIdentifier` | `klados.Klados` | **Nowhere.** It lives only in `microsoft/winget-pkgs`; R172e settles it so it is not re-litigated. Matching is case-insensitive; the exact casing is confirmed against that repository at submission time. |
+| `PackageVersion` | `1.0.0` | `package.json` `version`. `release.yml` already fails the build when the `v*` tag disagrees with it, so the tag is a safe second reading. |
+| `Publisher` | `Klados` | `package.json` `author.name` → `AppInfo.companyName` (R172a). **Correlation field** — must equal the ARP `Publisher` the installer writes. |
+| `PackageName` | `Klados` | `package.json` `productName` → `nsis.uninstallDisplayName`. **Correlation field** — must equal the ARP `DisplayName`. |
+| `License` | `MIT` | `package.json` `license`, and `LICENSE`. |
+| `Copyright` | `Copyright © 2026 Klados contributors` | `electron-builder.yml` `copyright` (R172c), which is also `LICENSE` line 3's holder. |
+| `ShortDescription` | `package.json` `description` | Verbatim. It is already one sentence and already the app's own words. |
+| `PublisherUrl`, `PackageUrl` | `https://github.com/mincowski/klados` | `package.json` `homepage`. |
+
+### The installer entry
+
+| winget field | Value | Source in this repository |
+|---|---|---|
+| `InstallerType` | `nullsoft` | `electron-builder.yml` `nsis`, with `oneClick` unset (D-091). |
+| `Scope` | `user` | `perMachine` unset, so the install goes to `%LOCALAPPDATA%\Programs` under `HKCU` (D-091). Changing this after publication requires a new manifest *and* orphans every existing install. |
+| `Architecture` | `x64` | `release.yml`'s `windows` job passes no architecture flag, so electron-builder builds the runner's — and `windows-latest` is x64. A local `--win nsis` run reports `archs=x64`. There is no arm64 Windows artifact to declare. |
+| `InstallerUrl` | `https://github.com/mincowski/klados/releases/download/v<version>/klados-<version>-setup.exe` | `nsis.artifactName` (`${name}-${version}-setup.${ext}`), stable across versions by construction, uploaded by `release.yml`'s `Build and publish` step. |
+| `InstallerSha256` | from `SHA256SUMS.txt` | `release.yml`'s `checksums` job hashes every published asset and uploads `SHA256SUMS.txt` to the release in `sha256sum -c` format (R167). Read the line for the setup executable; do not re-hash a local build, which is a different file. |
+
+### The correlation entry, which is the one usually left out
+
+```yaml
+AppsAndFeaturesEntries:
+  - ProductCode: 318f6304-c1a1-5b48-8b0d-d9b77e332a6b
+    DisplayName: Klados
+    Publisher: Klados
+    InstallerType: nullsoft
+```
+
+No `UpgradeCode`: it is an MSI concept and this is a Nullsoft installer.
+
+`ProductCode` is `nsis.guid` **verbatim, with no braces**, because that is literally the name of the
+registry key it has to match. `NsisTarget.js:157–163` passes the GUID through as
+`UNINSTALL_APP_KEY` unchanged — read in the source rather than assumed — so the key is
+
+```
+HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\318f6304-c1a1-5b48-8b0d-d9b77e332a6b
+```
+
+with the bare GUID as its final segment. A `{braced}` form — the MSI convention, and the shape most
+manifests carry — is a different string, so winget would find no match and treat an already-installed
+Klados as absent.
+
+**Why this block is the belt to §3's braces.** Every display string above it is a string someone
+might change: a Publisher can be revisited, a DisplayName reworded. `ProductCode` correlates on the
+one value this repository has pinned since before its first release and enforces by test, so
+install-and-upgrade detection survives a decision above it being reopened. Leaving it out is what
+produces the familiar winget failure where an upgrade installs a second copy beside the first.
+
+### What still has to be decided at submission time, not here
+
+- **Code signing.** Unsigned installers are accepted, and winget's validation reports them; whether
+  that is acceptable is a decision with a certificate and a renewal behind it (§7).
+- **`ReleaseDate`, `ReleaseNotesUrl`** — per-version, read off the release itself.
+- **The exact `ManifestVersion`** — whatever the schema in `microsoft/winget-pkgs` is on the day.
+
+## 11. Results
+
+**All three tasks landed.** `electron-builder.yml` and `package.json` carry the pinned identity,
+`test/publishedIdentity.test.ts` holds it there in eight tests, and §10 is the mapping.
+
+### What changed
+
+| | |
+|---|---|
+| `package.json` `author.name` | `mincowski` → `Klados` (R172a) |
+| `electron-builder.yml` `copyright` | added: `Copyright © 2026 Klados contributors` (R172c) |
+| `electron-builder.yml` `linux.maintainer` | added: `mincowski <8300485+mincowski@users.noreply.github.com>` (R172b) |
+| `electron-builder.yml` linux comment | rewritten — it explained why `maintainer:` was deliberately absent, which stopped being true (§9 acceptance 4) |
+| `docs/DECISIONS.md` | D-090 (the identity split), D-091 (per-user, one-click). D-089 also got the index row it never had |
+| `test/publishedIdentity.test.ts` | new, 8 tests (R173) |
+| §10 above | new (R174) |
+
+### The plan was wrong about the copyright, and the correction is the round's finding
+
+The first commit on this branch changed the plan before a line of it was implemented. §3's R172c had
+said the copyright *"falls out of R172a"* and would become `Copyright © <year> Klados`.
+
+**Both halves were wrong.** `AppInfo.copyright` (`appInfo.js:129`) reads `config.copyright` first
+and derives from `companyName` only when it is unset, so the field is independently pinnable rather
+than a side effect to accept — and `Klados` alone names a copyright holder that does not exist,
+contradicting `LICENSE` line 3, which has read `Copyright (c) 2026 Klados contributors` since the
+project was published.
+
+**How the error was made is the part worth keeping.** §2's verification was real: `AppInfo` was
+resolved against the actual `package.json`, which is what revealed the copyright as a third answer
+to `author.name` at all. The plan then reasoned *forward* from that verified derivation — if the
+copyright derives from `companyName`, changing `companyName` changes the copyright — without going
+back to the getter. `PLANNING.md` §2 says verify a mechanism before asserting it; the sharper form
+this round produced is that **verifying a mechanism once does not license an inference drawn from it
+later.** The check cost one `grep`.
+
+### Verified against real artifacts, not against the config
+
+§9 acceptance 1 asks for a real build rather than a config reading, on the grounds that the config is
+one resolution step away from the truth — which is the same step that produced the error above.
+
+`npx electron-vite build && npx electron-builder --dir`, then the version resource of
+`dist/win-unpacked/Klados.exe`:
+
+```
+CompanyName     : Klados
+ProductName     : Klados
+LegalCopyright  : Copyright © 2026 Klados contributors
+InternalName    : Klados
+FileVersion     : 1.0.0
+```
+
+Then `npx electron-builder --win nsis`, and the version resource of the installer it produced —
+`dist/klados-1.0.0-setup.exe`, 166,075,235 bytes:
+
+```
+CompanyName     : Klados
+ProductName     : Klados
+LegalCopyright  : Copyright © 2026 Klados contributors
+FileVersion     : 1.0.0
+```
+
+**That second reading is the one that matters.** The installer's `CompanyName` is the same
+`AppInfo.companyName` that `NsisTarget.js:492` hands to NSIS as the `COMPANY_NAME` define, and
+`installer.nsh:133` writes that define to ARP `Publisher` verbatim. So the string is confirmed to
+have reached the artifact that performs the registry write, one step short of the write itself.
+electron-builder's own log line for the target reports `oneClick=true perMachine=false`, which is
+D-091's claim stated by the tool rather than inferred from two absent keys.
+
+**Reading the wrong file nearly produced a false contradiction here.** A first attempt read
+`dist/klados-1.0.0-setup.exe` while the NSIS run was still packaging and got
+`CompanyName: mincowski` — the app executable apparently disagreeing with its own installer. The
+file was three days old; electron-builder leaves the previous build in place until the new one is
+written. Caught by its mtime, and `docs/FINDINGS.md` now carries `dist/` beside the `out/` entry
+that already described this trap in the other directory.
+
+**Not verified, and named rather than glossed:** the ARP registry write itself, and the `.deb`'s
+`Maintainer` field. Both need an install performed — one on Windows, one on a Debian machine — and
+neither was done here. The values feeding them are asserted at their source, which is a weaker claim
+than acceptance 1's literal wording and is what this round actually has.
+
+### R173, mutation-verified
+
+A test that passes is not evidence that it would fail. Ten mutations were applied one at a time
+against the real files, the suite run after each, and every one turned it red:
+
+| Mutation | |
+|---|---|
+| `author.name` reverted to a person | red |
+| `copyright` line removed | red |
+| `linux.maintainer` removed | red |
+| `nsis.guid` changed | red |
+| `nsis.artifactName` loses `${version}` | red |
+| `perMachine: true` added | red |
+| `oneClick: false` added | red |
+| `appId` changed | red |
+| `win.executableName` changed | red |
+| `LICENSE` holder changed | red |
+
+The last is the cross-check: `LICENSE` line 3 and the pinned `copyright` must name the same holder
+and year, normalised for `(c)` versus `©`, so changing one alone cannot pass.
+
+**The test reads `electron-builder.yml` with a 20-line scalar reader rather than a YAML parser.**
+No YAML parser is a declared dependency here, every value it needs is a one-line scalar at depth 0
+or 1, and adding one to the manifest to read seven strings is a dependency bought for a test. The
+reader is capped at one level of nesting deliberately: a key that moves deeper makes it throw
+"not found", which is the right answer to a restructure. If a parser is wanted later, `js-yaml` is
+already in the tree transitively and would need declaring.
+
+### Review, per `R` id
+
+- **R172** — the new `electron-builder.yml` comment claimed the copyright *"matches `LICENSE` line 3
+  exactly"*. It does not: the two differ in the copyright symbol. Corrected in the comment and in §9
+  acceptance 3, and R173 asserts the normalised form rather than an equality that was never true.
+- **R173** — the first draft handed `AppInfo` the whole flattened scalar map, including
+  `nsis.*`/`linux.*` keys that mean nothing at the config root. Inert, but it read like a real
+  config and invited someone to assert against one; narrowed to the file's top-level keys.
+- **R174** — the first draft carried an `UpgradeCode` beside `ProductCode`. `UpgradeCode` is an MSI
+  concept and this is a Nullsoft installer; removed rather than shipped as plausible-looking filler
+  in a document whose entire purpose is that it can be transcribed without re-deriving.
+
+### The suite, and the two acceptance criteria that are not fully met
+
+`npm test`: **1913 → 1921 tests**, 1916 passed and 5 skipped across 162 files, exit 0. `typecheck`
+clean; `lint` at its ratcheted 3 warnings and 0 errors, unchanged.
+
+`electron-builder --dir` and `electron-builder --win nsis` both completed, the second producing a
+166 MB installer carrying the new identity in its own version resource — so acceptance 8's real
+failure mode, an installer that no longer builds, is ruled out.
+
+**What is not met is the *installed* half of acceptance 1 and 8.** Acceptance 1 asks for the ARP
+`Publisher` read back from a fresh Windows install; acceptance 8 asks that the packaged app still
+installs and runs. Both need the installer executed against the real registry of a real machine, and
+neither was done. What this round has instead is the value inside the installer that would perform
+the write, which is one step short of the thing the criterion names. The same applies to the `.deb`'s `Maintainer`, which needs a
+Debian machine.
+
+That is why this round's marker is `built-caveat` and not `built`, and the check is in
+`docs/TASKS.md`'s Owed table rather than left as a sentence in a results section.
+
+### Not done, and deliberately
+
+§7's exclusions all hold: no manifest was written, no code signing, the `v1.0.0` tag was not moved,
+and no other package manager was researched. **No version bump** — `package.json` stays at `1.0.0`
+under the standing decision to hold it until the first release, and nothing here changes behaviour.

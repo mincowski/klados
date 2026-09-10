@@ -16,6 +16,54 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R172–R174 — one `package.json` field was answering three questions · built ⚠ (one item owed)
+
+**Plan:** `docs/plans/R172-published-identity.md` · **Decisions:** D-090, D-091
+
+**Nothing was broken.** This round exists because a release has not shipped yet, and every string a
+package manager correlates against — the uninstall key, the `Publisher` and `DisplayName` beside
+it, the installer URL — is free to settle now and frozen the moment one does. The trigger was a
+question about a winget identifier, which turned out to be the least binding part of it: the
+identifier lives in `microsoft/winget-pkgs`, and everything it has to correlate with lives here.
+
+**`author.name` was answering three different questions.** Who publishes the software (Windows ARP
+`Publisher`), who is responsible for the Debian package (`Maintainer`), and who holds the copyright
+— three right answers, one field, seven build outputs. R172 set `author.name` to `Klados`, which is
+the only way to move the Publisher because `AppInfo.companyName` has no override of any kind, and
+pinned `linux.maintainer` and `copyright` so that edit could not reach them.
+
+**The plan was wrong about the copyright, and the first commit on the branch says so.** §3 had said
+it *"falls out of R172a"* and would become `Copyright © <year> Klados`. `appInfo.js:129` reads an
+explicit `config.copyright` first, so it falls out of nothing; and `Klados` alone names a holder
+that does not exist, contradicting `LICENSE` line 3's `Klados contributors`, which is the file that
+actually grants the licence. Pinned to match `LICENSE`, with the year frozen at 2026 because the
+macro expander has no year token and first publication is a fact rather than a build clock.
+
+**How that error was made is the keeper.** §2's verification was real — `AppInfo` resolved against
+the actual `package.json`, which is the only reason the copyright surfaced as a third answer at all.
+The plan then reasoned forward from the verified derivation without going back to the getter.
+`PLANNING.md` §2 in a sharper form: **verifying a mechanism once does not license an inference drawn
+from it later.** The check cost one `grep`.
+
+**Verified against a real build.** `dist/win-unpacked/Klados.exe` reports `CompanyName: Klados` and
+`LegalCopyright: Copyright © 2026 Klados contributors`, and so does the installer built from it — the same `CompanyName` that `installer.nsh:133` writes to ARP `Publisher`. electron-builder's own NSIS log line reports
+`oneClick=true perMachine=false`, which is D-091 stated by the tool rather than inferred from two
+absent keys. The ARP registry write and the `.deb` `Maintainer` were **not** verified — both need an
+install performed, on two different operating systems — and the plan's Results say so rather than
+reading acceptance 1 loosely.
+
+**R173 is eight tests and was mutation-verified**: ten one-at-a-time mutations of the real files,
+all ten red, including a `LICENSE`-holder change caught by the cross-check that normalises `(c)`
+against `©`. **R174** is the winget field → repo source mapping, appended to the plan as §10 — and
+its `ProductCode` is the pinned GUID unbraced, because `NsisTarget.js:157–163` passes it through as
+the literal uninstall key name and a `{braced}` form is a different string.
+
+**Owed:** the identity values have never been read back off an installed machine — no installer was executed, no registry read, and the `.deb` `Maintainer` needs a Debian box. Everything feeding them is pinned and tested; what is missing is confirmation of the last resolution step. In `docs/TASKS.md`'s Owed table.
+
+**No version bump**; nothing shipped changes behaviour.
+
+---
+
 ## R171 — a file watcher error crashed the main process · built
 
 **Plan:** `docs/plans/R171-watcher-error-handling.md` · **Decisions:** D-089

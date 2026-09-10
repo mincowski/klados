@@ -110,7 +110,7 @@ so a reader of an old commit message can still find out what `R41` was.
 | **R169** | built | `docs/plans/R169-external-change-reload.md` |
 | **R170** | built | `docs/plans/R170-tree-horizontal-scroll.md` |
 | **R171** | built | `docs/plans/R171-watcher-error-handling.md` |
-| **R172–R174** | **OPEN** | `docs/plans/R172-published-identity.md` |
+| **R172–R174** | built ⚠ | `docs/plans/R172-published-identity.md` |
 | **R175–R178** | **OPEN** | `docs/plans/R175-self-write-suppression.md` |
 | **R179–R181** | **OPEN** | `docs/plans/R179-crlf-caret-position.md` |
 | **R182** | **OPEN** | `docs/plans/R182-ci-apt-hardening.md` |
@@ -137,6 +137,7 @@ disclosed in its own document too; this is the list that did not exist before.
 | Owed | Where | Why it is still open |
 |---|---|---|
 | **R168: whether a mouse *click* past the end of a CRLF line can put the caret between the `\r` and the `\n`.** The keyboard path is measured and correct; the pointer path is not. If reachable, text typed at that one position turns the line ending into a bare LF — cosmetic, but a fidelity leak. | `docs/plans/R168-crlf-edit-offset.md` §11 | `caretPositionFromPoint` and `caretRangeFromPoint` are both unavailable in the browser-project harness, so any answer from it would be a guess dressed as a measurement. Needs one manual check on a real build. |
+| **R172: the identity values have never been read back off an installed machine.** ARP `Publisher` and `DisplayName`, the uninstall key's name, and the `.deb`'s `Maintainer` are asserted at their source — `AppInfo` resolution, plus `CompanyName`/`LegalCopyright` read out of the built `Klados.exe` — but no installer was executed and no registry read. | `docs/plans/R172-published-identity.md` §11 | Acceptance 1 asks for a fresh Windows install and acceptance 8 for "installs and runs"; running the installer writes to the real registry of the build machine, and the `.deb` half needs a Debian machine. The values feeding all of them are pinned and tested, so this is confirmation of a resolution step rather than an untested mechanism. Worth doing once before the first release, alongside R168's own owed manual check. |
 | **R164: dropping a *link* on the title bar is not confirmed on a real build.** The navigation guard is tested at the decision level and the drop guard at the event level; what is unverified is the OS gesture that produces the event. | `docs/plans/R164-release-security-hardening.md` §9 | Native drag-drop cannot be dispatched from the harness — flagged as manual by §2e before the work started, not discovered late. |
 | **R166: the full lifecycle under `sandbox: true` is not exercised.** Automated coverage reaches the preload surface, an IPC round trip and the document read path (`stat`, `mintReadToken`); **Save, Save As, file watching and an edit cycle are not**. | `docs/plans/R164-release-security-hardening.md` §9 | Nothing suggests they are broken and the seam they share (the contextBridge) is proven — but §4 asked for the lifecycle, and this is not the whole of it. |
 | **R167's checksum job has never run for real.** The hashing logic is dry-run; `gh release download` against a real draft release is not. | `docs/plans/R164-release-security-hardening.md` §9 | By R141/R151's own argument the first genuine exercise is a `v*` tag, and a draft release cannot be rehearsed without making one. |
