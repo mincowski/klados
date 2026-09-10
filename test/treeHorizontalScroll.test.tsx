@@ -31,8 +31,8 @@
  * Real Chromium, because every assertion here is a layout fact the virtualizer
  * and the browser produce together; jsdom fakes both.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { SETTLE_MS } from './support/wait'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { POLL_MS, TIMEOUT_MS, waitForQuiet } from './support/wait'
 import { createRoot, type Root } from 'react-dom/client'
 import { SourceBuffer } from '../src/core/buffer'
 import { Interner } from '../src/core/interner'
@@ -69,15 +69,61 @@ afterEach(() => {
   container.remove()
 })
 
-async function paint(jsx: React.ReactNode): Promise<void> {
+/**
+ * Renders, then waits for the layout this file measures to be ready.
+ *
+ * **The two-rAF hop is not enough and a sleep was the wrong answer to that.**
+ * The virtualizer measures via `ResizeObserver` and the scrollbar's metrics
+ * read is rAF-coalesced on top of it, so the previous version added
+ * `setTimeout(resolve, SETTLE_MS)` — 50 ms — under a comment correctly
+ * diagnosing why two frames do not settle it. A sleep does not settle it
+ * either; it only settles it *usually*.
+ *
+ * **Measured (R183):** on an idle machine the horizontal track appears **three
+ * frames / ~27 ms past the two-rAF paint**. At 60 Hz three frames *is* 50 ms,
+ * so the sleep's margin was approximately zero — which is why this file failed
+ * twice on `macos-latest` and never here.
+ *
+ * `until` names the condition the caller is about to assert on, and is the
+ * right tool wherever one exists. Where it genuinely does not — the assertions
+ * that are *negative*, or that read a measured number with no threshold —
+ * quiescence is honest and a duration is not, so the fallback waits for the
+ * measured layout to stop changing rather than for a clock.
+ */
+async function paint(jsx: React.ReactNode, until?: () => boolean): Promise<void> {
   await new Promise<void>((resolve) => {
     root.render(jsx)
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
   })
-  // The virtualizer measures via `ResizeObserver`, and the scrollbar's own
-  // metrics read is rAF-coalesced on top of that — neither reliably settles
-  // inside two rAFs in headless Chromium.
-  await new Promise((resolve) => setTimeout(resolve, SETTLE_MS))
+  if (until !== undefined) {
+    await vi.waitFor(
+      () => {
+        if (!until()) throw new Error('paint: the awaited layout condition is not met yet')
+      },
+      { interval: POLL_MS, timeout: TIMEOUT_MS }
+    )
+    return
+  }
+  await waitForQuiet(layoutSignature, { label: 'paint' })
+}
+
+/**
+ * Everything this file measures, in one string — so "the layout stopped
+ * changing" is a real observation rather than a guess about how long it takes.
+ * Identity-stable while at rest, which is what `waitForQuiet` compares.
+ */
+function layoutSignature(): string {
+  const el = container.querySelector<HTMLElement>('.tree')
+  if (el === null) return 'no-tree'
+  const row = container.querySelector<HTMLElement>('.tree-row')
+  return [
+    el.scrollWidth,
+    el.clientWidth,
+    el.scrollLeft,
+    el.className,
+    row?.getBoundingClientRect().width ?? -1,
+    container.querySelectorAll('.scrollbar-track-horizontal').length
+  ].join('|')
 }
 
 function documentFor(text: string): {
@@ -229,7 +275,10 @@ describe('R170 — a deeply nested tree can scroll horizontally', () => {
     // horizontal scroll bar."* The extent was already there; `axis="vertical"`
     // meant the track was never drawn. This is the assertion that fails if the
     // axis is ever narrowed again.
-    await paint(<TreeContent document={documentFor(DEEP)} selectedNode={0} />)
+    await paint(
+      <TreeContent document={documentFor(DEEP)} selectedNode={0} />,
+      () => container.querySelector('.scrollbar-track-horizontal') !== null
+    )
     expect(container.querySelector('.scrollbar-track-horizontal')).not.toBeNull()
 
     await paint(<TreeContent document={documentFor(SHALLOW)} selectedNode={0} />)
@@ -242,7 +291,9 @@ describe('R170 — a deeply nested tree can scroll horizontally', () => {
     await paint(<TreeContent document={documentFor(SHALLOW)} selectedNode={0} />)
     expect(tree().classList.contains('tree-has-horizontal-track')).toBe(false)
 
-    await paint(<TreeContent document={documentFor(DEEP)} selectedNode={0} />)
+    await paint(<TreeContent document={documentFor(DEEP)} selectedNode={0} />, () =>
+      tree().classList.contains('tree-has-horizontal-track')
+    )
     expect(tree().classList.contains('tree-has-horizontal-track')).toBe(true)
   })
 })

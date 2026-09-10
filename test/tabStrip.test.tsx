@@ -6,6 +6,7 @@
  * uses (real `runParseJob`, no real `Worker`).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { POLL_MS, TIMEOUT_MS } from './support/wait'
 import { createRoot, type Root } from 'react-dom/client'
 import { Profiler, type ProfilerOnRenderCallback } from 'react'
 import {
@@ -257,9 +258,21 @@ describe('TabStrip overflow (R35–R37)', () => {
     expect(buttons).toHaveLength(3) // left chevron, right chevron, menu
     const [, rightChevron] = buttons
     rightChevron!.click()
-    await paint()
 
-    expect(scrollEl.scrollLeft).toBeGreaterThan(0)
+    // **R183: wait for the scroll, do not count frames at it.** The chevron
+    // scrolls with `behavior: 'smooth'`, which `TabStrip.tsx`'s own comment
+    // describes as "~30 frames of scroll events" — and `paint()` is two. The
+    // animation is time-based, so two frames buys whatever the machine had time
+    // to render, not a fixed fraction of the scroll.
+    //
+    // Measured on an idle machine: `scrollLeft` reads 3, 18, 60, 85, 99 … 120
+    // over the first frames, settling at 120. The frame this used to assert on
+    // was **3 of 120 — 2.5% in**, so any scheduling hiccup left it at 0. That is
+    // the `expected 0 to be greater than 0` seen twice on `ubuntu-latest`.
+    await vi.waitFor(() => expect(scrollEl.scrollLeft).toBeGreaterThan(0), {
+      interval: POLL_MS,
+      timeout: TIMEOUT_MS
+    })
     expect(getActiveTabId()).toBe(activeBefore)
   })
 
