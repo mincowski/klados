@@ -111,6 +111,7 @@ Search for the id to jump to one.
 | **D-089** | A failed file watcher is released and logged, not surfaced to the renderer or retried |  |
 | **D-090** | `author.name` names the project; the maintainer and copyright answers are pinned away from it |  |
 | **D-091** | Klados installs per-user and one-click, and that is now a decision rather than a default |  |
+| **D-092** | A save holds its own watcher open; the write-window race is accepted and recorded |  |
 
 ---
 
@@ -3098,3 +3099,59 @@ after it.
 **Not decided here: code signing.** Unsigned artifacts are a real consideration for any package
 manager and a much larger decision — a certificate, its cost, its renewal. R167's checksums are the
 integrity story for now.
+
+### D-092 — a save holds its own watcher open, and the write-window race is accepted rather than closed (R175) · `settled`
+
+Saving fired the app's own file watcher, so Klados reacted to its own write as though another
+program had edited the file. The registry was not malfunctioning: it decides "did the content
+change" by comparing `mtimeMs` against a baseline captured when the watch was established, and
+nothing ever updated that baseline when *we* were the writer. **A save was indistinguishable from a
+third-party write by construction.**
+
+**Decided:** `document:write` runs inside `DocumentWatcherRegistry.selfWrite`, a window during
+which that path's watcher events are dropped and at whose release the baseline is re-stat'd and
+committed. The window is bounded by a *condition* — the write and its re-stat having completed —
+and covers the re-stat rather than only the write, because a probe saw an event land 0.4 ms after
+`writeFile` resolved.
+
+**Events inside the window are dropped, not compared.** Comparing cannot work: one `writeFile`
+produces two `change` events on Windows with genuinely different intermediate mtimes, 1 ms apart,
+which is what defeated the mtime guard in the first place.
+
+**Rejected: a timer** — "ignore watcher events for N ms after a save". R159–R163 removed exactly
+this from four separate places. It is leaky in one direction (a slow write outlives the window) and
+slow in the other (a genuine external change is delayed by N ms), and it has no relationship to the
+thing it is trying to bracket.
+
+**Rejected: a content hash.** Comparing a digest of the file against what was written is exact and
+costs a full re-read of the document on every save. Invariant 1 applies directly: this is the one
+place a 200 MB file must not be pulled through memory to answer a bookkeeping question.
+
+**Rejected: any re-read at all.** The re-baseline is one `stat`.
+
+**Rejected: changing the clean-document auto-reload.** Reloading silently on a genuine external
+change is F8/CONCEPT §11.3's specified behaviour and is correct. The defect was that a save reached
+it.
+
+**The race that stays open: a third-party write landing inside our own write window is absorbed and never reported.** The
+post-write `stat` reads *their* mtime and commits it as the baseline, so their change looks like
+ours. The window is one `writeFile` plus one `stat` — single-digit milliseconds when measured.
+
+**Accepted, deliberately, because every way of closing it is worse than the race.** Closing it
+properly needs the content comparison rejected above, at the cost of a full re-read per save.
+
+**And the cheap mitigation the plan floated does not work, which is worth recording rather than
+leaving as an idea someone re-derives.** §12 suggested comparing the post-write `size` against the
+byte length just written and firing a notification when they differ. The comparison is sound; the
+delivery is not. Events inside the window are *dropped*, not deferred, so there is no pending event
+left to fire — a third-party write whose event already arrived is gone, and the mitigation would
+only work by *actively* notifying from inside the release path. That is a real feature, not a free
+one: it needs `size` added to `DocumentWatcherDeps.stat`'s contract, the expected byte length
+threaded through `selfWrite`, and a synthesised notification with no watcher event behind it. For a
+sub-10 ms window it buys catching only the different-size subset of an already vanishingly narrow
+case, and a partial guard that reads like a guard is worse than a documented gap.
+
+**What is not lost.** A third-party write arriving *after* the window is detected normally — the
+baseline is the mtime of our own write, and theirs differs from it. `test/selfWriteSuppression.test.ts`
+asserts exactly that against a real filesystem, because "external-change detection is quietly dead
+after the first save" is the failure this design could most easily have.

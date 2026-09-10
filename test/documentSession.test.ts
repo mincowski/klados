@@ -13,7 +13,7 @@ import {
   type ParseClientResult
 } from '../src/core/parseClient'
 import { runParseJob, runTransformJob } from '../src/worker/parse.worker'
-import { waitForQuiet } from './support/wait'
+import { POLL_MS, TIMEOUT_MS, waitForQuiet } from './support/wait'
 
 /** R163: the window a cancelled 30 ms reparse gets to wrongly fire in.
  * Named rather than written at the call site so it reads as the deliberate
@@ -27,6 +27,7 @@ import { computeMemoryBudget } from '../src/renderer/components/StatusBar/memory
 import { consumePendingReveal } from '../src/renderer/components/Tree/treeController'
 import { previewOf } from '../src/renderer/nodeDisplay'
 import type { KladosApi } from '../src/preload/api'
+import { createDocumentWatcherRegistry } from '../src/core/documentWatchers'
 import {
   createDocumentSession,
   NO_SELECTION,
@@ -3084,6 +3085,395 @@ describe('createDocumentSession (D6)', () => {
         const after = documentOf(session)
         expect(new TextDecoder().decode(after.sourceBuffer.bytes)).toBe('{"a":7}')
         expect(after.reloadPending).toBe(false)
+      })
+    })
+
+    describe('R176/R177 — a save resolves the external-change state, and follows the path', () => {
+      function documentOf(
+        session: ReturnType<typeof createDocumentSession>
+      ): Extract<DocumentSessionState, { phase: 'ready' }>['document'] {
+        const state = session.getSnapshot()
+        if (state.phase !== 'ready') throw new Error(`phase ${state.phase}, not ready`)
+        return state.document
+      }
+
+      /** A dirty document with a *genuine* external change pending — the
+       * banner up and a decision outstanding, exactly as the watcher path
+       * leaves it. R175 stops a save from ever reaching this state on its own;
+       * this is the state a real third-party write still produces. */
+      async function openWithBannerUp(): Promise<ReturnType<typeof createDocumentSession>> {
+        const { api, triggerChange } = fakeApiWithChangeCapture({
+          read: vi.fn().mockResolvedValueOnce(utf8('{"a":1}')).mockResolvedValue(utf8('{"a":99}'))
+        })
+        const session = createDocumentSession({
+          parse: fakeParse,
+          parseFromUrl: fakeParseFromUrl,
+          api,
+          reparseDelayMs: 5,
+          watchKey: TEST_WATCH_KEY
+        })
+        await session.openPath('C:/docs/data.json')
+        session.applyEdit({ start: 5, end: 6, text: '2' })
+        await flush(session)
+        triggerChange()
+        await flush(session)
+        expect(documentOf(session).externalChangeDetected).toBe(true)
+        return session
+      }
+
+      it('a save answers the pending prompt instead of leaving it up', async () => {
+        const session = await openWithBannerUp()
+
+        await session.save()
+
+        // The user answered by saving: their bytes *are* the file's contents
+        // now, so "reload and discard your unsaved edits" is asking about
+        // edits that no longer exist, and Reload and Discard would fetch back
+        // what they just wrote.
+        const after = documentOf(session)
+        expect(after.externalChangeDetected).toBe(false)
+        expect(after.dirty).toBe(false)
+        expect(getContext().hasExternalChange).toBe(false)
+      })
+
+      it('a save cancels a reload already in flight', async () => {
+        // R169's finding in the one other place a reload can be superseded.
+        // Clearing the banner does not stop work already running: without the
+        // abort this ends at '{"a":99}', the reload landing after the save and
+        // replacing the just-saved content with the pre-save file.
+        const session = await openWithBannerUp()
+
+        const inFlight = session.reloadAndDiscard()
+        await session.save()
+        const outcome = await inFlight
+
+        expect(outcome).toEqual({ ok: true, cancelled: true })
+        const after = documentOf(session)
+        expect(new TextDecoder().decode(after.sourceBuffer.bytes)).toBe('{"a":2}')
+        expect(after.reloadPending).toBe(false)
+        expect(after.externalChangeDetected).toBe(false)
+      })
+
+      it('a cancelled reload stays cancelled after the queue drains', async () => {
+        // The narrower failure the abort could still have: bailing out of the
+        // commit but leaving a later continuation to write anyway.
+        const session = await openWithBannerUp()
+
+        const inFlight = session.reloadAndDiscard()
+        await session.save()
+        await inFlight
+        await flush(session)
+
+        expect(new TextDecoder().decode(documentOf(session).sourceBuffer.bytes)).toBe('{"a":2}')
+      })
+
+      it('a failed save leaves the prompt up, because nothing was answered', async () => {
+        const { api, triggerChange } = fakeApiWithChangeCapture({
+          write: vi.fn().mockRejectedValue(new Error('EACCES: permission denied'))
+        })
+        const session = createDocumentSession({
+          parse: fakeParse,
+          parseFromUrl: fakeParseFromUrl,
+          api,
+          reparseDelayMs: 5,
+          watchKey: TEST_WATCH_KEY
+        })
+        await session.openPath('C:/docs/data.json')
+        session.applyEdit({ start: 5, end: 6, text: '2' })
+        await flush(session)
+        triggerChange()
+        await flush(session)
+
+        const outcome = await session.save()
+
+        expect(outcome.ok).toBe(false)
+        const after = documentOf(session)
+        expect(after.externalChangeDetected).toBe(true)
+        expect(after.dirty).toBe(true)
+      })
+      it('Save As re-watches the new path, and stops watching the old one', async () => {
+        // **The defect R177 fixes:** `api.document.watch` had exactly one call
+        // site in the whole renderer, in `openPath`. After a Save As the
+        // session went on watching the file it was opened from — so a change
+        // to the file being edited was never noticed, and a change to the
+        // *old* file reloaded the *new* path.
+        const { api } = fakeApiWithChangeCapture({
+          saveAsDialog: vi
+            .fn()
+            .mockResolvedValue({ path: 'C:/docs/copy.json', fileName: 'copy.json' })
+        })
+        const session = createDocumentSession({
+          parse: fakeParse,
+          parseFromUrl: fakeParseFromUrl,
+          api,
+          watchKey: TEST_WATCH_KEY
+        })
+        await session.openPath('C:/docs/data.json')
+        expect(api.document.watch).toHaveBeenCalledWith('C:/docs/data.json', TEST_WATCH_KEY)
+
+        await session.saveAs()
+
+        expect(api.document.watch).toHaveBeenLastCalledWith('C:/docs/copy.json', TEST_WATCH_KEY)
+        // One key watches one path: main's own `watch` releases this key's
+        // previous registration first, so re-watching *is* how the old path
+        // stops being watched on this session's behalf. Asserting the call
+        // rather than an `unwatch` that deliberately does not happen.
+        expect(documentOf(session).filePath).toBe('C:/docs/copy.json')
+      })
+
+      it('a cancelled Save As does not move the watch', async () => {
+        const { api } = fakeApiWithChangeCapture({
+          saveAsDialog: vi.fn().mockResolvedValue(null)
+        })
+        const session = createDocumentSession({
+          parse: fakeParse,
+          parseFromUrl: fakeParseFromUrl,
+          api,
+          watchKey: TEST_WATCH_KEY
+        })
+        await session.openPath('C:/docs/data.json')
+
+        await session.saveAs()
+
+        expect(api.document.watch).toHaveBeenCalledTimes(1)
+        expect(api.document.watch).toHaveBeenLastCalledWith('C:/docs/data.json', TEST_WATCH_KEY)
+      })
+    })
+
+    describe('R178 — a save with a live watcher is invisible to the document', () => {
+      /**
+       * **The interaction nothing covered.** `save/saveAs (F7)` tests a save
+       * with no watcher attached; the tests above drive a watcher with no save.
+       * Both halves were thorough and the seam between them was the defect —
+       * the same shape as R171, where the suite covered that watching works and
+       * never what happens when the platform says no.
+       *
+       * Wired to the **real registry** rather than to `triggerChange()`,
+       * because the suppression lives in the registry: a session test that
+       * fired the renderer's listener by hand would be asserting against a fake
+       * of the very thing under test.
+       */
+      function watchedSession(options: { throughSelfWrite: boolean }): {
+        session: ReturnType<typeof createDocumentSession>
+        api: FakeApi
+      } {
+        const PATH = 'C:/docs/data.json'
+        const mtimes = new Map<string, number>([[PATH, 100]])
+        const events = new Map<string, (() => void)[]>()
+        const registry = createDocumentWatcherRegistry({
+          stat: async (p: string) => {
+            const mtimeMs = mtimes.get(p)
+            return mtimeMs === undefined ? null : { mtimeMs }
+          },
+          watch: (p: string, onEvent: () => void) => {
+            events.set(p, [...(events.get(p) ?? []), onEvent])
+            return { close: () => {} }
+          }
+        })
+
+        let listener: ((key: string) => void) | null = null
+        const fire = (p: string): void => {
+          for (const onEvent of events.get(p) ?? []) onEvent()
+        }
+
+        /**
+         * §3's measured sequence, not an idealised one.
+         *
+         * ```
+         * document:write resolved +6.93 ms
+         *   notify sent to renderer      +2.63 ms
+         *   notify sent to renderer      +7.33 ms
+         * ```
+         *
+         * Two things a naive fake gets wrong. **The first notification arrives
+         * before the write resolves** — so the renderer handles it while
+         * `dirty` is still `true`, which is what puts the two-button prompt up.
+         * **The second arrives after**, once `save()` has cleared `dirty`,
+         * which is what sends the clean-document branch into an auto-reload.
+         * Deliver both inside the write and the reload never happens; deliver
+         * both after it and the prompt never does.
+         *
+         * The mtime moves twice *during* the write and is settled by the time
+         * it resolves — the second event reports the same final state, which is
+         * why re-baselining at release is enough to silence it.
+         */
+        const write = async (p: string): Promise<void> => {
+          const duringTheWrite = async (): Promise<void> => {
+            mtimes.set(p, 101)
+            fire(p)
+            await new Promise((resolve) => setTimeout(resolve, 0))
+            mtimes.set(p, 102)
+          }
+          if (options.throughSelfWrite) await registry.selfWrite(p, duringTheWrite)
+          else await duringTheWrite()
+          // Sent after the IPC reply, so it lands after `save()`'s own
+          // continuation rather than before it.
+          setTimeout(() => fire(p), 0)
+        }
+
+        const api = fakeApi({
+          onExternalChange: vi.fn().mockImplementation((cb: (key: string) => void) => {
+            listener = cb
+            return () => {
+              listener = null
+            }
+          }),
+          watch: vi.fn().mockImplementation(async (p: string, key: string) => {
+            await registry.watch(key, p, (notifiedKey) => listener?.(notifiedKey))
+          }),
+          write: vi.fn().mockImplementation(write)
+        })
+
+        return {
+          api,
+          session: createDocumentSession({
+            parse: fakeParse,
+            parseFromUrl: fakeParseFromUrl,
+            api,
+            reparseDelayMs: 5,
+            // The undo burst debounces on `REPARSE_DEBOUNCE_MS` (200 ms)
+            // unless told otherwise, and this block's whole subject is whether
+            // the entry it produces survives a save — so it has to have been
+            // committed before the save happens.
+            undoDelayMs: 5,
+            watchKey: TEST_WATCH_KEY
+          })
+        }
+      }
+
+      function documentOf(
+        session: ReturnType<typeof createDocumentSession>
+      ): Extract<DocumentSessionState, { phase: 'ready' }>['document'] {
+        const state = session.getSnapshot()
+        if (state.phase !== 'ready') throw new Error(`phase ${state.phase}, not ready`)
+        return state.document
+      }
+
+      function readyOf(
+        session: ReturnType<typeof createDocumentSession>
+      ): Extract<DocumentSessionState, { phase: 'ready' }> {
+        const state = session.getSnapshot()
+        if (state.phase !== 'ready') throw new Error(`phase ${state.phase}, not ready`)
+        return state
+      }
+
+      /**
+       * **Why these tests read `undoEntryCount` and not `getContext().canUndo`.**
+       *
+       * `commands/context` is a projection of the *active* session, not
+       * per-session storage — and this file creates 50-odd sessions, disposes
+       * none of them, and gives most of them the default 200 ms undo-burst
+       * debounce while awaiting only the ~50 ms reparse quiescence. A burst
+       * timer therefore outlives the test that armed it, fires during a later
+       * one, and rewrites the shared `canUndo` from a **different** session's
+       * stack.
+       *
+       * That is exactly what happened here: this block was green on every local
+       * configuration (Node 22 and 24, isolated, whole-file, whole-project, and
+       * under CPU starvation) and red on all three CI platforms, and the
+       * diagnostic said why —
+       * `{"undoEntryCount":0,"undoBytes":0,"externalRewrites":1,"reads":2,"canUndo":true}`.
+       * The reload had cleared the stack correctly; only the shared flag
+       * disagreed. Pure timing, and nothing to do with the code under test.
+       *
+       * `undoEntryCount` is this session's own state and cannot be clobbered.
+       * Where the *flag* is the claim — it is what enables Ctrl+Z — the test
+       * calls `resyncContext()` first, which is the method that exists to
+       * rewrite the projection from this session before it is read.
+       *
+       * Opens, makes one edit, and waits for the undo entry to exist — the
+       * condition, not a duration (R159). **It asserts its own
+       * postconditions**, so neither test below can pass without the state it
+       * assumes.
+       */
+      async function openAndEdit(
+        session: ReturnType<typeof createDocumentSession>,
+        api: FakeApi
+      ): Promise<void> {
+        await session.openPath('C:/docs/data.json')
+        session.applyEdit({ start: 5, end: 6, text: '2' })
+        await flush(session)
+        await vi.waitFor(() => expect(documentOf(session).undoEntryCount).toBe(1), {
+          interval: POLL_MS,
+          timeout: TIMEOUT_MS
+        })
+        // One read so far — the open. A reload is a *second* one.
+        expect(api.document.mintReadToken).toHaveBeenCalledTimes(1)
+        // Nothing has rewritten the buffer outside the Raw editor yet, so a
+        // later count of 1 can only have come from the reload.
+        expect(documentOf(session).externalRewrites).toBe(0)
+      }
+
+      it('the reproduction: without selfWrite a save reloads and Ctrl+Z goes dead', async () => {
+        // **The defect, reproduced**, kept as a test rather than described in a
+        // comment so the assertions below are known to be asserting something.
+        // Take `selfWrite` out of `document:write` and this is what a user
+        // gets on every save.
+        const { session, api } = watchedSession({ throughSelfWrite: false })
+        await openAndEdit(session, api)
+
+        await session.save()
+
+        // **Wait for the reload by the signal the plan names** — a *second*
+        // `mintReadToken` — rather than for quiescence. `flush` cannot tell
+        // "the reload finished" from "the reload has not started yet", which is
+        // `support/wait.ts`'s own warning, and is exactly how the first version
+        // of this test passed locally and failed on all three CI platforms.
+        await vi.waitFor(() => expect(api.document.mintReadToken).toHaveBeenCalledTimes(2), {
+          interval: POLL_MS,
+          timeout: TIMEOUT_MS
+        })
+        await flush(session)
+
+        // The document was re-read and re-parsed, the Raw editor rebuilt (R100
+        // keys off `externalRewrites`), and the undo stack went with it.
+        expect(documentOf(session).externalRewrites).toBe(1)
+        expect(documentOf(session).undoEntryCount).toBe(0)
+        session.resyncContext()
+        expect(getContext().canUndo).toBe(false)
+      })
+
+      it('a save leaves the document, the undo stack and the selection alone', async () => {
+        const { session, api } = watchedSession({ throughSelfWrite: true })
+        await openAndEdit(session, api)
+
+        const before = documentOf(session)
+        const selectionBefore = readyOf(session).selection
+
+        await session.save()
+        await flush(session)
+
+        const after = documentOf(session)
+        expect(after.dirty).toBe(false)
+        // No banner was derived at any point — neither the two-button prompt
+        // nor the reloading acknowledgement.
+        expect(after.externalChangeDetected).toBe(false)
+        expect(after.reloadPending).toBe(false)
+        expect(getContext().hasExternalChange).toBe(false)
+        // No reload: nothing re-read, nothing re-parsed, the Raw editor not
+        // rebuilt, the buffer the same object it was. The read count is the
+        // load-bearing one — `externalRewrites` is raised by four different
+        // paths and is evidence of a reload only alongside it.
+        expect(api.document.mintReadToken).toHaveBeenCalledTimes(1)
+        expect(after.externalRewrites).toBe(before.externalRewrites)
+        expect(after.sourceBuffer).toBe(before.sourceBuffer)
+        // Acceptance 2 — the symptom that matters most.
+        expect(after.undoEntryCount).toBe(1)
+        session.resyncContext()
+        expect(getContext().canUndo).toBe(true)
+        expect(readyOf(session).selection).toEqual(selectionBefore)
+      })
+
+      it('undo after a save actually undoes, rather than only looking enabled', async () => {
+        const { session, api } = watchedSession({ throughSelfWrite: true })
+        await openAndEdit(session, api)
+
+        await session.save()
+        await flush(session)
+        session.undo()
+        await flush(session)
+
+        expect(new TextDecoder().decode(documentOf(session).sourceBuffer.bytes)).toBe('{"a":1}')
       })
     })
   })

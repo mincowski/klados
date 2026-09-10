@@ -391,6 +391,23 @@ measurement first "found" a bug that had been fixed five hours earlier, because 
 predated the commit. **Run `npx electron-vite build` before any `_electron` session**, and check the
 asset timestamps if a result contradicts the source you are reading.
 
+**`commands/context` is a projection of the *active* session, and a test that asserts a context key
+can be clobbered by a session belonging to a different test.** It is not per-session storage:
+`setCtx` writes to one module-global, gated only by `isActive` — which defaults to `true` for every
+directly-constructed session, so **every** session in a test file writes to it.
+
+`test/documentSession.test.ts` creates ~50 sessions, calls `dispose()` on **none** of them, and gives
+most of them the default 200 ms undo-burst debounce while awaiting only ~50 ms of reparse quiescence.
+The burst timer outlives the test that armed it, fires during a later one, and rewrites `canUndo`
+from the wrong session's stack.
+
+R178 lost most of a round to this. The assertion was green on every local configuration — Node 22 and
+24, isolated, whole-file, whole-project, and under CPU starvation — and red on all three CI platforms,
+which reads exactly like a platform difference and is not one. **Assert per-session state**
+(`document.undoEntryCount`, `document.dirty`) rather than the context projection; where the context
+key *is* the claim, call `session.resyncContext()` immediately before reading it, which is the method
+that exists to rewrite the projection from one session.
+
 **`dist/` is the same trap, and it bites harder** because its contents look authoritative. R172
 read `dist/klados-1.0.0-setup.exe` while an `electron-builder --win nsis` run was still packaging,
 got a version resource naming the *previous* publisher and copyright, and briefly had a real

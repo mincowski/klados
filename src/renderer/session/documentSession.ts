@@ -2053,6 +2053,39 @@ export function createDocumentSession(deps: DocumentSessionDeps = {}): DocumentS
     syncUndoContext()
   }
 
+  /**
+   * R176 (`docs/plans/R175-self-write-suppression.md` §8) — a successful save
+   * resolves any pending external-change state.
+   *
+   * Independent of R175's suppression and still needed once it lands. If a
+   * *genuine* external change is pending and the user answers it by saving,
+   * their bytes are now the file's contents: the prompt asking whether to
+   * discard "your unsaved edits" is stale, there are no unsaved edits, and
+   * **Reload and Discard** would reload their own content over the top of it.
+   *
+   * **The abort is the load-bearing half**, and it is R169's finding in the
+   * one other place a reload can be superseded. `keepMine` had to learn this:
+   * clearing the banner does not stop a reload already in flight, so the
+   * button that exists to protect unsaved edits let them be destroyed a
+   * moment later. Dropping the controller is what makes `reloadFromDisk`'s own
+   * `reloadAbort !== controller` checks bail before committing; `abort()`
+   * additionally rejects the in-flight `parseFromUrl` rather than letting it
+   * run to completion and be discarded.
+   *
+   * Callers apply this only inside their own post-`await` guards — still
+   * `ready`, still the same `filePath`, still the same `sourceBuffer`.
+   *
+   * Side-effecting as well as returning: it aborts the in-flight reload and
+   * lowers the context key, then hands back the document fields to spread —
+   * the same shape and the same order `keepMine` uses.
+   */
+  function clearExternalChangeAfterSave(document: OpenDocument): OpenDocument {
+    reloadAbort?.abort()
+    reloadAbort = null
+    setCtx('hasExternalChange', false)
+    return { ...document, externalChangeDetected: false, reloadPending: false }
+  }
+
   async function save(): Promise<SaveOutcome> {
     if (state.phase !== 'ready') {
       return { ok: false, message: 'No document is open.' }
@@ -2080,7 +2113,10 @@ export function createDocumentSession(deps: DocumentSessionDeps = {}): DocumentS
       state.document.sourceBuffer === sourceBuffer
     ) {
       setCtx('isDirty', false)
-      setState({ ...state, document: { ...state.document, dirty: false } })
+      setState({
+        ...state,
+        document: { ...clearExternalChangeAfterSave(state.document), dirty: false }
+      })
     }
     return outcome
   }
@@ -2122,13 +2158,30 @@ export function createDocumentSession(deps: DocumentSessionDeps = {}): DocumentS
       setState({
         ...state,
         document: {
-          ...state.document,
+          ...clearExternalChangeAfterSave(state.document),
           filePath: picked.path,
           fileName: picked.fileName,
           readOnly: false,
           dirty: false
         }
       })
+      // R177 (`docs/plans/R175-self-write-suppression.md` §9) — the watch has
+      // to follow the document to its new path.
+      //
+      // Found while verifying §2: **`api.document.watch` had exactly one call
+      // site in the whole renderer**, in `openPath`. `saveAs` updated
+      // `filePath` in place and never re-watched, so afterwards the session was
+      // still watching the file it was opened from — an external change to the
+      // file now being edited went undetected, and an external change to the
+      // *old* file triggered a reload of the *new* path, because
+      // `reloadFromDisk` reads `state.document.filePath`.
+      //
+      // A missing call, not a missing mechanism: main's `watch` releases this
+      // key's previous registration first, so this both starts watching the new
+      // path and stops watching the old one on this session's behalf.
+      // Fire-and-forget for the same reason `openPath`'s call is — a watch that
+      // fails must not turn a successful save into a failed one.
+      void api.document.watch(picked.path, watchKey)
       // R95 (`R95-recent-files.md` §2): after a Save As the document being
       // edited *is* that path — a recent list missing the most recent file
       // of all would be wrong. `formatId` doesn't change on a Save As.
