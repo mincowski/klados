@@ -13,7 +13,7 @@ import {
   type ParseClientResult
 } from '../src/core/parseClient'
 import { runParseJob, runTransformJob } from '../src/worker/parse.worker'
-import { waitForQuiet } from './support/wait'
+import { POLL_MS, TIMEOUT_MS, waitForQuiet } from './support/wait'
 
 /** R163: the window a cancelled 30 ms reparse gets to wrongly fire in.
  * Named rather than written at the call site so it reads as the deliberate
@@ -27,6 +27,7 @@ import { computeMemoryBudget } from '../src/renderer/components/StatusBar/memory
 import { consumePendingReveal } from '../src/renderer/components/Tree/treeController'
 import { previewOf } from '../src/renderer/nodeDisplay'
 import type { KladosApi } from '../src/preload/api'
+import { createDocumentWatcherRegistry } from '../src/core/documentWatchers'
 import {
   createDocumentSession,
   NO_SELECTION,
@@ -3236,6 +3237,188 @@ describe('createDocumentSession (D6)', () => {
 
         expect(api.document.watch).toHaveBeenCalledTimes(1)
         expect(api.document.watch).toHaveBeenLastCalledWith('C:/docs/data.json', TEST_WATCH_KEY)
+      })
+    })
+
+    describe('R178 — a save with a live watcher is invisible to the document', () => {
+      /**
+       * **The interaction nothing covered.** `save/saveAs (F7)` tests a save
+       * with no watcher attached; the tests above drive a watcher with no save.
+       * Both halves were thorough and the seam between them was the defect —
+       * the same shape as R171, where the suite covered that watching works and
+       * never what happens when the platform says no.
+       *
+       * Wired to the **real registry** rather than to `triggerChange()`,
+       * because the suppression lives in the registry: a session test that
+       * fired the renderer's listener by hand would be asserting against a fake
+       * of the very thing under test.
+       */
+      function watchedSession(options: {
+        throughSelfWrite: boolean
+      }): ReturnType<typeof createDocumentSession> {
+        const PATH = 'C:/docs/data.json'
+        const mtimes = new Map<string, number>([[PATH, 100]])
+        const events = new Map<string, (() => void)[]>()
+        const registry = createDocumentWatcherRegistry({
+          stat: async (p: string) => {
+            const mtimeMs = mtimes.get(p)
+            return mtimeMs === undefined ? null : { mtimeMs }
+          },
+          watch: (p: string, onEvent: () => void) => {
+            events.set(p, [...(events.get(p) ?? []), onEvent])
+            return { close: () => {} }
+          }
+        })
+
+        let listener: ((key: string) => void) | null = null
+        const fire = (p: string): void => {
+          for (const onEvent of events.get(p) ?? []) onEvent()
+        }
+
+        /**
+         * §3's measured sequence, not an idealised one.
+         *
+         * ```
+         * document:write resolved +6.93 ms
+         *   notify sent to renderer      +2.63 ms
+         *   notify sent to renderer      +7.33 ms
+         * ```
+         *
+         * Two things a naive fake gets wrong. **The first notification arrives
+         * before the write resolves** — so the renderer handles it while
+         * `dirty` is still `true`, which is what puts the two-button prompt up.
+         * **The second arrives after**, once `save()` has cleared `dirty`,
+         * which is what sends the clean-document branch into an auto-reload.
+         * Deliver both inside the write and the reload never happens; deliver
+         * both after it and the prompt never does.
+         *
+         * The mtime moves twice *during* the write and is settled by the time
+         * it resolves — the second event reports the same final state, which is
+         * why re-baselining at release is enough to silence it.
+         */
+        const write = async (p: string): Promise<void> => {
+          const duringTheWrite = async (): Promise<void> => {
+            mtimes.set(p, 101)
+            fire(p)
+            await new Promise((resolve) => setTimeout(resolve, 0))
+            mtimes.set(p, 102)
+          }
+          if (options.throughSelfWrite) await registry.selfWrite(p, duringTheWrite)
+          else await duringTheWrite()
+          // Sent after the IPC reply, so it lands after `save()`'s own
+          // continuation rather than before it.
+          setTimeout(() => fire(p), 0)
+        }
+
+        const api = fakeApi({
+          onExternalChange: vi.fn().mockImplementation((cb: (key: string) => void) => {
+            listener = cb
+            return () => {
+              listener = null
+            }
+          }),
+          watch: vi.fn().mockImplementation(async (p: string, key: string) => {
+            await registry.watch(key, p, (notifiedKey) => listener?.(notifiedKey))
+          }),
+          write: vi.fn().mockImplementation(write)
+        })
+
+        return createDocumentSession({
+          parse: fakeParse,
+          parseFromUrl: fakeParseFromUrl,
+          api,
+          reparseDelayMs: 5,
+          // The undo burst debounces on `REPARSE_DEBOUNCE_MS` (200 ms) unless
+          // told otherwise, and this block's whole subject is whether the entry
+          // it produces survives a save — so it has to have been committed
+          // before the save happens.
+          undoDelayMs: 5,
+          watchKey: TEST_WATCH_KEY
+        })
+      }
+
+      function documentOf(
+        session: ReturnType<typeof createDocumentSession>
+      ): Extract<DocumentSessionState, { phase: 'ready' }>['document'] {
+        const state = session.getSnapshot()
+        if (state.phase !== 'ready') throw new Error(`phase ${state.phase}, not ready`)
+        return state.document
+      }
+
+      function readyOf(
+        session: ReturnType<typeof createDocumentSession>
+      ): Extract<DocumentSessionState, { phase: 'ready' }> {
+        const state = session.getSnapshot()
+        if (state.phase !== 'ready') throw new Error(`phase ${state.phase}, not ready`)
+        return state
+      }
+
+      /** Opens, makes one edit, and waits for the undo entry to exist — the
+       * condition, not a duration (R159). */
+      async function openAndEdit(session: ReturnType<typeof createDocumentSession>): Promise<void> {
+        await session.openPath('C:/docs/data.json')
+        session.applyEdit({ start: 5, end: 6, text: '2' })
+        await flush(session)
+        await vi.waitFor(() => expect(getContext().canUndo).toBe(true), {
+          interval: POLL_MS,
+          timeout: TIMEOUT_MS
+        })
+      }
+
+      it('the reproduction: without selfWrite a save reloads and Ctrl+Z goes dead', async () => {
+        // **The defect, reproduced**, kept as a test rather than described in a
+        // comment so the assertions below are known to be asserting something.
+        // Take `selfWrite` out of `document:write` and this is what a user
+        // gets on every save.
+        const session = watchedSession({ throughSelfWrite: false })
+        await openAndEdit(session)
+
+        await session.save()
+        await flush(session)
+
+        // The save's own events drove a reload: the document was re-read and
+        // re-parsed, the Raw editor rebuilt (R100 keys off `externalRewrites`),
+        // and the undo stack went with it.
+        expect(documentOf(session).externalRewrites).toBeGreaterThan(0)
+        expect(getContext().canUndo).toBe(false)
+      })
+
+      it('a save leaves the document, the undo stack and the selection alone', async () => {
+        const session = watchedSession({ throughSelfWrite: true })
+        await openAndEdit(session)
+
+        const before = documentOf(session)
+        const selectionBefore = readyOf(session).selection
+
+        await session.save()
+        await flush(session)
+
+        const after = documentOf(session)
+        expect(after.dirty).toBe(false)
+        // No banner was derived at any point — neither the two-button prompt
+        // nor the reloading acknowledgement.
+        expect(after.externalChangeDetected).toBe(false)
+        expect(after.reloadPending).toBe(false)
+        expect(getContext().hasExternalChange).toBe(false)
+        // No reload: nothing re-read, nothing re-parsed, the Raw editor not
+        // rebuilt, the buffer the same object it was.
+        expect(after.externalRewrites).toBe(before.externalRewrites)
+        expect(after.sourceBuffer).toBe(before.sourceBuffer)
+        // Acceptance 2 — the symptom that matters most.
+        expect(getContext().canUndo).toBe(true)
+        expect(readyOf(session).selection).toEqual(selectionBefore)
+      })
+
+      it('undo after a save actually undoes, rather than only looking enabled', async () => {
+        const session = watchedSession({ throughSelfWrite: true })
+        await openAndEdit(session)
+
+        await session.save()
+        await flush(session)
+        session.undo()
+        await flush(session)
+
+        expect(new TextDecoder().decode(documentOf(session).sourceBuffer.bytes)).toBe('{"a":1}')
       })
     })
   })
