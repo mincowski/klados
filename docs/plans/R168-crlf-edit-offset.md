@@ -1,9 +1,10 @@
 # R168 — a Raw edit on a CRLF document lands at the wrong byte
 
-<!-- status: built-caveat -->
+<!-- status: built -->
 
-**Built, with one item owed** (§11 — whether a mouse *click* past the end of a CRLF line can place
-the caret inside the pair; the keyboard path is measured and correct). Register: `docs/TASKS.md`.
+**Built.** The one item this round owed — §11's question of whether a mouse *click* past the end of
+a CRLF line can place the caret inside the pair — **was answered by R179, and the answer was yes**;
+see §12. Register: `docs/TASKS.md`.
 Results in §10. **The reported data corruption is fixed** — it was a real invariant-6 violation.
 Found by a user running R164–R167's owed manual pass against a real build; the pass was looking for
 something else entirely.
@@ -281,3 +282,26 @@ leak, and fidelity is this project's whole argument.
 
 **It needs one manual check on a real build**, which is why it is disclosed rather than guessed at:
 open a CRLF file, click well past the end of a line, type a character, save, and look at the bytes.
+
+## 12. The owed question, answered by R179
+
+§11 left one item owed: **whether a mouse *click* past the end of a CRLF line can put the caret
+between the `\r` and the `\n`.** The keyboard path had been measured; the pointer path had not,
+because `caretPositionFromPoint` and `caretRangeFromPoint` were both unavailable in the harness of
+the day, so any answer from it would have been a guess dressed as a measurement.
+
+**R179 (`docs/plans/R179-crlf-caret-position.md`) measured it, and the answer is yes.** Driven
+through `userEvent` in real Chromium — genuine CDP mouse events rather than the geometry helpers
+this round had reached for — a click at the end of the rendered text and a click *past* the end of
+the line both landed on `line.to`, inside the pair. So did `ArrowRight` and `ArrowUp`, which this
+round's §6a had concluded could not.
+
+Typing there produced exactly the corruption feared: `alpha\rds\nbeta…`, the CR terminating a line
+by itself. **A user hit it by hand before any test did.**
+
+R179 fixed it with a transaction filter and `test/crlfCaretPosition.test.tsx` now holds the
+behaviour. The owed entry is closed and removed from `docs/TASKS.md`.
+
+**Worth keeping, because the shape recurs**: this round gathered real evidence about the *keyboard
+API surface* and drew a conclusion about the *browser's behaviour*, which was never measured. R179's
+§4 says the same thing at more length, and R171 is a third instance of it.

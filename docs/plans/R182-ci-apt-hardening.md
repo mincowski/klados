@@ -1,10 +1,12 @@
 # R182 — CI depends on a vendor apt repository it does not use
 
-<!-- status: open -->
+<!-- status: built -->
 
-**Open.** Register: `docs/TASKS.md`. Every Linux CI run refreshes Google's Chrome apt repository,
-which this project never uses. When that repository is internally inconsistent the job exits before
-running a single test, and the pull request reads as failing.
+**Built**, and shipped in the same pull request as this plan
+([#19](https://github.com/mincowski/klados/pull/19)). Register: `docs/TASKS.md`. Every Linux CI run
+refreshed Google's Chrome apt repository, which this project never uses. When that repository was
+internally inconsistent the job exited before running a single test, and the pull request read as
+failing. §9 records what landed.
 
 Found by CI itself, on a documentation-only pull request that could not have affected apt.
 
@@ -129,3 +131,40 @@ platforms at all — it should; that is R151's finding and this round does not r
 ## 8. Version
 
 No bump implied — CI infrastructure, no change to anything shipped.
+
+## 9. Results
+
+**Built and merged in [#19](https://github.com/mincowski/klados/pull/19)**, plan and fix together —
+§1's own reasoning, since a plan-only branch would have been blocked by the very failure it planned
+to remove.
+
+`.github/workflows/ci.yml` carries the `Remove unused vendor apt sources` step, Linux-only, before
+both apt consumers.
+
+### The status was left stale for six merges, which is the part worth recording
+
+**The marker said `open` and the board said `OPEN` from 2026-09-09 until this correction**, while the
+fix had been on `main` the whole time. `test/docsStatus.test.ts` passed throughout — correctly, since
+it checks that the marker and the board *agree with each other*, and they did. They simply both
+disagreed with the repository.
+
+That is the gap the test cannot close, and it is worth naming rather than treating as an oversight:
+**a round that ships its fix and its plan in one pull request has no second commit in which to flip
+its own marker**, which is exactly the shape R182 had. Every other round in this window landed its
+plan first and its implementation second, and flipped the marker in the second — so the one round
+that did not, did not.
+
+No process change is proposed here. The observation is recorded so that the next
+plan-and-fix-together round has somewhere to have read it.
+
+### Acceptance
+
+1. `ubuntu-latest` reaches the test step — met, and repeatedly since: every CI run from
+   [#19](https://github.com/mincowski/klados/pull/19) onward.
+2. The suite passes on all three platforms, unchanged in content — met.
+3. No step references Google's repository by filename — met; the step matches on the host in the
+   source's contents.
+4. The Linux-only step count in `ci.yml`'s comments matches reality — met; corrected to three in the
+   same change.
+
+**No version bump** — CI infrastructure, nothing shipped changes.
