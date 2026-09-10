@@ -108,6 +108,9 @@ Search for the id to jump to one.
 | **D-086** | The application is renamed **Klados**; `NodePad` is retired before the first push |  |
 | **D-087** | The mark is a branching figure that reads as a logo, not a letterform with node dots |  |
 | **D-088** | Grid detection's eligibility widens from "has children" to "has children or attributes" |  |
+| **D-089** | A failed file watcher is released and logged, not surfaced to the renderer or retried |  |
+| **D-090** | `author.name` names the project; the maintainer and copyright answers are pinned away from it |  |
+| **D-091** | Klados installs per-user and one-click, and that is now a decision rather than a default |  |
 
 ---
 
@@ -3020,3 +3023,78 @@ The position is therefore: **handle failures where they arise, at the seam that 
 mean**, and leave the process's own error behaviour alone. If a global handler is ever added it
 should log loudly and still fail the process in development, never suppress silently — but no such
 handler is added here, and none is needed for R171's own defect.
+
+### D-090 — `author.name` names the project; the maintainer and copyright answers are pinned away from it (R172) · `settled`
+
+One `package.json` field was answering three different questions: *who publishes this software*,
+*who is responsible for the Debian package*, and *who holds the copyright*. They have three
+different right answers here, and until R172 they had one.
+
+**Verified by resolution, not by reading.** `AppInfo` was constructed against this repository's real
+`package.json` and `electron-builder.yml` and its values read back, which is how the third question
+surfaced at all — a plan written from the source alone would have changed the Publisher and silently
+changed the copyright with it.
+
+**Decided.** `author.name` becomes `Klados`, so the Windows ARP `Publisher` reads as the thing the
+user installed rather than as a stranger's handle — the call `appId: com.klados.app` already made.
+It has to be that field because `AppInfo.companyName` (`appInfo.js:90`) reads `author.name` and has
+no override of any kind. The other two answers are then pinned in `electron-builder.yml` so the edit
+cannot reach them: `linux.maintainer` to `mincowski <8300485+mincowski@users.noreply.github.com>`,
+and `copyright` to `Copyright © 2026 Klados contributors`.
+
+**The copyright holder is `Klados contributors`, not `Klados`.** Copyright vests in a person,
+natural or legal; there is no Klados entity, so the bare project name would put a holder that does
+not exist into every shipped binary — and would contradict `LICENSE` line 3, which has read
+`Copyright (c) 2026 Klados contributors` since the project was published. The version resource and
+the file that grants the licence must not disagree about who holds the rights.
+
+**Rejected: `mincowski` as the copyright holder.** Strictly true today — one contributor, and a
+pseudonym is no obstacle. It contradicts `LICENSE` in the other direction, and it stops being true
+on the first outside contribution, at which point the notice in a shipped binary is false rather
+than merely unconventional.
+
+**Rejected: leaving `copyright` derived.** The derived form tracks the build year, which is the only
+thing it has going for it, and it would follow `author.name` into naming a non-existent holder. A
+frozen 2026 states a fact — the year of first publication — and electron-builder's macro expander
+has no year token to keep it live even if that were wanted.
+
+**Rejected: leaving `linux.maintainer` derived**, which was the position before this round and was
+correct while `author.name` was a person. `FpmTarget.js:85` prefers an explicit `maintainer`, so the
+override is the supported path rather than a workaround.
+
+**Rejected: changing `appId`, `nsis.guid`, `productName` or the artifact-name patterns.** All four
+are already correct and already reasoned about in place, and the GUID pin has made the uninstall key
+independent of `appId` — the cosmetic objection to a `com.` prefix implying a domain is not worth an
+orphaning risk.
+
+None of this is enforced by comments: `package.json` cannot carry one, and `nsis.guid` has said
+"**Never change it**" in a comment for its whole life with nothing behind it.
+`test/publishedIdentity.test.ts` (R173) asserts the resolved values instead.
+
+### D-091 — Klados installs per-user and one-click, and that is now a decision rather than a default (R172) · `settled`
+
+Neither `perMachine` nor `oneClick` appears in `electron-builder.yml`, so both take electron-builder's
+defaults: install to `%LOCALAPPDATA%\Programs`, register under `HKCU`, and run without an install
+wizard. That was never chosen; it was inherited from the scaffold and never looked at.
+
+**Decided: keep both, and record why**, because the cost of these two is entirely in changing them
+later.
+
+**Per-user.** A file viewer does not need administrative rights, and a per-user install is what lets
+`winget install` complete without elevation. Setting `perMachine: true` after a release ships
+relocates the uninstall key from `HKCU` to `HKLM` — which is exactly the orphaning `nsis.guid` is
+pinned to prevent, and would additionally force winget's `Scope` to change on an identity that had
+already been published.
+
+**One-click.** `oneClick: false` produces an assisted installer and moves the install directory to
+`Program Files`. A viewer that opens from a file association has nothing to ask the user during
+installation, and a directory change after release is the same class of break as the scope change.
+
+**Rejected: deciding this at submission time.** That is the round where it would actually be
+noticed, and by then a release has shipped and both are frozen by the installs already out there.
+The whole reason R172 exists is that these are free to settle before the first release and expensive
+after it.
+
+**Not decided here: code signing.** Unsigned artifacts are a real consideration for any package
+manager and a much larger decision — a certificate, its cost, its renewal. R167's checksums are the
+integrity story for now.

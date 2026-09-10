@@ -391,6 +391,13 @@ measurement first "found" a bug that had been fixed five hours earlier, because 
 predated the commit. **Run `npx electron-vite build` before any `_electron` session**, and check the
 asset timestamps if a result contradicts the source you are reading.
 
+**`dist/` is the same trap, and it bites harder** because its contents look authoritative. R172
+read `dist/klados-1.0.0-setup.exe` while an `electron-builder --win nsis` run was still packaging,
+got a version resource naming the *previous* publisher and copyright, and briefly had a real
+contradiction between the app executable and its own installer. The file was three days old. **Check
+the artifact's mtime before reading anything out of it** — electron-builder leaves the previous
+build in place until the new one is written, so a stale artifact and a fresh one are the same path.
+
 **Playwright's `_electron` cannot test the `close`-interception behaviour (R26) at all** — a
 `BrowserWindow.close()` issued through its automation tears the window down regardless of
 `event.preventDefault()` in the `close` handler, confirmed by isolating the identical
