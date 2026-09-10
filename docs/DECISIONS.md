@@ -3206,3 +3206,32 @@ it. A mixed file keeps its local structure, which is the more conservative of th
 **Verified rather than assumed:** `leadingWhitespace` matches spaces and tabs only, so a trailing
 `\r` can never be captured into the indent the command copies. An indent containing a CR would have
 been a second corruption hiding inside the fix for the first.
+
+### D-094 — the packaging `files:` list is an allowlist, never a list of exclusions (R190) · `settled`
+
+electron-builder's default is `**/*`. A list of negative patterns **narrows that default rather
+than replacing it**, so a config holding only exclusions means "ship the entire working tree except
+these". That is what `electron-builder.yml` held, and the packaged application was 1202 MB of which
+the application itself was 2.0 MB.
+
+**Decided: `files:` contains only positive patterns** — currently `out/**`, `package.json`,
+`LICENSE` — and `test/packagedFiles.test.ts` fails if a negative one returns.
+
+**The argument is not the 1.2 GB.** That was `spike/fixtures/`: gitignored, absent from CI, and one
+exclusion line would have removed it. The argument is what the old list looked like after two
+years. It excluded three tsconfigs and the repository had five, because two were added later and
+nothing prompts anyone back to a packaging config. It excluded `README.md` and not `CLAUDE.md`,
+which did not exist when the line was written. **A blocklist is correct only for the repository as
+it stood on the day it was written**, and nothing tells you when it stops being correct — those two
+tsconfigs shipped for months at a size nobody would ever have noticed.
+
+An allowlist inverts which mistake is possible. Forgetting to *add* something breaks the
+application loudly on the next launch; forgetting to *remove* something ships it silently forever.
+
+**`node_modules` is deliberately not listed and is still packed.** electron-builder collects
+production dependencies outside this matcher, driven by the dependency tree — verified by building
+with exactly the three patterns and finding it present at 22.7 MB. Listing it would be redundant
+and would imply these patterns govern it.
+
+**Rejected:** adding a `spike` exclusion to the existing list (fixes the symptom, leaves the rot);
+`asar: false`, `extraResources` and `directories.app`, none of which is what was wrong.

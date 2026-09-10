@@ -16,6 +16,55 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R190–R191 — the installer shipped the repository · built
+
+**Plan:** `docs/plans/R190-packaging-allowlist.md`
+
+**Found by accident, checking something else.** Dependabot's one unpatched high alert
+(`extract-zip`) is scoped `runtime`, so the question was whether it reaches the shipped
+application. It does not — the asar's `node_modules` holds thirteen packages and `electron` is not
+among them, the npm `electron` package being a build-time downloader. But answering it meant
+opening `app.asar`, and the archive was **1202 MB**.
+
+**`electron-builder.yml`'s `files:` held only negative patterns.** electron-builder's default is
+`**/*`, and exclusions *narrow* that default rather than replacing it, so the rule in force was
+*ship the entire working tree except these six patterns*. The application — `out/` — is **eight
+files and 2.0 MB**, 0.17% of what was being packaged.
+
+**The two consequences are not the same size, and conflating them would have produced the wrong
+fix.** `spike/fixtures/` accounted for 1166 MB, but it is gitignored and neither workflow runs
+`fixtures:generate`, so **a tagged release never carried it**; that 1.16 GB only ever hit someone
+who had generated fixtures locally. What *did* ship from a CI runner is tracked: `docs/` (105
+files, every plan document), `test/` (171), `assets/`, `scripts/`, `.vscode/`, `tools/`,
+`.claude/`, `CLAUDE.md` and ten more root files.
+
+**The argument for an allowlist was written in the file.** The exclusion list named three
+tsconfigs; the repository has five, because two were added later and nothing prompts anyone back to
+a packaging config. It excluded `README.md` and not `CLAUDE.md`, which did not exist when the line
+was written. The 1.2 GB is a symptom big enough to notice; the two tsconfigs are the same defect at
+a size nobody would ever notice, and they had shipped for months. **R190** replaced the list with
+`out/**`, `package.json`, `LICENSE` (D-094).
+
+**`node_modules` is absent from that list and still packs**, which had to be verified rather than
+assumed — electron-builder collects production dependencies outside the `files` matcher. Built with
+exactly those three patterns: four top-level asar entries, `node_modules` present at 22.7 MB.
+**1202 MB → 31 MB**, and the packaged app launches clean.
+
+**R191 guards it, and the mutation run found a hole in the guard itself.** `selects()` returned
+`false` for any pattern outside its two-form vocabulary, so mutating the config to a broad `**/*`
+left *"ships nothing else the repository contains"* **green** — the most important assertion in the
+file passing on a configuration it had not parsed. It throws now. `FINDINGS.md` gains the general
+shape, because a silent predicate over any syntax fails the same way, and because it was only
+visible by reading *which* assertions moved rather than that the suite went red.
+
+**Not done, deliberately:** the 22.7 MB of `node_modules` is roughly half React development and
+server builds an Electron renderer never loads. Different question, different risk; recorded in the
+plan's § 9 rather than started.
+
+**No version bump.**
+
+---
+
 ## R187–R189 — `npm run test:large` failed, and what it was hiding · built ⚠ (one item owed)
 
 **Plan:** `docs/plans/R187-large-suite-honesty.md`

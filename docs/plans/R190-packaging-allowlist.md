@@ -1,10 +1,14 @@
 # R190–R191 — the installer ships the repository
 
-<!-- status: open -->
+<!-- status: built -->
 
-**Open.** Found while checking whether the `extract-zip` Dependabot alert reached the shipped
+**Built.** Found while checking whether the `extract-zip` Dependabot alert reached the shipped
 application. It does not — but answering the question meant opening `app.asar`, and what was
 inside it was the finding.
+
+**Result: 1202 MB -> 31 MB**, four top-level asar entries, and the packaged application launches
+clean. Every acceptance criterion in § 7 met, including the mutation in 4 — which found a defect
+in the guard's first version and is written up in § 9.
 
 ## 1. What is wrong
 
@@ -135,9 +139,16 @@ in R190 prevents someone adding a `**/*` or a negative pattern back, and § 3 is
 they eventually will.
 
 `test/packagedFiles.test.ts` reads `electron-builder.yml`, resolves its `files` patterns against
-the repository's own tracked file list (`git ls-files`), and asserts the resulting set. It fails if
-a pattern is negative, if the resolved set contains anything outside `out/`, `package.json` and
-`LICENSE`, or if the application's own entry points go missing.
+the repository's own top-level entries, and asserts the resulting set. It fails if a pattern is
+negative, if anything outside `package.json` and `LICENSE` is selected, or if the application's own
+entry points go missing.
+
+**Reading the directory rather than `git ls-files`.** The first sketch shelled out to git, which
+would have been the first test in the suite to do so — a dependency on git being on `PATH` and on
+the working tree being a checkout, for no gain here. `readdirSync('.')` answers the same question,
+and reading the *real* directory rather than a hardcoded list is what makes the test cover a
+directory added after it was written. `out/`, `node_modules/`, `dist/` and `.git/` are skipped by
+name, for the reasons the test states at that line.
 
 **What it proves and what it does not.** It proves the *configuration* selects the right set of
 repository files. It does not run electron-builder and so does not prove the *pack* — that was
@@ -151,9 +162,10 @@ doubt.
 
 ## 6. Cost
 
-The test resolves three patterns against ~520 tracked paths with no glob dependency — the pattern
-vocabulary here is a literal and a `/**` suffix and nothing else, so it is a prefix test and an
-equality. Milliseconds, node project. **No new dependency** (`CLAUDE.md` § Conventions).
+The test resolves three patterns against the ~30 top-level repository entries with no glob
+dependency — the pattern vocabulary here is a literal and a `/**` suffix and nothing else, so it is
+a prefix test and an equality. **Measured: 6 ms**, node project. **No new dependency**
+(`CLAUDE.md` § Conventions).
 
 ## 7. Acceptance
 
@@ -170,3 +182,61 @@ equality. Milliseconds, node project. **No new dependency** (`CLAUDE.md` § Conv
 **No bump.** Standing decision: 1.0.0 until first release. This changes what the first release
 contains, which is an argument for landing it before that release rather than for renumbering
 anything.
+
+---
+
+## 9. Results
+
+**Landed as planned.** `files:` is `out/**`, `package.json`, `LICENSE`; `test/packagedFiles.test.ts`
+guards it; no other file changed.
+
+### Measured
+
+| | before | after |
+|---|---|---|
+| `app.asar` on disk | 1202 MB | **31 MB** |
+| top-level entries | `spike`, `node_modules`, `docs`, `test`, `out`, `assets`, + 8 root files | `node_modules`, `out`, `package.json`, `LICENSE` |
+| application share | 0.17% | 100% |
+
+Built with `spike/fixtures/` present on disk (1.5 GB), so the 31 MB is the figure a developer who
+has run `fixtures:generate` now gets. `dist/win-unpacked/Klados.exe` launched: main, renderer, GPU
+and utility processes up, nothing on stderr.
+
+`npm test` 2000 passed / 5 skipped / 0 failed. `npm run typecheck` clean. `npm run lint` 0 errors
+(3 pre-existing `react-hooks/incompatible-library` warnings on `Tree.tsx`, untouched here).
+
+### What the review found
+
+**The guard's first version reported a pass it had not earned.** `selects()` returned `false` for
+any pattern outside its vocabulary. Adding a broad glob to `files:` therefore turned the vocabulary
+assertion red — but left *"ships nothing else the repository contains"* **green**, because the
+matcher did not recognize the pattern and so concluded nothing was selected. The most important
+assertion in the file was passing on a configuration it had not understood.
+
+This is only visible by running the mutation and *reading which assertions failed*, rather than
+observing that the suite went red. §7's criterion 4 asks for the mutation for exactly this reason,
+and R183 established the standard. `selects()` now throws on an unrecognized pattern, and a third
+mutation — `docs/**`, well-formed and inside the vocabulary — confirms the assertion catches what
+only it can catch:
+
+| mutation | vocabulary | selects exactly | ships nothing else | ships the app |
+|---|---|---|---|---|
+| `!src/*` | ✗ | ✗ | ✗ | ✗ |
+| `**/*` | ✗ | ✗ | ✗ | ✗ |
+| `docs/**` | ✓ | ✗ | **✗** | ✓ |
+
+Also corrected in review: § 5 and § 6 described a `git ls-files` implementation that was not what
+landed, and a path count that went with it.
+
+### Owed
+
+**Nothing.** All five acceptance criteria met.
+
+### Not done, deliberately
+
+**The `node_modules` payload is untouched at 22.7 MB**, and roughly half of it is React's
+development and server builds (`react-dom-profiling.development.js` and friends, 1.1 MB each)
+that an Electron renderer never loads. That is a separate question from this round's — which was
+about the *repository* being in the package — and answering it means deciding whether to prune a
+dependency tree by hand, which is a different kind of risk. Recorded here rather than in the Owed
+table because it is not something this round undertook to do.

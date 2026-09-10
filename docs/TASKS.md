@@ -116,7 +116,7 @@ so a reader of an old commit message can still find out what `R41` was.
 | **R182** | built | `docs/plans/R182-ci-apt-hardening.md` |
 | **R183–R186** | built ⚠ | `docs/plans/R183-ci-flakes.md` |
 | **R187–R189** | built ⚠ | `docs/plans/R187-large-suite-honesty.md` |
-| **R190–R191** | **OPEN** | `docs/plans/R190-packaging-allowlist.md` |
+| **R190–R191** | built | `docs/plans/R190-packaging-allowlist.md` |
 
 ### Pre-`R` milestones
 
