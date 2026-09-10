@@ -3253,9 +3253,10 @@ describe('createDocumentSession (D6)', () => {
        * fired the renderer's listener by hand would be asserting against a fake
        * of the very thing under test.
        */
-      function watchedSession(options: {
-        throughSelfWrite: boolean
-      }): ReturnType<typeof createDocumentSession> {
+      function watchedSession(options: { throughSelfWrite: boolean }): {
+        session: ReturnType<typeof createDocumentSession>
+        api: FakeApi
+      } {
         const PATH = 'C:/docs/data.json'
         const mtimes = new Map<string, number>([[PATH, 100]])
         const events = new Map<string, (() => void)[]>()
@@ -3323,18 +3324,21 @@ describe('createDocumentSession (D6)', () => {
           write: vi.fn().mockImplementation(write)
         })
 
-        return createDocumentSession({
-          parse: fakeParse,
-          parseFromUrl: fakeParseFromUrl,
+        return {
           api,
-          reparseDelayMs: 5,
-          // The undo burst debounces on `REPARSE_DEBOUNCE_MS` (200 ms) unless
-          // told otherwise, and this block's whole subject is whether the entry
-          // it produces survives a save — so it has to have been committed
-          // before the save happens.
-          undoDelayMs: 5,
-          watchKey: TEST_WATCH_KEY
-        })
+          session: createDocumentSession({
+            parse: fakeParse,
+            parseFromUrl: fakeParseFromUrl,
+            api,
+            reparseDelayMs: 5,
+            // The undo burst debounces on `REPARSE_DEBOUNCE_MS` (200 ms)
+            // unless told otherwise, and this block's whole subject is whether
+            // the entry it produces survives a save — so it has to have been
+            // committed before the save happens.
+            undoDelayMs: 5,
+            watchKey: TEST_WATCH_KEY
+          })
+        }
       }
 
       function documentOf(
@@ -3353,9 +3357,22 @@ describe('createDocumentSession (D6)', () => {
         return state
       }
 
-      /** Opens, makes one edit, and waits for the undo entry to exist — the
-       * condition, not a duration (R159). */
-      async function openAndEdit(session: ReturnType<typeof createDocumentSession>): Promise<void> {
+      /**
+       * Opens, makes one edit, and waits for the undo entry to exist — the
+       * condition, not a duration (R159).
+       *
+       * **It asserts its own postconditions**, so neither test below can pass
+       * without the state it assumes. The first version of this block did not,
+       * and the reproduction test asserted `externalRewrites > 0` — which four
+       * separate paths raise (undo/redo, Transform, Replace All, and the
+       * reload), so it was not evidence of a reload at all. It went green on
+       * one machine and red on all three CI platforms, and the message could
+       * not say which half was wrong.
+       */
+      async function openAndEdit(
+        session: ReturnType<typeof createDocumentSession>,
+        api: FakeApi
+      ): Promise<void> {
         await session.openPath('C:/docs/data.json')
         session.applyEdit({ start: 5, end: 6, text: '2' })
         await flush(session)
@@ -3363,6 +3380,11 @@ describe('createDocumentSession (D6)', () => {
           interval: POLL_MS,
           timeout: TIMEOUT_MS
         })
+        // One read so far — the open. A reload is a *second* one.
+        expect(api.document.mintReadToken).toHaveBeenCalledTimes(1)
+        // Nothing has rewritten the buffer outside the Raw editor yet, so a
+        // later count of 1 can only have come from the reload.
+        expect(documentOf(session).externalRewrites).toBe(0)
       }
 
       it('the reproduction: without selfWrite a save reloads and Ctrl+Z goes dead', async () => {
@@ -3370,22 +3392,31 @@ describe('createDocumentSession (D6)', () => {
         // comment so the assertions below are known to be asserting something.
         // Take `selfWrite` out of `document:write` and this is what a user
         // gets on every save.
-        const session = watchedSession({ throughSelfWrite: false })
-        await openAndEdit(session)
+        const { session, api } = watchedSession({ throughSelfWrite: false })
+        await openAndEdit(session, api)
 
         await session.save()
+
+        // **Wait for the reload by the signal the plan names** — a *second*
+        // `mintReadToken` — rather than for quiescence. `flush` cannot tell
+        // "the reload finished" from "the reload has not started yet", which is
+        // `support/wait.ts`'s own warning, and is exactly how the first version
+        // of this test passed locally and failed on all three CI platforms.
+        await vi.waitFor(() => expect(api.document.mintReadToken).toHaveBeenCalledTimes(2), {
+          interval: POLL_MS,
+          timeout: TIMEOUT_MS
+        })
         await flush(session)
 
-        // The save's own events drove a reload: the document was re-read and
-        // re-parsed, the Raw editor rebuilt (R100 keys off `externalRewrites`),
-        // and the undo stack went with it.
-        expect(documentOf(session).externalRewrites).toBeGreaterThan(0)
+        // The document was re-read and re-parsed, the Raw editor rebuilt (R100
+        // keys off `externalRewrites`), and the undo stack went with it.
+        expect(documentOf(session).externalRewrites).toBe(1)
         expect(getContext().canUndo).toBe(false)
       })
 
       it('a save leaves the document, the undo stack and the selection alone', async () => {
-        const session = watchedSession({ throughSelfWrite: true })
-        await openAndEdit(session)
+        const { session, api } = watchedSession({ throughSelfWrite: true })
+        await openAndEdit(session, api)
 
         const before = documentOf(session)
         const selectionBefore = readyOf(session).selection
@@ -3401,7 +3432,10 @@ describe('createDocumentSession (D6)', () => {
         expect(after.reloadPending).toBe(false)
         expect(getContext().hasExternalChange).toBe(false)
         // No reload: nothing re-read, nothing re-parsed, the Raw editor not
-        // rebuilt, the buffer the same object it was.
+        // rebuilt, the buffer the same object it was. The read count is the
+        // load-bearing one — `externalRewrites` is raised by four different
+        // paths and is evidence of a reload only alongside it.
+        expect(api.document.mintReadToken).toHaveBeenCalledTimes(1)
         expect(after.externalRewrites).toBe(before.externalRewrites)
         expect(after.sourceBuffer).toBe(before.sourceBuffer)
         // Acceptance 2 — the symptom that matters most.
@@ -3410,8 +3444,8 @@ describe('createDocumentSession (D6)', () => {
       })
 
       it('undo after a save actually undoes, rather than only looking enabled', async () => {
-        const session = watchedSession({ throughSelfWrite: true })
-        await openAndEdit(session)
+        const { session, api } = watchedSession({ throughSelfWrite: true })
+        await openAndEdit(session, api)
 
         await session.save()
         await flush(session)
