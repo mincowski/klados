@@ -1,11 +1,16 @@
 # R183–R186 — CI on `main` is not reliably green
 
-<!-- status: open -->
+<!-- status: built-caveat -->
 
-**Open.** Register: `docs/TASKS.md`. **Three of the last 21 completed `main` runs were red, and none
-of the three was caused by the commit that triggered it.** A red run therefore no longer reliably
-means "this branch broke something" — which is the one property the whole pull-request gate is built
-on.
+**Built, with two tasks owed.** Register: `docs/TASKS.md`. **Three of the last 21 completed `main`
+runs were red, and none of the three was caused by the commit that triggered it.** A red run
+therefore no longer reliably meant "this branch broke something" — the one property the whole
+pull-request gate is built on.
+
+**R183 and R185 landed**, fixing all three tests that had actually failed. **R184 and R186 are open**
+and recorded in `docs/TASKS.md`'s Owed table: the sixteen files carrying the same latent shape have
+not flaked, and converting them properly is the separate round §5 already said it was. §13 records
+what landed, including a finding about the guard R185 was sent to adjust.
 
 Found while reading CI output for R179–R181, after a failure on that branch turned out to belong to
 a test the branch never touched.
@@ -229,3 +234,109 @@ correct behaviour. Dependabot branches whose failures are legitimate.
 ## 12. Version
 
 No bump implied — test-suite reliability, nothing shipped changes.
+
+## 13. Results
+
+**R183 and R185 landed. R184 and R186 are owed**, exactly as §5 and §7 said they were separable.
+All three tests that had actually failed are fixed; the sixteen files that merely *could* fail are
+untouched, because converting them well is a round's work and converting them mechanically is what
+§5 forbids.
+
+### Reproduced before fixed, which is what §10 asked for
+
+**The tab strip.** `prefers-reduced-motion` reports `false` here, so smooth scrolling is active.
+Sampling `scrollLeft` once per frame after the chevron click:
+
+```
+frame:       0   1   2   3   4   5   6   7   8   9   →  settles
+scrollLeft:  3  18  60  85  99 107 113 116 119 120      120
+```
+
+The animation is **time-based**, so two frames buys whatever the machine had time to render. The
+frame this asserted on was **3 of 120 — 2.5% in.** Any scheduling hiccup leaves it at 0, which is the
+`expected 0 to be greater than 0` seen twice on `ubuntu-latest`.
+
+**The tree.** The horizontal track appears **three frames / ~27 ms past the two-rAF paint**, measured
+three times on an idle machine (26.9, 30.4, 24.2 ms). The sleep was 50 ms, and **at 60 Hz three
+frames is 50 ms** — so the margin was approximately zero. That is why it failed twice on
+`macos-latest` and never here.
+
+### R183 — the fix, and why a green suite is not the acceptance
+
+`paint()` takes an optional condition and waits on it. Where a call site genuinely has none — the
+assertions that are *negative*, or that read a measured number with no threshold — it waits for the
+measured layout to stop changing (`waitForQuiet` over a `layoutSignature()`), which is honest where a
+duration is not.
+
+**A condition wait can fail by timing out into a pass**, so acceptance 1 is a mutation run:
+
+| Mutation | Result |
+|---|---|
+| the tree's scrollbar back to `axis="vertical"` (R170's own defect) | **red**, 15 s |
+| the chevron no longer scrolls | **red**, 10 s |
+
+### R185 — sent to adjust a number, came back with a finding about the guard
+
+§6 forbade moving the constant without first recording the distribution. Twelve consecutive samples
+of the existing grouped shape, idle machine:
+
+```
+0.960  0.983  0.985  0.991  0.991  0.992  0.994  0.997  1.002  1.006  1.024  1.025
+```
+
+**All within 4% of parity**, so the declaration-free fast path is genuinely clean and the 3.45× CI
+observation was environmental. §6's first branch.
+
+**The shape was wrong, not the number.** Three plain runs then three namespaced ones means the two
+shapes measure *different windows of wall clock*, so a contention burst landing in the second half
+inflates only one — which is what CI showed: `plain` at 232 ms, squarely in line with an idle
+machine, while `namespaced` hit 800 ms in the same run. Uniform slowness would have inflated both.
+The runs are now **paired**, with the ratio taken *within* each pair so a burst that slows one run
+almost always slows its neighbour and divides out; five pairs, median rather than mean.
+
+**Then the guard itself was measured** — by injecting a per-node cost into the namespaced path and
+asking what the ceiling actually catches:
+
+| injected cost | old (min/min, 3×) | new (paired median, 1.5×) |
+|---|---|---|
+| none | 0.983 passes | 0.984 passes |
+| 20× | 1.075 passes | 1.069 passes |
+| 100× | 1.391 passes | 1.419 passes |
+| **400×** | **2.747 passes** | **2.805 fails — caught** |
+| 1000× | 5.206 fails | 5.481 fails |
+
+**That is the cost of R153's raise, stated plainly**: everything between parity and 3× was a blind
+spot, and *a parse taking 2.7× as long sat inside it*, passing silently — a regression far larger
+than the one the assertion exists to catch. R153 raised the number to stop the flakes; this round
+removes the flakes' **cause**, which is what makes 1.5× safe rather than reckless: the noise the
+ceiling had to clear is gone.
+
+A first mutation attempt injected the cost into `findColon` and **stayed green**, which was not a gap
+— `findColon` runs per *distinct name*, not per node, exactly as its own comment claims. The
+injection moved to `intern()`, which does run per node occurrence, and that is where the table above
+comes from.
+
+### The suite
+
+`npm test`: **1994 tests**, 1989 passed and 5 skipped across 165 files, exit 0. `typecheck`
+clean; `lint` unchanged at its ratcheted 3 warnings, 0 errors. One net new test (R185 adds none; the
+count moved with R179–R181 landing on `main` underneath this branch).
+
+### Review, per `R` id
+
+- **R183** — `paint()`'s fallback is `waitForQuiet`, which is *slower* than the 50 ms sleep it
+  replaces in the negative cases (it waits out a 50 ms quiet window *after* the layout settles, so
+  ~77 ms rather than 50 ms). §10 claimed condition waits are faster; that is true of the `until`
+  path and false of the fallback. Named rather than left as a claim the round quietly broke.
+- **R185** — no finding against the change itself. The finding is against what it was sent to do:
+  the number it was asked not to raise turned out to be hiding a 2.7× regression, which is a
+  stronger reason not to raise it than the one the plan gave.
+- **R184 and R186 not started**, and the plan does not pretend otherwise.
+
+### What this round has not done, and the acceptance it cannot meet
+
+**Acceptance 2 — twenty consecutive clean `main` runs — cannot be met inside the round**, and is
+recorded in `docs/TASKS.md`'s Owed table rather than claimed. The three fixed tests were fixed on
+mechanism and measurement, not on observed CI runs, and only accumulated runs can confirm it.
+
+**No version bump** — test-suite reliability, nothing shipped changes.

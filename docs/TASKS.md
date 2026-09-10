@@ -114,7 +114,7 @@ so a reader of an old commit message can still find out what `R41` was.
 | **R175–R178** | built | `docs/plans/R175-self-write-suppression.md` |
 | **R179–R181** | built | `docs/plans/R179-crlf-caret-position.md` |
 | **R182** | **OPEN** | `docs/plans/R182-ci-apt-hardening.md` |
-| **R183–R186** | **OPEN** | `docs/plans/R183-ci-flakes.md` |
+| **R183–R186** | built ⚠ | `docs/plans/R183-ci-flakes.md` |
 
 ### Pre-`R` milestones
 
@@ -137,6 +137,9 @@ disclosed in its own document too; this is the list that did not exist before.
 
 | Owed | Where | Why it is still open |
 |---|---|---|
+| **R183 acceptance 2: twenty consecutive clean `main` runs.** The three tests that were failing are fixed on measurement and mutation, not on observed CI. | `docs/plans/R183-ci-flakes.md` §13 | Only accumulated runs can confirm it, and the round cannot wait for them. Check the next time CI history is being read anyway. |
+| **R184: sixteen browser test files still end `paint()` with a 50 ms sleep**, the same shape as the two R183 fixed. None has flaked yet. | `docs/plans/R183-ci-flakes.md` §5 | Each call site's condition is different and R154 established that quiescence can return *before the work starts*, so this is per-call-site work rather than a find-and-replace — a round, not a follow-up. |
+| **R186: nothing stops a new fixed-duration wait being added.** R159 published the vocabulary and eighteen files kept the sleep anyway. | `docs/plans/R183-ci-flakes.md` §7 | Deliberately last: a guard written before R184's conversions would ship with an allowlist of eighteen entries, which proves nothing. |
 | **R168: whether a mouse *click* past the end of a CRLF line can put the caret between the `\r` and the `\n`.** The keyboard path is measured and correct; the pointer path is not. If reachable, text typed at that one position turns the line ending into a bare LF — cosmetic, but a fidelity leak. | `docs/plans/R168-crlf-edit-offset.md` §11 | `caretPositionFromPoint` and `caretRangeFromPoint` are both unavailable in the browser-project harness, so any answer from it would be a guess dressed as a measurement. Needs one manual check on a real build. |
 | **R172: the identity values have never been read back off an installed machine.** ARP `Publisher` and `DisplayName`, the uninstall key's name, and the `.deb`'s `Maintainer` are asserted at their source — `AppInfo` resolution, plus `CompanyName`/`LegalCopyright` read out of the built `Klados.exe` — but no installer was executed and no registry read. | `docs/plans/R172-published-identity.md` §11 | Acceptance 1 asks for a fresh Windows install and acceptance 8 for "installs and runs"; running the installer writes to the real registry of the build machine, and the `.deb` half needs a Debian machine. The values feeding all of them are pinned and tested, so this is confirmation of a resolution step rather than an untested mechanism. Worth doing once before the first release, alongside R168's own owed manual check. |
 | **R164: dropping a *link* on the title bar is not confirmed on a real build.** The navigation guard is tested at the decision level and the drop guard at the event level; what is unverified is the OS gesture that produces the event. | `docs/plans/R164-release-security-hardening.md` §9 | Native drag-drop cannot be dispatched from the harness — flagged as manual by §2e before the work started, not discovered late. |
