@@ -112,6 +112,7 @@ Search for the id to jump to one.
 | **D-090** | `author.name` names the project; the maintainer and copyright answers are pinned away from it |  |
 | **D-091** | Klados installs per-user and one-click, and that is now a decision rather than a default |  |
 | **D-092** | A save holds its own watcher open; the write-window race is accepted and recorded |  |
+| **D-093** | Enter copies the line's own ending; a document majority was measured and rejected |  |
 
 ---
 
@@ -3155,3 +3156,53 @@ case, and a partial guard that reads like a guard is worse than a documented gap
 baseline is the mtime of our own write, and theirs differs from it. `test/selfWriteSuppression.test.ts`
 asserts exactly that against a real filesystem, because "external-change detection is quietly dead
 after the first save" is the failure this design could most easily have.
+
+### D-093 — Enter copies the ending of the line it splits; a document majority was measured and rejected (R181) · `settled`
+
+`insertNewlineAndIndentCommand` built `'\n' + indent`, a literal LF. **Every line a user added to
+a CRLF file therefore got an LF ending**, so editing a CRLF document steadily converted it to a
+mixed one — a slower version of the silent corruption R179 and R180 fix outright.
+
+The replacement cannot be `EditorState.lineBreak`: that follows `lineSeparator`, which R168 pins to
+`\n` deliberately so splitting stays exact on mixed files. The answer has to come from the
+document.
+
+**Decided:**
+
+```
+endingOf(n)  = undefined                       if n is the last line (it has no ending)
+             = '\r\n'  if line n's text ends with \r
+             = '\n'    otherwise
+
+insert       = endingOf(current) ?? endingOf(current - 1) ?? '\n'
+```
+
+Each clause earns its place. **The line being split** answers it whenever the caret is anywhere but
+the final line, which is nearly always. **The line before** covers the last line, which has no ending
+of its own — and that is not a rare case: a document with a trailing newline has an empty final line,
+so *pressing Enter at the end of a file* lands there every time, which makes it the single most
+common Enter in the editor. **`\n`** covers a document with no line break at all, where there is
+nothing to imitate.
+
+**Rejected: always `\n`.** Not an option, because it is what the code did and it is the defect. Its
+simplicity is real and it is simplicity purchased by corrupting the file.
+
+**Rejected: the document's majority ending — and the measurement is why this entry exists.** Counting
+CRLF against LF across a whole buffer runs at **~820 MB/s**: 1.2 ms at 1 MB, 60 ms at 50 MB,
+**244 ms at the 200 MB ceiling**. Cheap enough to do once, far too slow to do on every Enter — so it
+would have to be computed once and cached, and *that cache is the real cost*, because it has to be
+invalidated whenever the buffer changes and every edit changes the buffer.
+
+The rule above needs none of it. Every case is O(1) — one line lookup, or two. No scan, no cache, no
+invalidation, and no question about whether the window or the whole file is the right population to
+measure, which was the weakest part of the majority design. **The 244 ms measurement is kept here as
+the record of an option not taken**, which is worth more than the option would have been: it also
+answers the majority question for anyone who proposes it again.
+
+**Rejected: normalising a file's endings on open or on save.** Out of scope by the plan's own §11 and
+against invariant 6's posture — this round is about not corrupting what is there, not about tidying
+it. A mixed file keeps its local structure, which is the more conservative of the two behaviours.
+
+**Verified rather than assumed:** `leadingWhitespace` matches spaces and tabs only, so a trailing
+`\r` can never be captured into the indent the command copies. An indent containing a CR would have
+been a second corruption hiding inside the fix for the first.

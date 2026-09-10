@@ -112,7 +112,7 @@ so a reader of an old commit message can still find out what `R41` was.
 | **R171** | built | `docs/plans/R171-watcher-error-handling.md` |
 | **R172–R174** | built ⚠ | `docs/plans/R172-published-identity.md` |
 | **R175–R178** | built | `docs/plans/R175-self-write-suppression.md` |
-| **R179–R181** | **OPEN** | `docs/plans/R179-crlf-caret-position.md` |
+| **R179–R181** | built | `docs/plans/R179-crlf-caret-position.md` |
 | **R182** | **OPEN** | `docs/plans/R182-ci-apt-hardening.md` |
 
 ### Pre-`R` milestones

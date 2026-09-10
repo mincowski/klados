@@ -34,6 +34,7 @@
  * traversing focus exactly as it does today when there's nothing to indent.
  */
 import { ChangeSet, EditorSelection, type StateCommand } from '@codemirror/state'
+import { crlfBackspaceRange, crlfDeleteRange, lineBreakAt, type DocumentSlice } from './crlfCaret'
 import { keymap, type KeyBinding } from '@codemirror/view'
 import type { Extension } from '@codemirror/state'
 
@@ -134,19 +135,76 @@ function dedentCommand(unit: string): StateCommand {
 
 /** Enter: copies the current line's leading whitespace into the new line —
  * format-agnostic (invariant 8), unlike a language-aware indenter, since it
- * never has to know what XML or JSON or TOML is. */
+ * never has to know what XML or JSON or TOML is.
+ *
+ * **R181: the line ending comes from the document, not from a literal.** This
+ * built `'\n' + indent`, so every line a user added to a CRLF file got an LF
+ * ending and editing a CRLF document steadily converted it to a mixed one — a
+ * slower version of the same silent corruption R179 and R180 fix outright.
+ *
+ * Not `EditorState.lineBreak` either: that follows `lineSeparator`, which R168
+ * pins to `\n` deliberately so splitting stays exact on mixed files. The
+ * answer has to come from the line being split — see `lineBreakAt`.
+ *
+ * `leadingWhitespace` matches spaces and tabs only, so a trailing `\r` can
+ * never be captured into the indent this copies. Checked rather than assumed,
+ * since an indent containing a CR would be a second corruption hiding inside
+ * the fix for the first. */
 function insertNewlineAndIndentCommand(): StateCommand {
   return ({ state, dispatch }) => {
     if (state.readOnly) return false
     const changes = state.changeByRange((range) => {
       const line = state.doc.lineAt(range.from)
-      const insert = '\n' + leadingWhitespace(line.text)
+      const insert = lineBreakAt(state.doc, range.from) + leadingWhitespace(line.text)
       return {
         changes: { from: range.from, to: range.to, insert },
         range: EditorSelection.cursor(range.from + insert.length)
       }
     })
     dispatch(state.update(changes, { scrollIntoView: true, userEvent: 'input' }))
+    return true
+  }
+}
+
+/**
+ * R180 — Backspace and Delete cross a whole line ending or none of it.
+ *
+ * Neither key was bound at all before this, so both were native contentEditable
+ * deletion, which works in units: Backspace at the start of a line removed the
+ * `\n` and stranded the `\r` inside the joined line (`alpha\rbeta`), and Delete
+ * at the visible end of a line removed the `\r` alone and quietly converted that
+ * one ending from CRLF to LF. Both survive a save, because invariant 6 writes
+ * the buffer back verbatim.
+ *
+ * **These return `false` for everything else**, which un-consumes the key and
+ * leaves native deletion to do its job. That is deliberate: the round's scope is
+ * not to reimplement deletion, and a hand-written deleter would have to get
+ * grapheme clusters, surrogate pairs and IME state right to break even.
+ *
+ * **Only a single empty selection is handled.** A range deletion removes what is
+ * selected, and R179 has already clamped both its endpoints out of any pair; a
+ * multi-range selection is not reachable in this editor today, and handling it
+ * here would mean deciding what to do when some ranges match and others do not
+ * — which is reimplementing deletion by another name. Both cases fall through.
+ */
+function deleteAcrossCrlfCommand(
+  rangeFor: (doc: DocumentSlice, pos: number) => { from: number; to: number } | null
+): StateCommand {
+  return ({ state, dispatch }) => {
+    if (state.readOnly) return false
+    if (state.selection.ranges.length !== 1) return false
+    const range = state.selection.main
+    if (!range.empty) return false
+    const span = rangeFor(state.doc, range.head)
+    if (span === null) return false
+    dispatch(
+      state.update({
+        changes: span,
+        selection: EditorSelection.single(span.from),
+        scrollIntoView: true,
+        userEvent: 'delete'
+      })
+    )
     return true
   }
 }
@@ -195,7 +253,11 @@ export function createRawKeymapBindings(getIndentUnit: () => string): readonly K
         return dedentCommand(getIndentUnit())(view)
       }
     },
-    { key: 'Enter', run: insertNewlineAndIndentCommand() }
+    { key: 'Enter', run: insertNewlineAndIndentCommand() },
+    // R180: both fall through to native deletion unless the caret is exactly at
+    // a whole CRLF, so nothing about ordinary deleting changes.
+    { key: 'Backspace', run: deleteAcrossCrlfCommand(crlfBackspaceRange) },
+    { key: 'Delete', run: deleteAcrossCrlfCommand(crlfDeleteRange) }
   ]
 }
 

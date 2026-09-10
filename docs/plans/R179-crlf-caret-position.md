@@ -1,12 +1,12 @@
 # R179–R181 — the caret can rest between the CR and the LF
 
-<!-- status: open -->
+<!-- status: built -->
 
-**Open.** Register: `docs/TASKS.md`. R168 made CodeMirror's document byte-faithful by keeping the
+**Built.** Register: `docs/TASKS.md`. R168 made CodeMirror's document byte-faithful by keeping the
 `\r` as an ordinary character. That was right, and it created a document position **inside** the
-CRLF pair that ordinary arrow keys and ordinary clicks reach. Typing there splices bytes between the
-CR and the LF, producing a line ending the app never intended and no other editor reads back the
-same way.
+CRLF pair that ordinary arrow keys and ordinary clicks reached. Typing there spliced bytes between
+the CR and the LF, producing a line ending the app never intended and no other editor read back the
+same way. §13 records what landed; R181's rule is `DECISIONS.md` D-093.
 
 Found by a user editing `spike/fixtures/small.json` by hand, in the manual pass that has now produced
 R168–R171 and R175–R178.
@@ -277,3 +277,120 @@ corrupting what is there, not about tidying it.
 ## 12. Version
 
 No bump implied — defect fixes against unreleased `1.0.0`, consistent with R168–R178.
+
+## 13. Results
+
+All three tasks landed. **The reproduction is exact**: with the fix removed, the browser test
+produces the user's own bytes.
+
+```
+without R179:  alpha\rds\nbeta\r\ngamma\r\n     the CR ending a line by itself
+with R179:     alphads\r\nbeta\r\ngamma\r\n
+```
+
+| | |
+|---|---|
+| **R179** | `crlfCaret.ts` — two transaction filters, wired into `Raw.tsx` beside the facet that creates the position |
+| **R180** | `Backspace`/`Delete` bindings in `rawKeymap.ts`, falling through to native everywhere else |
+| **R181** | Enter reads the line's own ending; `DECISIONS.md` D-093 |
+| Tests | 15 + 12 node (rules), 12 node (keymap), 16 browser (paths and bytes) |
+
+### §6's open question had an answer, and it was not the expected one
+
+The plan asked whether an insertion can reach the gap **without** a preceding selection transaction
+to clamp, and said to settle it by measurement rather than to add speculative code. Measured: **a
+drop can.** CodeMirror's drop handling takes its position from `posAtCoords` and dispatches the
+insertion directly, so it never passes through a selection this module has already moved. With only
+the selection clamp installed, dropping text past the end of a CRLF line produced
+`alpha\rds\nbeta…` in a real browser — the same corruption by a second route.
+
+So the filter covers insertions too, and the round has **two filters rather than one**. CodeMirror
+runs them in sequence, each seeing what the previous produced; the insertion correction has to run
+first, because relocating a `\r` moves the positions the selection clamp then judges.
+
+**Expressed as an appended follow-up rather than by rewriting the transaction**, which is the part
+worth keeping. A rebuilt spec silently drops annotations, and two of them are load-bearing here:
+`programmaticChange` and `programmaticSelection` are what stop `rawEdit` and `rawCaretSync` treating
+the app's own replays as user edits. The insertion is allowed to land and the `\r` is moved to the
+far side of it, combined into one transaction before anything is applied — so no observer ever sees
+the split.
+
+### Measured against real input, because that is where R168 went wrong
+
+Every path is driven through `userEvent`, which issues genuine CDP key and mouse events — not
+CodeMirror's geometry helpers (on no input path in this app, and they answer `line.to`, which is
+exactly what made this look fine) and not synthetic `KeyboardEvent`s, which contentEditable ignores.
+
+Acceptance 5 is asserted as a property rather than a spot check: **every position the caret can now
+reach has screen coordinates**. §3's `coordsAtPos(line.to) -> NULL` was the visible half of the
+defect, and the test walks the whole document.
+
+### Mutation-verified, fourteen mutations
+
+R179: removing the extension, making the clamp a no-op, clamping only the head, dropping the
+insertion correction, moving forward instead of back. R180/R181: removing either binding, Enter
+reverting to a literal LF, `lineBreakAt` losing its previous-line clause, `lineEndingOf` ignoring the
+retained CR, either deletion range never matching, and the deletion commands consuming the key
+instead of falling through. All red.
+
+**One mutation stayed green, and it is equivalent rather than uncovered.** Removing
+`isInsideCrlfPair`'s explicit bounds check changes nothing: CodeMirror's rope clamps an out-of-range
+`sliceString` to `''`, which is already not a `\r`. The check is kept as `DocumentSlice`'s stated
+precondition and as two fewer rope reads at the boundaries, and both the module and the test now say
+so rather than claiming a correctness role the measurement disproved.
+
+### The suite
+
+`npm test`: **1941 → 1993 tests**, 1988 passed and 5 skipped across 165 files, exit 0.
+`typecheck` clean; `lint` unchanged at its ratcheted 3 warnings, 0 errors.
+
+### CI found a platform assumption in one test
+
+`End and Shift+End still land where they always did` asserted position 5 and got **20** on
+`macos-latest`. §3 measured those keys on Windows, where End is line-boundary motion; **macOS means
+something else by it** — End scrolls to the end of the *document*, and line-end is Cmd+Right. The
+test had encoded a native convention as though it were a fact about this code.
+
+Split in two rather than platform-gated. The claim that matters — *a selection already outside a pair
+is never moved*, which is the failure mode of an over-eager clamp — is a property of the filter, so
+it is asserted directly against a set of positions with no key involved and no platform in it. The
+native-key test keeps only the portable half: wherever this platform's End goes, it is not between a
+CR and its LF, and the anchor of an extended selection does not move. Pinning the landing position
+would be testing the operating system.
+
+Same class as R171's finding in a new place: **a test driving a real OS facility inherits its
+platform differences**, and CI is what establishes them.
+
+### One failure in the same run was not from this branch
+
+`ubuntu-latest` also failed `TabStrip overflow (R35–R37) > clicking the right chevron scrolls the
+strip without changing the active tab`. It passes 3/3 locally and touches nothing this round
+changes. **`main` itself has been intermittently red in this class**: two recent `main` runs failed
+on `R170 — a deeply nested tree can scroll horizontally`. Reported rather than folded in here,
+because a pre-existing flake in the browser project's geometry tests is its own problem and fixing
+it inside an unrelated round is how it would stop being visible.
+
+### Review, per `R` id
+
+- **R179** — the first draft's test comment asserted that the bounds check prevented a *wrong
+  answer*. It does not, and the mutation run is what established that. Corrected in place rather than
+  left as a plausible-sounding claim.
+- **R180** — the deletion commands handle only a single empty selection and fall through otherwise.
+  Recorded in the code as a deliberate limit: handling partial matches across multiple ranges is
+  reimplementing deletion by another name, which §7 rules out.
+- **R181** — no finding. The rule went in as §8a specified it, and the one thing worth checking
+  (`leadingWhitespace` never capturing a trailing CR) was already verified while the plan was
+  written and is now asserted by test.
+- **A block comment cannot contain `*/`.** Writing `leadingWhitespace`'s own regex into a doc
+  comment closed the comment early and turned the rest of the file into a parse error. Caught by
+  `prettier`, fixed by rephrasing, and the applying script now refuses to write a block comment
+  containing the sequence.
+- **R180 and R181 share one commit**, which the per-`R`-id rule would rather they did not. They are
+  not separable in the tree: R181 changes the Enter command three lines from R180's new bindings,
+  both sets of rules live in `crlfCaret.ts`, and their tests interleave in the same two files. Named
+  rather than quietly ignored.
+
+### Not done, and deliberately
+
+§11's exclusions hold: lone-CR documents stay ordinary text, nothing about saving changed, and no
+file's endings are normalised on open or on save. **No version bump**, per §12.
