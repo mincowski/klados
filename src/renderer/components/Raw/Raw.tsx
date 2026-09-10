@@ -49,6 +49,7 @@ import {
 } from './rawDecorations'
 import { rawLineNumbersExtension } from './rawGutter'
 import { rawKeymapExtension, sniffIndentUnit } from './rawKeymap'
+import { crlfCaretExtension } from './crlfCaret'
 import { computeWindowBounds, planReslice, shouldRecenter, WINDOW_BYTES } from './rawWindow'
 import { needsWrapToScroll } from './wrapPolicy'
 import './Raw.css'
@@ -379,6 +380,15 @@ export function RawContent({ document, caretOffset, selectedNode }: RawContentPr
         // text is exactly what keeps the document byte-faithful. Mixed CRLF/LF
         // files — which are common — are handled exactly.
         EditorState.lineSeparator.of('\n'),
+        // R179 (`docs/plans/R179-crlf-caret-position.md`) — **the other half of
+        // the line above.** Keeping the `\r` in the document creates a legal
+        // position between it and the `\n`, which native arrow motion and
+        // ordinary clicks both reach; typing there splits the pair and turns
+        // that line's ending into a bare LF, durably and invisibly.
+        //
+        // Placed immediately after the facet that creates the position, so the
+        // two are read together.
+        crlfCaretExtension(),
         readOnlyCompartment.of(EditorState.readOnly.of(document.readOnly)),
         wrapCompartment.of([]),
         rawDecorationsExtension(
