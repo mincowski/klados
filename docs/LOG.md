@@ -16,6 +16,58 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R175–R178 — the app's own save was detected as an external change · built
+
+**Plan:** `docs/plans/R175-self-write-suppression.md` · **Decisions:** D-092
+
+**Found by a person, exercising the previous round by hand.** Saving a file made two banners flash —
+the keep-or-discard prompt, then "reloading from disk" — with no other program involved. R169's
+behaviour was correct throughout; every banner shown was the banner the state asked for. The defect
+was that the state was reached at all.
+
+**Nothing in the code had a concept of "our own write".** The registry decides "did the content
+change" by comparing `mtimeMs` against a baseline captured when the watch was established, and
+nothing ever updated that baseline when *we* were the writer. `document:write` was a bare
+`await writeDocument(path, bytes)` that did not reference the watchers at all. A save was
+indistinguishable from a third-party write **by construction**.
+
+**The flash was the cosmetic half.** The auto-reload behind it discarded the undo stack, re-read and
+fully re-parsed the document, rebuilt the Raw editor and reset the selection — on every save. After
+any save, `Ctrl+Z` did nothing. There was a data-loss path too: edit, save, edit again quickly, and
+**Reload and Discard** would destroy a real unsaved edit in favour of content byte-identical to what
+the user already had.
+
+**`selfWrite` holds the watch across the write** and re-stats before releasing it. Events inside the
+window are dropped rather than compared, because comparing cannot work: one `writeFile` produces two
+`change` events on Windows with genuinely different intermediate mtimes. Not a timer (R159–R163
+removed four of those) and not a content hash (invariant 1); the window is bounded by a condition.
+R176 makes a save resolve any *genuine* pending prompt and cancel an in-flight reload — R169's
+finding in the one other place a reload can be superseded. R177 fixes something found while
+verifying the plan: **`api.document.watch` had exactly one call site in the whole renderer**, so
+after a Save As the session was still watching the file it was opened from.
+
+**The seam is what nothing tested.** Save was tested with no watcher; the watcher was tested with no
+save. Both halves thorough, the interaction covered by nothing — the same shape as R171. R178 is two
+files: a real-filesystem test that a bare `writeFile` notifies where `selfWrite` produces zero, and
+a session test wired to the real registry rather than to a fake notification.
+
+**Two things the round got wrong first, both caught by running something rather than reading it.**
+The session fake initially delivered both notifications inside the write, which made the
+*reproduction* test pass while reproducing nothing — the defect needs the first notification before
+the write resolves and the second after. And a mutation run found one claim in a comment that no
+test held: that the mark must outlive the re-stat. Closing it needed the registry's fake `stat` to
+grow a hook so a test could act while a stat was in flight.
+
+**The race that stays open is D-092**, not a silence: a third-party write landing inside our own
+sub-10 ms window is absorbed. The plan's suggested free mitigation — compare the post-write size —
+turns out not to work as described, because events inside the window are dropped rather than
+deferred, so there is no pending event left to fire. Recorded rather than left for someone to
+re-derive.
+
+**No version bump**; defect fixes against unreleased `1.0.0`.
+
+---
+
 ## R172–R174 — one `package.json` field was answering three questions · built ⚠ (one item owed)
 
 **Plan:** `docs/plans/R172-published-identity.md` · **Decisions:** D-090, D-091

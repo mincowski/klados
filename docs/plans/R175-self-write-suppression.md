@@ -1,13 +1,14 @@
 # R175–R178 — the app's own save is detected as an external change
 
-<!-- status: open -->
+<!-- status: built -->
 
-**Open.** Register: `docs/TASKS.md`. Saving a document makes the file watcher fire, so the app
-reacts to its own write as though another program had edited the file. The visible symptom is two
-banners flashing; the invisible one is that **every save silently discards the undo stack and
-re-parses the whole document**.
+**Built.** Register: `docs/TASKS.md`. Saving a document made the file watcher fire, so the app
+reacted to its own write as though another program had edited the file. The visible symptom was two
+banners flashing; the invisible one was that **every save silently discarded the undo stack and
+re-parsed the whole document**.
 
 Found by a user exercising R169 by hand on `main`, in the same manual pass that produced R168–R171.
+§16 records what landed; the residual race §12 names is settled as `DECISIONS.md` D-092.
 
 ---
 
@@ -272,3 +273,109 @@ appearing. §3 is the measurement this plan's claims rest on instead, per §2 of
 ## 15. Version
 
 No bump implied — defect fixes against unreleased `1.0.0`, consistent with R168–R171.
+
+## 16. Results
+
+All four tasks landed, in one commit each.
+
+| | |
+|---|---|
+| **R175** | `DocumentWatcherRegistry.selfWrite`; `document:write` routes through it |
+| **R176** | `save`/`saveAs` clear the external-change state and cancel an in-flight reload |
+| **R177** | `saveAs` re-watches the path it just wrote |
+| **R178** | the seam between saving and watching, in two test files |
+| **D-092** | the design, its four rejected alternatives, and the accepted race |
+
+Suite **1921 → 1941**: 1936 passed, 5 skipped, 163 files. `typecheck` clean; `lint` unchanged at
+its ratcheted 3 warnings, 0 errors.
+
+### What the acceptance criteria have
+
+1. **A save with a live watcher produces no notification, against a real filesystem.**
+   `test/selfWriteSuppression.test.ts` — a bare `writeFile` notifies, the same write through
+   `selfWrite` produces zero. The bare half asserts the mtime moved *before* asserting the watcher
+   reported it, because that is the registry's own criterion for "changed": a run whose timestamp
+   did not move had nothing to detect, and finding that out from a failed assertion beats a green
+   test that proved nothing.
+2. **The undo stack survives a save** — asserted directly, and twice: that `canUndo` is still true,
+   and that `undo()` actually returns the buffer to its pre-edit bytes rather than only looking
+   enabled.
+3. **A genuine external change is still detected**, including specifically *after* a save through
+   `selfWrite` — the failure this design could most easily have is external-change detection going
+   quietly dead once the baseline moves. A change to a *different* open document during a save is
+   covered in `documentWatchers.test.ts`.
+4. **A failed save leaves detection working** — the mark is released in a `finally`, and a later
+   genuine change still notifies. Mutation-verified.
+5. **A successful save clears pending external-change state and cancels an in-flight reload.**
+6. **After Save As the watch follows the document**, and the old path stops being watched on this
+   session's behalf — main's `watch` releases the key's previous registration first, so the
+   re-watch *is* the unwatch.
+7. **§12's race is D-092**, with what was rejected and why.
+
+### The reproduction is a test, not a comment
+
+`documentSession.test.ts`'s R178 block runs the same session **without** `selfWrite` and asserts the
+defect: `externalRewrites` rises, and `canUndo` is false. That test only reproduces because the fake
+models §3's measured ordering rather than an idealised one:
+
+- **the first notification arrives before `document:write` resolves**, so the renderer handles it
+  while `dirty` is still `true` — which is what puts the two-button prompt up;
+- **the second arrives after**, once `save()` has cleared `dirty` — which is what sends the
+  clean-document branch into an auto-reload.
+
+Deliver both inside the write and the reload never happens. Deliver both after it and the prompt
+never does. A first attempt did the former and produced two green tests asserting nothing, which is
+how the ordering earned its own paragraph here.
+
+### Mutation-verified, and one mutation initially escaped
+
+Eleven mutations across the two source files, applied one at a time with the suite run after each.
+Ten were red immediately. The one that was not:
+
+**Releasing the mark before the re-baseline instead of after.** The code comment claimed the
+ordering mattered and no test proved it — precisely the shape of claim this project's review
+agreement exists to catch. Closing it needed a way to act *while a stat is in flight*, so the
+registry's fake `stat` gained an `onStat` hook; the test fires a watcher event during the re-stat,
+which is the instant a premature release re-opens the window. §3's "an event arrived 0.4 ms after
+the write resolved" is that instant, measured.
+
+The others: removing the drop, removing the re-baseline, a flag instead of a count, not releasing on
+a rejected write, skipping the reload abort, leaving `externalChangeDetected` set, leaving
+`reloadPending` raised, not clearing at all, dropping R177's re-watch, and moving that re-watch
+before the dialog result is checked so a *cancelled* Save As re-watches anyway.
+
+### One honest limit on the real-filesystem test
+
+Removing the drop from the registry turns the session tests red and leaves
+`selfWriteSuppression.test.ts` **green**: a 32-byte write's events land after `writeFile` resolves
+there, where the re-baseline alone silences them. The drop covers events arriving *during* the
+write, and that ordering is controllable only in a fake. Both tests are load-bearing and neither
+subsumes the other — recorded because a reader who assumes the real-filesystem test covers
+everything would be wrong.
+
+### Review, per `R` id
+
+- **R175** — the plan's §12 offered a "free" mitigation: fire a notification when the post-write
+  `size` differs from the bytes just written. **It does not work as described**, and the finding is
+  in D-092 rather than left for someone to re-derive: events inside the window are *dropped*, not
+  deferred, so there is no pending event left to fire. Making it work needs `size` on
+  `DocumentWatcherDeps.stat`, the expected length threaded through `selfWrite`, and a synthesised
+  notification with no watcher event behind it — a feature, for the different-size subset of a
+  sub-10 ms window. Not built; recorded.
+- **R176** — `clearExternalChangeAfterSave` both mutates session state and returns a document to
+  spread, which reads purer than it is. Kept, because it is the shape and order `keepMine` already
+  uses and splitting it would separate the abort from the state it invalidates; its doc comment now
+  says so explicitly.
+- **R177** — nothing found. The call is one line and its two tests bracket it on both sides.
+- **R178** — the first draft of the session fake delivered both notifications inside the write,
+  which made the reproduction test pass while reproducing nothing. Caught by running it: the
+  reproduction was green when it had to be red.
+- **D-092 rode with R178 rather than with R175**, which is where `CLAUDE.md`'s "record decisions in
+  the same commit" would have put it. Named rather than quietly tidied.
+
+### Not done, and deliberately
+
+§14's exclusions hold: nothing changed about what the banners say, nothing about the undo stack on a
+*genuine* external change (D-036/F10's reasoning is unchanged — the entries are patches against a
+buffer that no longer exists), and no general debouncing of watcher events. **No version bump**, per
+§15 and consistent with R168–R171.
