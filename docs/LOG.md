@@ -16,6 +16,43 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R183–R186 — a red CI run had stopped meaning anything · built ⚠ (two items owed)
+
+**Plan:** `docs/plans/R183-ci-flakes.md`
+
+**Three of the last 21 completed `main` runs were red and none was caused by its own commit.** Found
+while reading CI output for R179–R181, after a failure on that branch turned out to belong to a test
+the branch never touched.
+
+**Two of the three were one defect R159 had already named** — *wait for the condition, never for a
+duration* — and both were quantified before being touched. The tab strip waited two frames for a
+time-based smooth scroll; sampling per frame gave 3, 18, 60, 85, 99 … 120, so **the frame it asserted
+on was 3 of 120**. The tree slept 50 ms for a layout that needs **three frames / ~27 ms**, and at
+60 Hz three frames *is* 50 ms — the margin was approximately zero. Both are now condition waits, and
+both were mutation-verified red, because a condition wait's failure mode is timing out into a pass.
+
+**The third came back with a finding about the guard rather than a fix to it.** R185 was forbidden
+to move the performance ceiling without first measuring; twelve samples put the ratio within 4% of
+parity, so the fast path is clean. The wrong thing was the measurement's *shape*: three plain runs
+then three namespaced ones means the shapes sample different windows of wall clock, and CI's failure
+had `plain` at a perfectly normal 232 ms while `namespaced` hit 800 ms in the same run. Pairing the
+runs and dividing within the pair cancels that.
+
+**Then the guard was measured, and it was much weaker than it looked.** Injecting a per-node cost:
+the old 3× ceiling let a **2.747× regression pass silently**, and only fired at 5.2×. That is the
+price of R153's earlier raise, and a stronger argument against raising it again than the plan had.
+The paired design catches the 2.8× case at a 1.5× ceiling — safe not because the round got braver,
+but because pairing removed the noise the ceiling existed to clear.
+
+**R184 and R186 are owed**, as the plan said they were separable: sixteen files carry the same latent
+shape and none has flaked, and a reintroduction guard written before those conversions would ship
+with an eighteen-entry allowlist. **Acceptance 2 — twenty consecutive clean `main` runs — cannot be
+met inside a round** and is in the Owed table rather than claimed.
+
+**No version bump**; test-suite reliability, nothing shipped changes.
+
+---
+
 ## R179–R181 — the caret could rest between the CR and the LF · built
 
 **Plan:** `docs/plans/R179-crlf-caret-position.md` · **Decisions:** D-093
