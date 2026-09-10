@@ -322,15 +322,54 @@ comes from.
 clean; `lint` unchanged at its ratcheted 3 warnings, 0 errors. One net new test (R185 adds none; the
 count moved with R179–R181 landing on `main` underneath this branch).
 
+### R185's tightening was wrong, and CI said so one run later
+
+**The 1.5× ceiling shipped and was reverted.** It rested on pairing each plain run with the
+namespaced run beside it and dividing, on the assumption that a contention burst slows a run *and its
+neighbour* together. The next `macos-latest` run — on a **documentation-only** branch — returned:
+
+```
+paired ratios: 1.240  1.895  0.737  2.078  1.916      median 1.895, ceiling 1.5
+```
+
+**0.737 means the namespaced run came in 26% faster than the plain run beside it; 2.078 means twice
+as slow.** The noise on that runner is finer-grained than a single ~230 ms parse, so adjacent runs
+are not correlated and pairing cancels nothing.
+
+**The ±4% spread measured above is a property of this machine, and reading it as a property of CI is
+the mistake this repository keeps making**: R168 gathered evidence about the keyboard API surface and
+concluded something about the browser; R171 measured `fs.watch` on Windows and concluded something
+about every platform; R185 measured variance on an idle desktop and concluded something about a
+shared runner. Three rounds, one error.
+
+**What was kept and what went back:**
+
+| | |
+|---|---|
+| The interleave | **kept** — it fixes a real, separate failure (`plain` at 232 ms while `namespaced` hit 800 ms in the same run) and cost nothing |
+| `min` per shape | **restored** — contention only makes a run slower, so the fastest of five is each shape's closest thing to a noise-free measurement |
+| The paired-median ratio | **removed** |
+| The 3× ceiling | **restored** |
+
+**The blind spot is therefore still open, and is now in the Owed table rather than in a comment.**
+The failed attempt is what establishes that a tighter wall-clock bound is not available on this
+hardware — so closing it needs the *mechanism* asserted (no per-node namespace work on a
+declaration-free document) rather than a braver number. That is a different piece of work.
+
+**A guard that fails randomly gets ignored and then deleted**, which leaves nothing at all. That is
+the argument for reverting rather than for arguing with the runner.
+
 ### Review, per `R` id
 
 - **R183** — `paint()`'s fallback is `waitForQuiet`, which is *slower* than the 50 ms sleep it
   replaces in the negative cases (it waits out a 50 ms quiet window *after* the layout settles, so
   ~77 ms rather than 50 ms). §10 claimed condition waits are faster; that is true of the `until`
   path and false of the fallback. Named rather than left as a claim the round quietly broke.
-- **R185** — no finding against the change itself. The finding is against what it was sent to do:
-  the number it was asked not to raise turned out to be hiding a 2.7× regression, which is a
-  stronger reason not to raise it than the one the plan gave.
+- **R185** — **the change was wrong and CI caught it in one run.** The finding it produced stands
+  (the 3× ceiling hides a 2.7× regression) and the fix it proposed did not. Reverted to 3× with the
+  interleave kept; the blind spot moved to the Owed table. Recorded above at length because the
+  error is this repository's most repeated one and the round had just written it into two other
+  plan documents before making it again.
 - **R184 and R186 not started**, and the plan does not pretend otherwise.
 
 ### What this round has not done, and the acceptance it cannot meet
