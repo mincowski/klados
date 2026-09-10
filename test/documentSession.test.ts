@@ -3410,8 +3410,31 @@ describe('createDocumentSession (D6)', () => {
 
         // The document was re-read and re-parsed, the Raw editor rebuilt (R100
         // keys off `externalRewrites`), and the undo stack went with it.
-        expect(documentOf(session).externalRewrites).toBe(1)
-        expect(getContext().canUndo).toBe(false)
+        //
+        // The message is here because this assertion failed on all three CI
+        // platforms and on none of eight local configurations (Node 22 and 24,
+        // isolated, whole-file, whole-project, and under CPU starvation). The
+        // discriminating value is `undoEntryCount`: **0 means the stack was
+        // cleared and only the context flag disagrees** — a real divergence,
+        // since the UI enables Ctrl+Z from that flag — while **1 means the
+        // reload committed without clearing the stack**, which the source says
+        // is impossible because no `await` separates the two.
+        const diagnostic = (): string => {
+          const d = documentOf(session)
+          return JSON.stringify({
+            undoEntryCount: d.undoEntryCount,
+            undoBytes: d.undoBytes,
+            externalRewrites: d.externalRewrites,
+            reloadPending: d.reloadPending,
+            externalChangeDetected: d.externalChangeDetected,
+            dirty: d.dirty,
+            reads: (api.document.mintReadToken as ReturnType<typeof vi.fn>).mock.calls.length,
+            canUndo: getContext().canUndo,
+            canRedo: getContext().canRedo
+          })
+        }
+        expect(documentOf(session).externalRewrites, diagnostic()).toBe(1)
+        expect(getContext().canUndo, diagnostic()).toBe(false)
       })
 
       it('a save leaves the document, the undo stack and the selection alone', async () => {
