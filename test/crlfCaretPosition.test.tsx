@@ -254,22 +254,49 @@ describe('R179 — the selection cannot rest inside a CRLF pair', () => {
     expectOutOfEveryGap(view, 'ArrowUp from the line below')
   })
 
-  it('End and Shift+End still land where they always did', async () => {
-    // These two were already correct (§3). Asserted because a clamp that
-    // "fixed" them would be moving the caret somewhere the user did not ask
-    // for, which is the failure mode of an over-eager filter.
+  it('a selection already outside a pair is left exactly where it is', async () => {
+    // The failure mode of an over-eager clamp: moving a caret the user placed
+    // deliberately. Asserted directly rather than through a key, because what
+    // the filter must not do is a property of the filter, not of any one input.
+    await openTab(SOURCE)
+    const view = editorViewIn(container)
+    view.focus()
+
+    for (const pos of [0, 2, 5, 7, 11, view.state.doc.length]) {
+      view.dispatch({ selection: { anchor: pos } })
+      expect(view.state.selection.main.head, `position ${pos} was moved`).toBe(pos)
+    }
+
+    // And a range, both endpoints.
+    view.dispatch({ selection: { anchor: 2, head: 9 } })
+    expect(view.state.selection.main.anchor).toBe(2)
+    expect(view.state.selection.main.head).toBe(9)
+  })
+
+  it('End and Shift+End land outside the pair, whatever the platform means by End', async () => {
+    // §3 measured these as already correct on Windows, where End is
+    // line-boundary motion. **macOS means something else by it** — End scrolls
+    // to the end of the *document*, and line-end is Cmd+Right — which a first
+    // version of this test learned from CI by asserting position 5 and getting
+    // 20 on `macos-latest`.
+    //
+    // The platform-independent claim is the one that matters here: wherever
+    // this platform's End goes, it is not between a CR and its LF. The exact
+    // landing position is a native convention, not something this round
+    // changes, and pinning it would be testing the operating system.
     await openTab(SOURCE)
     const view = editorViewIn(container)
     view.focus()
     view.dispatch({ selection: { anchor: 2 } })
 
     await userEvent.keyboard('{End}')
-    expect(view.state.selection.main.head).toBe(5)
     expectOutOfEveryGap(view, 'End')
 
     view.dispatch({ selection: { anchor: 2 } })
     await userEvent.keyboard('{Shift>}{End}{/Shift}')
-    expect(view.state.selection.main.head).toBe(5)
+    expectOutOfEveryGap(view, 'Shift+End')
+    // The anchor is the half that is portable: extending a selection never
+    // moves where it started from.
     expect(view.state.selection.main.anchor).toBe(2)
   })
 

@@ -344,6 +344,32 @@ so rather than claiming a correctness role the measurement disproved.
 `npm test`: **1941 → 1993 tests**, 1988 passed and 5 skipped across 165 files, exit 0.
 `typecheck` clean; `lint` unchanged at its ratcheted 3 warnings, 0 errors.
 
+### CI found a platform assumption in one test
+
+`End and Shift+End still land where they always did` asserted position 5 and got **20** on
+`macos-latest`. §3 measured those keys on Windows, where End is line-boundary motion; **macOS means
+something else by it** — End scrolls to the end of the *document*, and line-end is Cmd+Right. The
+test had encoded a native convention as though it were a fact about this code.
+
+Split in two rather than platform-gated. The claim that matters — *a selection already outside a pair
+is never moved*, which is the failure mode of an over-eager clamp — is a property of the filter, so
+it is asserted directly against a set of positions with no key involved and no platform in it. The
+native-key test keeps only the portable half: wherever this platform's End goes, it is not between a
+CR and its LF, and the anchor of an extended selection does not move. Pinning the landing position
+would be testing the operating system.
+
+Same class as R171's finding in a new place: **a test driving a real OS facility inherits its
+platform differences**, and CI is what establishes them.
+
+### One failure in the same run was not from this branch
+
+`ubuntu-latest` also failed `TabStrip overflow (R35–R37) > clicking the right chevron scrolls the
+strip without changing the active tab`. It passes 3/3 locally and touches nothing this round
+changes. **`main` itself has been intermittently red in this class**: two recent `main` runs failed
+on `R170 — a deeply nested tree can scroll horizontally`. Reported rather than folded in here,
+because a pre-existing flake in the browser project's geometry tests is its own problem and fixing
+it inside an unrelated round is how it would stop being visible.
+
 ### Review, per `R` id
 
 - **R179** — the first draft's test comment asserted that the bounds check prevented a *wrong
