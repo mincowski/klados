@@ -44,14 +44,37 @@ Resolved by constructing electron-builder's own `AppInfo` against this repositor
 | ARP `DisplayName` | `Klados` | `nsis.uninstallDisplayName` ← `productName` |
 | ARP `Publisher` | **`mincowski`** | `AppInfo.companyName` ← `package.json` `author.name` |
 | Debian `Maintainer` | `mincowski <8300485+mincowski@users.noreply.github.com>` | `author.name` + `author.email` |
-| Copyright resource | `Copyright © 2026 mincowski` | `AppInfo.copyright` ← `author.name` |
+| Copyright resource | `Copyright © 2026 mincowski` | `AppInfo.copyright` — `config.copyright` when set, **else** `Copyright © <build year> <companyName>` |
 | Installer URL | `klados-<version>-setup.exe` | `nsis.artifactName` — **already stable by construction** |
 | Install scope | per-user (`%LOCALAPPDATA%`, HKCU) | `oneClick` defaults true, `perMachine` defaults false |
 
-**The finding that makes this round non-trivial: `author.name` has three consumers, not one.** It is
-simultaneously the Windows Publisher, the Debian Maintainer, and the copyright holder. Those are
-three different questions with three different right answers, and one field is currently answering
-all of them. That is the actual problem R172 solves; the winget question merely exposed it.
+**The finding that makes this round non-trivial: `author.name` answers three different questions at
+once.** *Who publishes this software*, *who is responsible for the Debian package*, and *who holds
+the copyright* have three different right answers, and one field is currently giving the same answer
+to all three. That is the actual problem R172 solves; the winget question merely exposed it.
+
+Three questions, but more than three outputs — the table above lists what a package manager keys
+off, not everything the field reaches:
+
+| Output | Path |
+|---|---|
+| ARP `Publisher` | `companyName` → `COMPANY_NAME` (`NsisTarget.js:492`) → `installer.nsh:133` |
+| `Klados.exe` version resource, `CompanyName` | `companyName` (`winPackager.js:147`) |
+| Installer `.exe` version resource, `CompanyName` | `companyName` (`NsisTarget.js:399`) |
+| `Klados.exe` version resource, `LegalCopyright` | `copyright` (`winPackager.js:141`) |
+| Installer `.exe` version resource, `LegalCopyright` | `copyright` (`NsisTarget.js:390`) |
+| macOS `Info.plist`, `NSHumanReadableCopyright` | `copyright` (`macPackager.js:400`) |
+| Debian `Maintainer` | `author.name` + `author.email` (`FpmTarget.js:85`) |
+
+A Start-menu folder named after the company is an eighth, reached only when `nsis.menuCategory` is
+`true` (`CommonWindowsInstallerConfiguration.js:12`). It is unset here, so it is not in play — noted
+so that turning it on later is understood as adopting the publisher string, not a layout preference.
+
+**Two of the three questions have an explicit override; one does not.** `linux.maintainer` and the
+top-level `copyright` are both settable and both win before any derivation runs. `companyName` has
+no override at all (`appInfo.js:90` reads `author.name` and nothing else), which is why R172a is a
+`package.json` edit rather than a config line, and why R172b and R172c are the two pins that keep
+that edit from reaching the other two answers.
 
 ## 3. The decisions to settle
 
@@ -78,12 +101,50 @@ and is the supported path. Note that `electron-builder.yml` currently carries a 
 why `maintainer:` is deliberately *absent* — **that comment becomes wrong and must be rewritten**,
 not left standing next to a line it now contradicts.
 
-### R172c — the copyright string
+### R172c — the copyright string, which must not follow it either
 
-Falls out of R172a: it becomes `Copyright © <year> Klados`. This is the desired answer rather than
-an accident — the copyright holder for an MIT project published under the project's name is the
-project. Called out because it is a third consumer that would otherwise change silently, which is
-how an unreviewed change becomes a surprise in a version resource nobody looks at.
+**`copyright: Copyright © 2026 Klados contributors`**, pinned explicitly, exactly as R172b pins the
+maintainer.
+
+An earlier draft of this section said the copyright *"falls out of R172a"* and named the result
+`Copyright © <year> Klados`. Both halves were wrong, and the correction is the reason this section
+now exists as a decision rather than as a note.
+
+**It does not fall out of anything.** `AppInfo.copyright` (`appInfo.js:129`) reads `config.copyright`
+first and only derives `Copyright © <build year> <companyName || productName>` when that is unset.
+`copyright` is a documented top-level electron-builder option, so this is a third *decision*, not a
+side effect to be accepted.
+
+**And `Klados` alone is the wrong holder.** Copyright vests in a person, natural or legal. There is
+no Klados entity — no company, no foundation — so the notice would name a holder that does not
+exist. A notice has not been a condition of protection since Berne, and the US dropped the
+requirement in 1989, so this is inaccuracy rather than forfeiture; but it is inaccuracy that
+**contradicts the repository's own operative document**, and that is the part that matters:
+
+```
+LICENSE:3:  Copyright (c) 2026 Klados contributors
+```
+
+Shipping a binary whose version resource says `Klados` beside a licence file that says `Klados
+contributors` is two documents disagreeing about who holds the rights, one of them the one that
+actually grants the licence.
+
+`Klados contributors` is the ordinary convention for a project with no entity behind it — the same
+shape as `Node.js contributors`, `Electron contributors`, `The Rust Project Developers` — and reads
+as a collective handle for the natural persons who each hold copyright in their own contribution.
+
+**Rejected: `mincowski`.** Strictly true today, since there is exactly one contributor, and a
+pseudonym is no obstacle to it. Rejected because it contradicts `LICENSE` just as `Klados` does, only
+in the other direction, and goes stale on the first outside pull request — at which point the notice
+in the shipped binary is not merely unconventional but false.
+
+**The year is frozen at 2026, deliberately.** The derived form recomputes it with
+`new Date().getFullYear()` at build time; an explicit string cannot, because electron-builder's macro
+expander has `${author}`, `${productName}`, `${version}`, `${arch}`, `${platform}` and `${channel}`
+and **no year token** (`macroExpander.js`). So pinning trades a value that tracks the build clock for
+one that states a fact: 2026 is when Klados was first published, which is what a copyright notice is
+for. It matches `LICENSE`, and it is the value R173 asserts, so it cannot drift silently in either
+direction.
 
 ### R172d — install scope and installer shape, which are also permanent
 
@@ -167,10 +228,20 @@ the belt to §3's braces.
 `PLANNING.md` §1 does not apply — nothing here is a visual decision. §3 does not apply — nothing
 here is on a hot path; the entire round is build-time configuration and one test.
 
-§2 is the substance of §2 above, and it is worth naming what it caught: the claim *"the Publisher
-comes from `author.name`"* was verified by resolving it through electron-builder's own `AppInfo`,
-which is also what revealed the copyright string as a third consumer. Reading the source alone
-would have produced a plan that changed one field and silently changed two others.
+§2 is the substance of §2 above, and it is worth naming what it caught — twice, because the second
+catch was of the first.
+
+Resolving the claim *"the Publisher comes from `author.name`"* through electron-builder's own
+`AppInfo` is what revealed the copyright string as a third answer to the same field. Reading the
+source alone would have produced a plan that changed one output and silently changed two others.
+
+**Then the same rule caught this plan.** Having established that the copyright derives from
+`companyName`, §3 wrote down that it therefore *"falls out of R172a"* — a claim about a mechanism,
+asserted rather than checked. `appInfo.js:129` reads `config.copyright` first, so the derivation
+this plan had verified is the *fallback*, not the path, and the field is independently pinnable.
+That is `PLANNING.md` §2 exactly: **verifying a mechanism once does not license an inference drawn
+from it later.** The correction cost one `grep` of the getter; leaving it would have shipped a
+version resource naming a copyright holder that does not exist, in a field nobody opens.
 
 ## 9. Acceptance criteria
 
@@ -179,7 +250,9 @@ would have produced a plan that changed one field and silently changed two other
    the config — §2's whole lesson is that the config is one resolution step away from the truth.
 2. The `.deb`'s `Maintainer` field is unchanged from today's value and is well-formed
    `Name <email>`.
-3. The copyright resource reads `Copyright © <year> Klados`.
+3. The copyright resource reads `Copyright © 2026 Klados contributors` on every artifact that
+   carries one — both Windows version resources and macOS's `NSHumanReadableCopyright` — and matches
+   `LICENSE` line 3 exactly.
 4. `electron-builder.yml`'s comment about deliberately omitting `maintainer:` is rewritten to
    describe what the file now does.
 5. R173's test fails if any of the pinned values changes, and its failure message names the
