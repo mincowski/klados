@@ -195,8 +195,17 @@ against a harness, and a harness is built from the same assumptions as the code.
 Two things follow, and they are cheap:
 
 1. **When adding a fixture, ask what axis it does not vary.** Line endings, encoding, depth, size,
-   and whether the file is on the platform's native path shape are the ones that have bitten so
-   far. A second fixture differing on one axis is worth more than ten differing on none.
+   whether the file is on the platform's native path shape, and — R187 — **the distribution of node
+   kinds it contains**. A second fixture differing on one axis is worth more than ten differing on
+   none.
+
+   **R187 is the sharpest instance so far, because the gap was total rather than partial.** A census
+   of every fixture `invariants.test.ts` could see found the default corpus held **zero `Property`
+   nodes and zero `Object` nodes**: `cars-10mb.xml` is Element/Comment, `deep-10k.json` is
+   Array/Scalar. The only property-bearing fixture was 100 MB, excluded by size, inside a command
+   that could not finish — so an invariant asserting something the product documents as impossible
+   went unchallenged. A few-kilobyte JSON fixture carrying the four kinds
+   (`test/fixtures/kinds/properties.json`) reproduced it **in 13 ms**.
 2. **Anything a person perceives — feedback, focus, a native dialog, a drop target — belongs in
    `mainElectron.test.ts` against the real build**, not in a component harness. That file is where
    this project's blind spot ends.
@@ -457,10 +466,19 @@ the shell's own `grep`/`sed`. Full account: `docs/plans/R47-repo-hygiene.md`.
 - **An unscoped `//name` is not meaningfully faster than a full scan**, and a **predicate step
   collects its full candidate set before filtering** — so `car[1]//type` does not reduce work the
   way it looks like it should. An early-exit positional predicate is the concrete next step.
-- **`npm run test:large` currently fails.** A full run across every fixture takes ~21 minutes and
-  ends with 8 truncation-fuzz tests failing on a worker RPC timeout (`[vitest-worker]: Timeout
-  calling "onTaskUpdate"`), not an assertion, on the largest fixtures at the full 200-sample count.
-  Confirmed pre-existing, not caused by the round that found it. Full account: `docs/plans/R47-repo-hygiene.md`.
+- **`npm run test:large` passes as of R187–R189 (2038 tests, 5m50s) but still exits 1** on one
+  unhandled `[vitest-worker]: Timeout calling "onTaskUpdate"` with zero test failures. Ruled out by
+  measurement: the 500 MB fixture alone (the invariants file in isolation produces no RPC error even
+  while timing out for 25 minutes), the browser project (`--project node` still errors), and worker
+  parallelism (`--no-file-parallelism` still errors, and is slower). Vitest does not expose the RPC
+  timeout — it is birpc's default. Full account: `docs/plans/R187-large-suite-honesty.md` §14.
+
+  **The entry this replaces was wrong in two of its three claims**, and the correction is worth more
+  than the fact: it said "8 truncation-fuzz tests failing on a worker RPC timeout … **not an
+  assertion**". There were **ten** failures, and **two of them were assertions** — a real invariant
+  failing in 5 ms, in a command nobody could run to see it. The eight noisy timeouts had buried them.
+  R47's own lesson, one directory over: **when a signal is expensive to look at, nobody looks, and
+  what is written down about it stops being checked.**
 - **TOML permits non-contiguous table extension**; this project's contiguous-span tree model does
   not. A later `[x]` opens a second, separate `Object` rather than corrupting spans. Believed
   unreachable in real-world TOML, disclosed rather than left to be rediscovered.

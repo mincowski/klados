@@ -1,0 +1,58 @@
+{
+  "note": "R189 — the default invariant corpus had zero Property and zero Object nodes. This fixture exists to carry them.",
+  "scalars": {
+    "string": "plain",
+    "stringWithEscapes": "a \"quoted\" \\ backslash é and a \t tab",
+    "emptyString": "",
+    "integer": 42,
+    "negative": -17,
+    "zero": 0,
+    "float": 3.14159,
+    "exponent": 6.022e23,
+    "negativeExponent": 1.6e-19,
+    "bigInteger": 9007199254740993,
+    "true": true,
+    "false": false,
+    "null": null
+  },
+  "nested": {
+    "level1": {
+      "level2": {
+        "level3": {
+          "leaf": "deep enough to exercise a parent chain"
+        }
+      }
+    }
+  },
+  "arrays": {
+    "empty": [],
+    "scalars": [1, 2, 3],
+    "mixed": ["text", 7, true, null, -0.5],
+    "objects": [
+      { "id": 1, "name": "first", "tags": ["a", "b"] },
+      { "id": 2, "name": "second", "tags": [] },
+      { "id": 3, "name": "third", "tags": ["c"] }
+    ],
+    "nestedArrays": [[1, 2], [3, [4, 5]], []]
+  },
+  "objectInArrayInObject": {
+    "rows": [
+      {
+        "cells": [
+          { "value": "a", "span": 1 },
+          { "value": "b", "span": 2 }
+        ]
+      }
+    ]
+  },
+  "emptyObject": {},
+  "keysNeedingCare": {
+    "": "empty key",
+    "with space": "spaces",
+    "with\"quote": "quote in key",
+    "with\\backslash": "backslash in key",
+    "unicodeé": "non-ascii key",
+    "123": "numeric-looking key"
+  },
+  "trailing": "last property, so the final Property node is not also the last byte"
+}
