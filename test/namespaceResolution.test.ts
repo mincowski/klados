@@ -122,8 +122,40 @@ describe('R134 — a namespace-free document parses measurably unchanged', () =>
     timeParse(false)
     timeParse(true)
 
-    const plain = Math.min(timeParse(false), timeParse(false), timeParse(false))
-    const namespaced = Math.min(timeParse(true), timeParse(true), timeParse(true))
+    // **R185: interleaved, not grouped.** This used to time three plain runs and
+    // then three namespaced ones, which leaves the two shapes measuring
+    // *different windows of time* on a machine whose load varies. A burst of
+    // contention landing in the second half inflates only `namespaced`, and the
+    // `Math.min` of three consecutive runs cannot filter out a burst that spans
+    // all three.
+    //
+    // That is what CI observed: `plain` came in at 232 ms — squarely in line
+    // with an idle local machine — while `namespaced` hit 800 ms in the same
+    // run, a 3.45× ratio against a 3× ceiling. Uniform slowness would have
+    // inflated both.
+    //
+    // Interleaving makes each shape sample the same stretch of wall clock, so
+    // contention hits both and the ratio survives it. The ceiling is unchanged.
+    // **Paired, and compared as a ratio per pair.** Timing the two shapes
+    // back to back and dividing within the pair is what cancels contention:
+    // a burst that slows one run almost always slows its neighbour, so it
+    // divides out instead of landing on whichever shape happened to be
+    // measured while it lasted.
+    const ratios: number[] = []
+    const plainRuns: number[] = []
+    const namespacedRuns: number[] = []
+    for (let run = 0; run < 5; run++) {
+      const p = timeParse(false)
+      const n = timeParse(true)
+      plainRuns.push(p)
+      namespacedRuns.push(n)
+      ratios.push(n / p)
+    }
+    // The median, not the mean: one pair straddling a GC pause should not move
+    // the verdict, and with five pairs the median needs three of them to agree.
+    const ratio = [...ratios].sort((a, b) => a - b)[2]!
+    const plain = Math.min(...plainRuns)
+    const namespaced = Math.min(...namespacedRuns)
 
     // Generous ratio, not a tight budget — the point is "no per-node
     // resolution work leaked into the declaration-free fast path," not a
@@ -142,9 +174,55 @@ describe('R134 — a namespace-free document parses measurably unchanged', () =>
     // defect this guards and stops failing for runner noise. The additive
     // arm is unchanged — it only governs the small-input case.
     //
+    // **R185: the ceiling was not raised again — it was tightened, and the
+    // measurements are why.**
+    //
+    // It failed once more on `macos-latest` at 3.45×, and the obvious move —
+    // 3× to 4× — is the one R153's own note above warns against. So the ratio
+    // was measured instead. Twelve consecutive samples of the old grouped
+    // shape, on an idle machine:
+    //
+    //     0.960  0.983  0.985  0.991  0.991  0.992
+    //     0.994  0.997  1.002  1.006  1.024  1.025
+    //
+    // **Every one within ±4% of parity**, so there is no per-node cost hiding
+    // under the generous ratio and the fast path is genuinely clean.
+    //
+    // **Then the guard itself was measured, by injecting a per-node cost into
+    // the namespaced path and asking what the ceiling actually catches:**
+    //
+    //     injected cost   old (min/min, 3×)   new (paired median, 1.5×)
+    //     none            0.983  passes            0.984  passes
+    //     20×             1.075  passes            1.069  passes
+    //     100×            1.391  passes            1.419  passes
+    //     400×            2.747  **passes**        2.805  **fails — caught**
+    //     1000×           5.206  fails             5.481  fails
+    //
+    // That is the cost of R153's raise, stated plainly: everything between
+    // parity and 3× was a blind spot, and **a parse taking 2.7× as long sat
+    // inside it** — a regression far larger than the one the assertion exists
+    // to catch, passing silently.
+    //
+    // R153 raised the number to stop the flakes. This round removes the flakes'
+    // *cause* instead, and that is what makes a tighter ceiling safe rather
+    // than reckless: pairing and dividing within the pair cancels the
+    // contention, so the noise the ceiling had to clear is gone.
+    //
+    // **1.5× on the paired median**, well clear of the ±4% the measurements
+    // show and well under the 2.7× that used to pass. The additive arm is kept
+    // for the small-input case, where a few milliseconds of noise dominates any
+    // ratio.
+    //
     // Rejected: Vitest's `retry`. It would have greened this and R152 in one
     // line, and it would have hidden R152's missing wait completely.
-    expect(namespaced).toBeLessThan(Math.max(plain * 3, plain + 20))
+    //
+    // Rejected: skipping this on CI. A performance guard that runs only where
+    // nobody looks is R47's buried lint signal in a new place.
+    expect(ratio, `paired ratios: ${ratios.map((r) => r.toFixed(3)).join(', ')}`).toBeLessThan(1.5)
+    // The absolute arm, unchanged in spirit: on a small input a few
+    // milliseconds of noise swamps any ratio, so a tiny absolute difference is
+    // always acceptable regardless of what the ratio says.
+    expect(namespaced).toBeLessThan(Math.max(plain * 1.5, plain + 20))
     // Explicit timeout, not the 5 s default: this parses a 50,000-element
     // document eight times (two warm-ups plus three timed runs per shape).
     // The assertion above is a deliberately generous *ratio* — wall-clock
