@@ -251,8 +251,10 @@ version resource naming a copyright holder that does not exist, in a field nobod
 2. The `.deb`'s `Maintainer` field is unchanged from today's value and is well-formed
    `Name <email>`.
 3. The copyright resource reads `Copyright © 2026 Klados contributors` on every artifact that
-   carries one — both Windows version resources and macOS's `NSHumanReadableCopyright` — and matches
-   `LICENSE` line 3 exactly.
+   carries one — both Windows version resources and macOS's `NSHumanReadableCopyright` — and names
+   the same holder and year as `LICENSE` line 3. The two differ in the symbol only: `LICENSE` keeps
+   the ASCII `(c)` conventional in a licence file, the version resource uses `©`. R173 normalises
+   that one difference and asserts the rest, so changing the holder in either place alone is caught.
 4. `electron-builder.yml`'s comment about deliberately omitting `maintainer:` is rewritten to
    describe what the file now does.
 5. R173's test fails if any of the pinned values changes, and its failure message names the

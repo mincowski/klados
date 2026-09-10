@@ -1,4 +1,27 @@
 appId: com.klados.app
+# R172c: pinned rather than derived. It names the same holder and year as
+# `LICENSE` line 3, which is the point of pinning it; the two differ in the
+# symbol only, because a licence file conventionally keeps the ASCII `(c)`.
+#
+# Left unset, `AppInfo.copyright` (`appInfo.js:129`) derives
+# `Copyright © <build year> <companyName>` — and `companyName` is
+# `package.json`'s `author.name`, which R172a changed from a person to the
+# project. That would name a copyright holder which does not exist: there is
+# no Klados entity, natural or legal, and the notice would contradict the one
+# file that actually grants the licence. `Klados contributors` is the
+# ordinary collective handle for the natural persons who each hold copyright
+# in their own contribution.
+#
+# The year is frozen deliberately. The derived form recomputes it with
+# `new Date().getFullYear()` at build time; an explicit string cannot,
+# because electron-builder's macro expander has no year token. That trades a
+# value tracking the build clock for one stating a fact — 2026 is when Klados
+# was first published, which is what the notice is for.
+#
+# It lands in three artifacts: `LegalCopyright` on `Klados.exe`
+# (`winPackager.js:141`) and on the installer (`NsisTarget.js:390`), and
+# macOS's `NSHumanReadableCopyright` (`macPackager.js:400`).
+copyright: Copyright © 2026 Klados contributors
 directories:
   buildResources: assets/build
 files:
@@ -72,11 +95,19 @@ linux:
   target:
     - AppImage
     - deb
-  # No `maintainer:` here on purpose. It used to read `klados`, which is not a
-  # well-formed Debian maintainer field — that field requires `Name <email>`,
-  # and the hardcode existed only because `package.json` had no `author` to
-  # fall back to. It does now, so `FpmTarget.js` derives
-  # `mincowski <8300485+mincowski@users.noreply.github.com>` instead.
+  # R172b: pinned, and it must stay pinned. `FpmTarget.js:85` derives this
+  # from `author.name` + `author.email` whenever it is absent, and R172a
+  # changed `author.name` from a person to the project — so removing this line
+  # would silently produce `Maintainer: Klados <8300485+mincowski@…>`.
+  #
+  # Debian's `Maintainer` means *the person responsible for the package*, and
+  # its grammar is `Name <email>`. Who maintains the package and who publishes
+  # the software are different questions with different answers here; they
+  # shared one source until R172 separated them.
+  #
+  # An earlier version of this comment explained why the field was deliberately
+  # *absent*, which was correct while `author.name` was still a person.
+  maintainer: mincowski <8300485+mincowski@users.noreply.github.com>
   category: Utility
 appImage:
   artifactName: ${name}-${version}.${ext}
