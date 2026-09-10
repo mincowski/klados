@@ -24,13 +24,40 @@ appId: com.klados.app
 copyright: Copyright © 2026 Klados contributors
 directories:
   buildResources: assets/build
+# R190: an allowlist, replacing a list of exclusions.
+#
+# electron-builder's default is `**/*`, and a list of negative patterns
+# *narrows* that default rather than replacing it — so the rule in force was
+# "ship the entire working tree except these six patterns". It shipped
+# `docs/` (105 files), `test/` (171), `CLAUDE.md`, `.claude/`, `scripts/`,
+# `tools/` and the tsconfigs, and locally `spike/fixtures/` too: a 1202 MB
+# asar whose application part is `out/`, eight files, 2.0 MB.
+#
+# The old list is worth describing because it argues the case. It excluded
+# three tsconfigs; the repository has five, the other two having been added
+# later with nothing to prompt anyone back here. It excluded `README.md` and
+# not `CLAUDE.md`, which did not exist when the line was written. A default
+# that must be actively narrowed rots; one that must be actively widened
+# cannot.
+#
+# `out/**` is the built application, including the `?asset` outputs
+# electron-vite emits into `out/main/chunks/` — which is why `assets/` is not
+# here. `package.json` is required: Electron reads `main` from it. `LICENSE`
+# is deliberate, being a condition of distributing the software.
+#
+# **`node_modules` is absent on purpose and is still packed.** electron-builder
+# collects production dependencies outside this matcher, driven by the
+# dependency tree rather than by these patterns; verified by building with
+# exactly these three entries and finding `node_modules` at 22.7 MB in the
+# asar. Adding it here would be redundant and would imply these patterns
+# govern it.
+#
+# Guarded by `test/packagedFiles.test.ts`, which resolves these patterns
+# against `git ls-files` and fails on a negative pattern or a broad one.
 files:
-  - '!**/.vscode/*'
-  - '!src/*'
-  - '!electron.vite.config.{js,ts,mjs,cjs}'
-  - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
-  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
-  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  - out/**
+  - package.json
+  - LICENSE
 win:
   executableName: Klados
 nsis:
