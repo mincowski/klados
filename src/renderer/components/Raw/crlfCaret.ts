@@ -114,6 +114,111 @@ export function clampSelectionOutOfCrlfPairs(
   return moved ? EditorSelection.create(ranges, selection.mainIndex) : null
 }
 
+/** A span of the document, as `Text.line`/`Text.lineAt` return one. */
+export interface DocumentLine {
+  readonly number: number
+  readonly from: number
+  readonly to: number
+  readonly text: string
+}
+
+/** `DocumentSlice` plus the line lookups R181 needs. `Text` satisfies it. */
+export interface DocumentLines extends DocumentSlice {
+  readonly lines: number
+  line(lineNumber: number): DocumentLine
+  lineAt(pos: number): DocumentLine
+}
+
+/**
+ * R180 — the range Backspace must remove when the caret sits at the start of a
+ * line whose predecessor ended in CRLF, or `null` when this is an ordinary
+ * Backspace that native behaviour should handle.
+ *
+ * Without it, Backspace deletes the `\n` alone and strands the `\r` inside the
+ * joined line — `alpha\rbeta`, a lone CR in the middle of a line, silently and
+ * durably, because invariant 6 writes the buffer back verbatim.
+ *
+ * R179 stops the caret *resting* inside the pair; this is the other defect,
+ * which starts from a position either side of a **complete** pair and removes
+ * one unit of it.
+ */
+export function crlfBackspaceRange(
+  doc: DocumentSlice,
+  pos: number
+): { from: number; to: number } | null {
+  if (pos < 2) return null
+  return doc.sliceString(pos - 2, pos) === '\r\n' ? { from: pos - 2, to: pos } : null
+}
+
+/**
+ * R180 — the range Delete must remove when the caret sits just before a CRLF,
+ * or `null` for an ordinary Delete.
+ *
+ * Without it, Delete removes the `\r` alone and converts that one line ending
+ * from CRLF to LF — the same silent, durable corruption in the other direction.
+ * With R179 in place this is exactly where the caret lands at the visible end of
+ * a CRLF line, so it is the common case rather than an edge one.
+ */
+export function crlfDeleteRange(
+  doc: DocumentSlice,
+  pos: number
+): { from: number; to: number } | null {
+  if (pos + 2 > doc.length) return null
+  return doc.sliceString(pos, pos + 2) === '\r\n' ? { from: pos, to: pos + 2 } : null
+}
+
+/**
+ * R181 — the line ending line `lineNumber` carries, or `undefined` if it has
+ * none.
+ *
+ * The last line of a document has no ending by definition; every other line's
+ * ending is a CRLF exactly when its text ends with the retained `\r` (R168), and
+ * an LF otherwise.
+ */
+export function lineEndingOf(doc: DocumentLines, lineNumber: number): string | undefined {
+  if (lineNumber < 1 || lineNumber >= doc.lines) return undefined
+  return doc.line(lineNumber).text.endsWith('\r') ? '\r\n' : '\n'
+}
+
+/**
+ * R181 — the line ending Enter should insert at `pos`.
+ *
+ * ```
+ * insert = endingOf(current) ?? endingOf(current - 1) ?? '\n'
+ * ```
+ *
+ * **Every case is O(1)** — one line lookup, or two. That is the point of the
+ * rule rather than a detail of it. The alternative considered was a document
+ * majority, measured at ~820 MB/s: 244 ms at the 200 MB ceiling, so it would
+ * have had to be computed once and cached, and that cache would need
+ * invalidating on every edit. No scan, no cache, no invalidation, and no
+ * question about whether the window or the whole file is the right population.
+ *
+ * Each clause earns its place:
+ *
+ * - **The line being split** answers it whenever the caret is anywhere but the
+ *   final line, which is nearly always. Splitting a CRLF line yields two.
+ * - **The line before** covers the last line, which has no ending of its own.
+ *   Not a rare case: a document ending in a trailing newline has an empty final
+ *   line, so *pressing Enter at the end of a file* lands here every time — the
+ *   single most common Enter in the editor, which a majority would have had to
+ *   be computed to answer.
+ * - **`\n`** covers a document with no line break at all, where there is
+ *   nothing to imitate and no majority to consult either.
+ *
+ * The rule preserves a mixed file's local structure rather than healing it
+ * toward a dominant ending — the more conservative of the two, and the one
+ * consistent with invariant 6's posture of writing back what was there.
+ *
+ * **"Always `\n`" is not among the options because it is the defect**: it is
+ * what the code did, and it is the mechanism by which editing a CRLF file
+ * steadily converted it to a mixed one.
+ */
+export function lineBreakAt(doc: DocumentLines, pos: number): string {
+  const current = doc.lineAt(pos).number
+  return lineEndingOf(doc, current) ?? lineEndingOf(doc, current - 1) ?? '\n'
+}
+
 /**
  * Corrections for any change that *inserts* at a CRLF gap, or `null` when there
  * are none — which is almost always.

@@ -387,3 +387,131 @@ describe('R179 — the selection cannot rest inside a CRLF pair', () => {
     expect(bufferText()).toBe('alphads\nbeta\ngamma\n')
   })
 })
+
+describe('R180/R181 — a line ending is written and removed whole', () => {
+  const SOURCE = 'alpha\r\nbeta\r\ngamma\r\n'
+
+  /** Every assertion in this block is on `sourceBuffer.bytes`, per the plan:
+   * the document can look right while the buffer that gets saved does not, and
+   * the buffer is the only side the defect ever showed up on. */
+  function expectNoHalfEndings(): void {
+    const bytes = bufferText()
+    expect(/\r(?!\n)/.test(bytes), `a CR without its LF in ${JSON.stringify(bytes)}`).toBe(false)
+    expect(/(?<!\r)\n/.test(bytes), `an LF without its CR in ${JSON.stringify(bytes)}`).toBe(false)
+  }
+
+  it('Backspace at the start of a line joins it without stranding the CR', async () => {
+    // Before R180, native deletion removed the LF alone and left
+    // `alpha\rbeta` — a lone CR inside the joined line, saved verbatim.
+    await openTab(SOURCE)
+    const view = editorViewIn(container)
+    view.focus()
+    view.dispatch({ selection: { anchor: 7 } }) // start of "beta"
+
+    await userEvent.keyboard('{Backspace}')
+    await flushReparse()
+
+    expect(bufferText()).toBe('alphabeta\r\ngamma\r\n')
+    expectNoHalfEndings()
+  })
+
+  it('Delete at the visible end of a line joins it without dropping to LF', async () => {
+    // Before R180, this removed the CR alone and converted that one ending from
+    // CRLF to LF — the same corruption in the other direction.
+    await openTab(SOURCE)
+    const view = editorViewIn(container)
+    view.focus()
+    view.dispatch({ selection: { anchor: 5 } }) // just before the first CR
+
+    await userEvent.keyboard('{Delete}')
+    await flushReparse()
+
+    expect(bufferText()).toBe('alphabeta\r\ngamma\r\n')
+    expectNoHalfEndings()
+  })
+
+  it('ordinary Backspace and Delete still delete one character', async () => {
+    // The bindings return false for everything but a whole CRLF, so native
+    // deletion keeps doing its job. If this broke, R180 would have quietly
+    // become a reimplementation of deletion.
+    await openTab(SOURCE)
+    const view = editorViewIn(container)
+    view.focus()
+    view.dispatch({ selection: { anchor: 3 } })
+
+    await userEvent.keyboard('{Backspace}')
+    await flushReparse()
+    expect(bufferText()).toBe('alha\r\nbeta\r\ngamma\r\n')
+
+    await userEvent.keyboard('{Delete}')
+    await flushReparse()
+    expect(bufferText()).toBe('ala\r\nbeta\r\ngamma\r\n')
+    expectNoHalfEndings()
+  })
+
+  it('Enter adds a line that ends with CRLF, not LF (acceptance 4)', async () => {
+    // The slow drift: every added line used to get a literal LF, so editing a
+    // CRLF file converted it to a mixed one one keystroke at a time.
+    await openTab(SOURCE)
+    const view = editorViewIn(container)
+    view.focus()
+    view.dispatch({ selection: { anchor: 5 } }) // visible end of line 1
+
+    await userEvent.keyboard('{Enter}')
+    await flushReparse()
+
+    expect(bufferText()).toBe('alpha\r\n\r\nbeta\r\ngamma\r\n')
+    expectNoHalfEndings()
+  })
+
+  it('Enter at the very end of a CRLF file still adds CRLF', async () => {
+    // The most common Enter of all — a file with a trailing newline has an
+    // empty last line, which has no ending of its own to copy.
+    await openTab(SOURCE)
+    const view = editorViewIn(container)
+    view.focus()
+    view.dispatch({ selection: { anchor: view.state.doc.length } })
+
+    await userEvent.keyboard('{Enter}')
+    await flushReparse()
+
+    expect(bufferText()).toBe('alpha\r\nbeta\r\ngamma\r\n\r\n')
+    expectNoHalfEndings()
+  })
+
+  it('an LF document keeps getting LF endings (acceptance 6)', async () => {
+    await openTab('alpha\nbeta\n')
+    const view = editorViewIn(container)
+    view.focus()
+    view.dispatch({ selection: { anchor: 5 } })
+
+    await userEvent.keyboard('{Enter}')
+    await flushReparse()
+
+    expect(bufferText()).toBe('alpha\n\nbeta\n')
+    // The mirror of `expectNoHalfEndings`: no CR may appear in a file that
+    // never had one.
+    expect(bufferText()).not.toContain('\r')
+  })
+
+  it('a mixed document keeps each line ending local to its own line', async () => {
+    // The rule preserves structure rather than healing toward a dominant
+    // ending — the conservative choice, and the one consistent with invariant
+    // 6's posture of writing back what was there.
+    await openTab('crlf\r\nlf\ncrlf2\r\n')
+    const view = editorViewIn(container)
+    view.focus()
+
+    // Splitting the LF line yields an LF.
+    view.dispatch({ selection: { anchor: 8 } })
+    await userEvent.keyboard('{Enter}')
+    await flushReparse()
+    expect(bufferText()).toBe('crlf\r\nlf\n\ncrlf2\r\n')
+
+    // Splitting a CRLF line in the same document yields a CRLF.
+    view.dispatch({ selection: { anchor: 4 } })
+    await userEvent.keyboard('{Enter}')
+    await flushReparse()
+    expect(bufferText()).toBe('crlf\r\n\r\nlf\n\ncrlf2\r\n')
+  })
+})

@@ -16,7 +16,11 @@ import { EditorSelection, Text } from '@codemirror/state'
 import {
   clampOutOfCrlfPair,
   clampSelectionOutOfCrlfPairs,
-  isInsideCrlfPair
+  crlfBackspaceRange,
+  crlfDeleteRange,
+  isInsideCrlfPair,
+  lineBreakAt,
+  lineEndingOf
 } from '../src/renderer/components/Raw/crlfCaret'
 
 /** A real CodeMirror `Text`, split the way `Raw.tsx` splits it (R168:
@@ -166,5 +170,98 @@ describe('clampSelectionOutOfCrlfPairs (R179)', () => {
         null
       )
     }
+  })
+})
+
+describe('crlfBackspaceRange and crlfDeleteRange (R180)', () => {
+  it('Backspace at the start of a line takes the whole preceding CRLF', () => {
+    // Without this, native deletion removes the `\r\n`'s LF alone and leaves
+    // `alpha\rbeta` — a lone CR in the middle of a line, silently.
+    const d = doc('alpha\r\nbeta')
+    expect(crlfBackspaceRange(d, 7)).toEqual({ from: 5, to: 7 })
+  })
+
+  it('Delete at the visible end of a line takes the whole following CRLF', () => {
+    // The caret sits at 5 after R179's clamp, which makes this the common case
+    // rather than an edge one.
+    const d = doc('alpha\r\nbeta')
+    expect(crlfDeleteRange(d, 5)).toEqual({ from: 5, to: 7 })
+  })
+
+  it('answers null for an ordinary deletion, so native behaviour handles it', () => {
+    const d = doc('alpha\r\nbeta')
+    // Mid-word, both directions.
+    expect(crlfBackspaceRange(d, 3)).toBeNull()
+    expect(crlfDeleteRange(d, 3)).toBeNull()
+    // Either side of a bare LF: one unit is the whole ending, so native
+    // deletion is already correct and must not be overridden.
+    const lf = doc('alpha\nbeta')
+    expect(crlfBackspaceRange(lf, 6)).toBeNull()
+    expect(crlfDeleteRange(lf, 5)).toBeNull()
+  })
+
+  it('answers null rather than reading outside the document', () => {
+    const d = doc('\r\n')
+    expect(crlfBackspaceRange(d, 0)).toBeNull()
+    expect(crlfBackspaceRange(d, 1)).toBeNull()
+    expect(crlfDeleteRange(d, 1)).toBeNull()
+    expect(crlfDeleteRange(d, d.length)).toBeNull()
+    // And the one case that does match, at both ends of the same pair.
+    expect(crlfBackspaceRange(d, 2)).toEqual({ from: 0, to: 2 })
+    expect(crlfDeleteRange(d, 0)).toEqual({ from: 0, to: 2 })
+  })
+
+  it('does not mistake a lone CR followed by text for a pair', () => {
+    const d = doc('alpha\rbeta')
+    expect(crlfDeleteRange(d, 5)).toBeNull()
+    expect(crlfBackspaceRange(d, 6)).toBeNull()
+  })
+})
+
+describe('lineEndingOf and lineBreakAt (R181)', () => {
+  it('reports a CRLF line as CRLF and an LF line as LF', () => {
+    const d = doc('a\r\nb\nc')
+    expect(lineEndingOf(d, 1)).toBe('\r\n')
+    expect(lineEndingOf(d, 2)).toBe('\n')
+  })
+
+  it('reports the last line as having no ending', () => {
+    const d = doc('a\r\nb')
+    expect(d.lines).toBe(2)
+    expect(lineEndingOf(d, 2)).toBeUndefined()
+    // Out of range in either direction is the same answer, not a throw.
+    expect(lineEndingOf(d, 0)).toBeUndefined()
+    expect(lineEndingOf(d, 99)).toBeUndefined()
+  })
+
+  it('splitting a CRLF line yields a CRLF', () => {
+    const d = doc('alpha\r\nbeta\r\ngamma')
+    expect(lineBreakAt(d, 2)).toBe('\r\n')
+  })
+
+  it('splitting an LF line yields an LF, in the same mixed document', () => {
+    // The rule is per position, not per document: a mixed file keeps its local
+    // structure rather than being healed toward a dominant ending.
+    const d = doc('a\r\nb\nc\r\nd')
+    expect(lineBreakAt(d, 0)).toBe('\r\n') // line 1, CRLF
+    expect(lineBreakAt(d, 3)).toBe('\n') // line 2, LF
+    expect(lineBreakAt(d, 5)).toBe('\r\n') // line 3, CRLF
+  })
+
+  it('Enter at the very end of a CRLF file uses the line before', () => {
+    // **The single most common Enter in the editor.** A document with a
+    // trailing newline has an empty final line, which has no ending of its
+    // own — so without the second clause every such Enter would insert an LF
+    // into a CRLF file.
+    const d = doc('alpha\r\nbeta\r\n')
+    expect(d.lines).toBe(3)
+    expect(lineEndingOf(d, 3)).toBeUndefined()
+    expect(lineBreakAt(d, d.length)).toBe('\r\n')
+  })
+
+  it('falls back to LF only when the document has no line break at all', () => {
+    const d = doc('no breaks here')
+    expect(lineBreakAt(d, 5)).toBe('\n')
+    expect(lineBreakAt(doc(''), 0)).toBe('\n')
   })
 })
