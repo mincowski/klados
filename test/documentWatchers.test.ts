@@ -11,6 +11,11 @@ import { createDocumentWatcherRegistry, type WatchHandle } from '../src/core/doc
 
 interface FakeFs {
   mtimes: Map<string, number>
+  /** R175 — called synchronously at the top of every `stat`, so a test can
+   * do something *while a stat is in flight*. The one property that needs
+   * it is the ordering inside `selfWrite`'s release: the mark has to
+   * outlive the re-stat, and nothing else can open that gap. */
+  onStat: ((path: string) => void) | null
   /** Every `WatchHandle` `watch()` handed out, keyed by path, in creation
    * order — a test fires `[path][n].fire()` to simulate the OS noticing
    * something, and reads `.closed` to confirm teardown. */
@@ -24,8 +29,11 @@ function createFakeFs(): FakeFs & { deps: Parameters<typeof createDocumentWatche
     { fire: () => void; fail: (error: Error) => void; closed: boolean }[]
   >()
 
+  const fake = { mtimes, watchersFor, onStat: null as ((path: string) => void) | null }
+
   const deps = {
     stat: async (path: string): Promise<{ mtimeMs: number } | null> => {
+      fake.onStat?.(path)
       const mtimeMs = mtimes.get(path)
       return mtimeMs === undefined ? null : { mtimeMs }
     },
@@ -45,7 +53,7 @@ function createFakeFs(): FakeFs & { deps: Parameters<typeof createDocumentWatche
     }
   }
 
-  return { mtimes, watchersFor, deps }
+  return Object.assign(fake, { deps })
 }
 
 describe('createDocumentWatcherRegistry', () => {
@@ -298,6 +306,193 @@ describe('createDocumentWatcherRegistry', () => {
       await registry.watch('tab-3', '/a.json', () => {})
       expect(fs.watchersFor.get('/a.json')).toHaveLength(2) // joined, not rebuilt
     })
+  })
+})
+
+describe('selfWrite (R175)', () => {
+  it('drops the events our own write produces', async () => {
+    const fs = createFakeFs()
+    fs.mtimes.set('C:/docs/a.json', 100)
+    const registry = createDocumentWatcherRegistry(fs.deps)
+    const onChange = vi.fn()
+    await registry.watch('tab-1', 'C:/docs/a.json', onChange)
+
+    await registry.selfWrite('C:/docs/a.json', async () => {
+      // Exactly what a real save does to the file, and exactly when the
+      // watcher hears about it: `fs.watch` fires *during* the write, before
+      // `writeFile` resolves (§3 measured the first notification 4 ms ahead
+      // of the IPC reply). Two events with different intermediate mtimes,
+      // because one `writeFile` produces two on Windows and the mtime guard
+      // cannot collapse them.
+      fs.mtimes.set('C:/docs/a.json', 200)
+      fs.watchersFor.get('C:/docs/a.json')![0]!.fire()
+      fs.mtimes.set('C:/docs/a.json', 201)
+      fs.watchersFor.get('C:/docs/a.json')![0]!.fire()
+      await drainTaskQueue()
+    })
+    await drainTaskQueue()
+
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('re-baselines, so an event arriving after the write is quiet too', async () => {
+    const fs = createFakeFs()
+    fs.mtimes.set('C:/docs/a.json', 100)
+    const registry = createDocumentWatcherRegistry(fs.deps)
+    const onChange = vi.fn()
+    await registry.watch('tab-1', 'C:/docs/a.json', onChange)
+
+    await registry.selfWrite('C:/docs/a.json', async () => {
+      fs.mtimes.set('C:/docs/a.json', 200)
+    })
+    // §3 saw one land 0.4 ms after the write resolved. Dropping is not what
+    // saves this one — the window is shut. It is quiet because the baseline
+    // now says 200.
+    fs.watchersFor.get('C:/docs/a.json')![0]!.fire()
+    await drainTaskQueue()
+
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('still reports a genuine change after a save', async () => {
+    const fs = createFakeFs()
+    fs.mtimes.set('C:/docs/a.json', 100)
+    const registry = createDocumentWatcherRegistry(fs.deps)
+    const onChange = vi.fn()
+    await registry.watch('tab-1', 'C:/docs/a.json', onChange)
+
+    await registry.selfWrite('C:/docs/a.json', async () => {
+      fs.mtimes.set('C:/docs/a.json', 200)
+    })
+    fs.mtimes.set('C:/docs/a.json', 300)
+    fs.watchersFor.get('C:/docs/a.json')![0]!.fire()
+    await drainTaskQueue()
+
+    expect(onChange).toHaveBeenCalledWith('tab-1')
+  })
+
+  it('leaves another document watched during our save', async () => {
+    const fs = createFakeFs()
+    fs.mtimes.set('C:/docs/a.json', 100)
+    fs.mtimes.set('C:/docs/b.json', 100)
+    const registry = createDocumentWatcherRegistry(fs.deps)
+    const onA = vi.fn()
+    const onB = vi.fn()
+    await registry.watch('tab-1', 'C:/docs/a.json', onA)
+    await registry.watch('tab-2', 'C:/docs/b.json', onB)
+
+    await registry.selfWrite('C:/docs/a.json', async () => {
+      fs.mtimes.set('C:/docs/b.json', 500)
+      fs.watchersFor.get('C:/docs/b.json')![0]!.fire()
+      await drainTaskQueue()
+    })
+    await drainTaskQueue()
+
+    expect(onA).not.toHaveBeenCalled()
+    expect(onB).toHaveBeenCalledWith('tab-2')
+  })
+
+  it('performs the write and returns its result for a path nobody watches', async () => {
+    const fs = createFakeFs()
+    fs.mtimes.set('C:/docs/new.json', 100)
+    const registry = createDocumentWatcherRegistry(fs.deps)
+    const write = vi.fn().mockResolvedValue('written')
+
+    // Save As to a file no session has open.
+    await expect(registry.selfWrite('C:/docs/new.json', write)).resolves.toBe('written')
+    expect(write).toHaveBeenCalledOnce()
+  })
+
+  it('propagates a failed write, and external-change detection survives it', async () => {
+    const fs = createFakeFs()
+    fs.mtimes.set('C:/docs/a.json', 100)
+    const registry = createDocumentWatcherRegistry(fs.deps)
+    const onChange = vi.fn()
+    await registry.watch('tab-1', 'C:/docs/a.json', onChange)
+
+    await expect(
+      registry.selfWrite('C:/docs/a.json', () => Promise.reject(new Error('EACCES')))
+    ).rejects.toThrow('EACCES')
+
+    // The mark has to be released on the failure path too, or one read-only
+    // save would disable external-change detection for the rest of the
+    // session.
+    fs.mtimes.set('C:/docs/a.json', 300)
+    fs.watchersFor.get('C:/docs/a.json')![0]!.fire()
+    await drainTaskQueue()
+
+    expect(onChange).toHaveBeenCalledWith('tab-1')
+  })
+
+  it('nests: an inner release does not re-open the outer window', async () => {
+    const fs = createFakeFs()
+    fs.mtimes.set('C:/docs/a.json', 100)
+    const registry = createDocumentWatcherRegistry(fs.deps)
+    const onChange = vi.fn()
+    await registry.watch('tab-1', 'C:/docs/a.json', onChange)
+
+    await registry.selfWrite('C:/docs/a.json', async () => {
+      await registry.selfWrite('C:/docs/a.json', async () => {
+        fs.mtimes.set('C:/docs/a.json', 200)
+      })
+      // A flag rather than a count would have cleared here, and this event
+      // would be compared against a baseline the outer write has not
+      // finished producing.
+      fs.mtimes.set('C:/docs/a.json', 201)
+      fs.watchersFor.get('C:/docs/a.json')![0]!.fire()
+      await drainTaskQueue()
+    })
+    await drainTaskQueue()
+
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('keeps the window open across the re-stat, not only across the write', async () => {
+    const fs = createFakeFs()
+    fs.mtimes.set('C:/docs/a.json', 100)
+    const registry = createDocumentWatcherRegistry(fs.deps)
+    const onChange = vi.fn()
+    await registry.watch('tab-1', 'C:/docs/a.json', onChange)
+
+    // §3 measured an event landing 0.4 ms *after* `document:write` resolved.
+    // This reproduces that instant: the event fires while the re-stat is
+    // still in flight, and observes an mtime the re-stat has already answered
+    // without. A release that dropped the mark before re-baselining would
+    // compare it against the old baseline and notify — which is the whole
+    // defect, in a window a few hundred microseconds wide.
+    let armed = true
+    fs.onStat = () => {
+      if (!armed) return
+      armed = false
+      queueMicrotask(() => {
+        fs.mtimes.set('C:/docs/a.json', 201)
+        fs.watchersFor.get('C:/docs/a.json')![0]!.fire()
+      })
+    }
+
+    await registry.selfWrite('C:/docs/a.json', async () => {
+      fs.mtimes.set('C:/docs/a.json', 200)
+    })
+    await drainTaskQueue()
+
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('tolerates a re-stat that fails, rather than failing the save', async () => {
+    const fs = createFakeFs()
+    fs.mtimes.set('C:/docs/a.json', 100)
+    const registry = createDocumentWatcherRegistry(fs.deps)
+    await registry.watch('tab-1', 'C:/docs/a.json', vi.fn())
+
+    // The file is gone by the time the window closes. `deps.stat` answers
+    // `null` for that, and a different implementation could reject; neither
+    // may surface as the save's own failure.
+    await expect(
+      registry.selfWrite('C:/docs/a.json', async () => {
+        fs.mtimes.delete('C:/docs/a.json')
+        return 'written'
+      })
+    ).resolves.toBe('written')
   })
 })
 

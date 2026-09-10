@@ -138,7 +138,17 @@ secureHandle('document:stat', async (_event, path: string): Promise<DocumentStat
  * apply on the way out.
  */
 secureHandle('document:write', async (_event, path: string, bytes: ArrayBuffer): Promise<void> => {
-  await writeDocument(path, bytes)
+  // R175 (`docs/plans/R175-self-write-suppression.md`): through the watcher
+  // registry, not straight to `writeDocument`. Every save fired the file
+  // watcher, so the app reacted to its own write as though another program
+  // had edited the file - two banners flashing, and behind them an
+  // auto-reload that discarded the undo stack and re-parsed the whole
+  // document on every save. `selfWrite` holds the watch across the write and
+  // re-establishes its mtime baseline before releasing it.
+  //
+  // `watchers` is declared further down this module; this body only runs when
+  // a renderer invokes the channel, long after evaluation.
+  await watchers.selfWrite(path, () => writeDocument(path, bytes))
 })
 
 secureHandle(
