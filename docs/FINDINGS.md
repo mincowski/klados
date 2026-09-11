@@ -505,12 +505,17 @@ union in `src/preload/api.ts` (R193) keeps the renderer's declared environment h
 - **An unscoped `//name` is not meaningfully faster than a full scan**, and a **predicate step
   collects its full candidate set before filtering** — so `car[1]//type` does not reduce work the
   way it looks like it should. An early-exit positional predicate is the concrete next step.
-- **`npm run test:large` passes as of R187–R189 (2038 tests, 5m50s) but still exits 1** on one
-  unhandled `[vitest-worker]: Timeout calling "onTaskUpdate"` with zero test failures. Ruled out by
-  measurement: the 500 MB fixture alone (the invariants file in isolation produces no RPC error even
-  while timing out for 25 minutes), the browser project (`--project node` still errors), and worker
-  parallelism (`--no-file-parallelism` still errors, and is slower). Vitest does not expose the RPC
-  timeout — it is birpc's default. Full account: `docs/plans/R187-large-suite-honesty.md` §14.
+- **`npm run test:large` works.** R187–R189 fixed ten failures (eight truncation-fuzz timeouts
+  and two real assertions the timeouts were burying); **R193 removed the last symptom**, an
+  unhandled `[vitest-worker]: Timeout calling "onTaskUpdate"` that made the command exit 1 with
+  zero test failures. Under Vitest 5.0.0 it **exits 0**: 2042 passed, 5 skipped, 397 s.
+
+  **Closed on measurement, not on an explanation.** R187 ruled out three causes — the 500 MB
+  fixture alone, the browser project, worker parallelism — and its fourth candidate, worker reuse
+  after the invariants file leaves hundreds of megabytes of garbage, was never tested and still has
+  not been. Three majors of Vitest changed the outcome; which change did it is unknown. Keep that
+  in mind if anything in this family recurs. Full account:
+  `docs/plans/R187-large-suite-honesty.md` §14 and `docs/plans/R193-vitest-5.md` §7.
 
   **The entry this replaces was wrong in two of its three claims**, and the correction is worth more
   than the fact: it said "8 truncation-fuzz tests failing on a worker RPC timeout … **not an
