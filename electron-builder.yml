@@ -58,6 +58,49 @@ files:
   - out/**
   - package.json
   - LICENSE
+# R195: ship one locale, not 55.
+#
+# Electron's `locales/` is 45 MiB of Chromium `.pak` files — its own context
+# menus and error pages in 54 languages this application does not speak, having
+# no translations of its own. Trimming to one takes the directory to 1 MiB and
+# the unpacked application from 356 to 312 MiB. Measured, and the packaged app
+# launches unchanged.
+#
+# **It must be `en-US` and not `en`, and getting that wrong is silent.**
+# electron-builder keeps a locale file when
+#
+#     wanted === file || wanted.startsWith(file + '-') || wanted.startsWith(file + '_')
+#
+# (`app-builder-lib/out/electron/ElectronFramework.js`). Read the direction: it
+# asks whether the *wanted* string starts with the *file's* name, not the
+# reverse. Windows Electron ships `en-GB.pak` and `en-US.pak` and **no
+# `en.pak`** — so `en` matches nothing and deletes all 55, English included.
+#
+# Verified by building it both ways, and nothing tells you: the build succeeds,
+# the "no locales found matching wanted languages" warning fires only when
+# *nothing* was deleted so it stays quiet, and the zero-locale application
+# launches cleanly. The symptom arrives much later as a missing string in a
+# Chromium-drawn menu.
+#
+# `en-US` is also correct on macOS, whose framework ships `en.lproj`:
+# `"en-us".startsWith("en-")` is true, so it survives. The same asymmetry that
+# makes `en` wrong makes `en-US` right on both platforms.
+#
+# **Revisit this the day Klados gains translations.** The guard below checks
+# only that the configured value matches a locale that exists, so it would go
+# on passing for a localized application shipping English-only Chromium
+# strings. Nothing else will raise it.
+#
+# Guarded by `test/electronLanguages.test.ts`, which runs that predicate
+# against the real locale names Electron ships — searched rather than read from
+# a fixed path, because the layout differs by platform (`.pak` under
+# `locales/`, or `.lproj` inside the macOS framework bundle).
+#
+# Measured both ways: **installed 356 -> 312 MiB, installer 88.6 -> 81.3 MB.**
+# The download saves far less than the disk does because `.pak` files are
+# text-heavy and compress well, so most of the 45 MiB was never on the wire.
+electronLanguages:
+  - en-US
 win:
   executableName: Klados
 nsis:

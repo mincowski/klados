@@ -16,6 +16,64 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R195 — the installer carried 54 languages the application does not have · built
+
+**Plan:** `docs/plans/R195-locale-trim.md`
+
+**Found answering a question about install size after R190.** The packaged application is 356 MiB,
+of which **45 MiB is `locales/`** — 55 Chromium `.pak` files localizing Chromium's own context menus
+and error pages into languages Klados never speaks, having no translations.
+
+**R190 had already cut the part that was ours** (1202 MB → 31 MB of asar). What remains is Electron:
+`Klados.exe` alone is 202 MB, so **the application is 8.4% of its own install, which is normal**.
+This is the one line item that is unambiguously unused. `electronLanguages: [en-US]` takes
+`locales/` to **1 MiB** and the unpacked application to **312 MiB**.
+
+**The finding is that the value must be `en-US`, and `en` silently destroys the build.**
+electron-builder keeps a locale when `wanted === file || wanted.startsWith(file + '-')` — it asks
+whether the *wanted* string starts with the *file's* name, not the reverse. Windows Electron ships
+`en-GB.pak` and `en-US.pak` and **no `en.pak`**, so `en` matches nothing and deletes all 55,
+English included.
+
+**Every signal that should catch it is absent, each verified by building it rather than reasoned
+about**: the build succeeds; the "no locales found matching wanted languages" warning fires only
+when *nothing* was deleted, so it stays quiet; and **the zero-locale application launches cleanly**
+with nothing on stderr. The wrong value passes every check this project has and ships. That is the
+argument for `test/electronLanguages.test.ts` over a comment — it reimplements the predicate against
+the **real** filenames in `node_modules/electron/dist/locales/`, and `en` turns two assertions red
+with a message naming the trap.
+
+`en-US` is also right on macOS, whose framework ships `en.lproj`: `"en-us".startsWith("en-")` is
+true. The same asymmetry that makes `en` wrong makes `en-US` right on both.
+
+**The guard was itself the recurring mistake, and CI caught it.** Its first version read
+`dist/locales/*.pak`, the Windows and Linux layout; **macOS keeps locales as `.lproj` directories
+inside the framework bundle**, so all three data-driven assertions failed there. Measured on
+Windows, asserted about every platform — in a file whose subject is electron-builder branching on
+platform, three lines below a citation of the code that does exactly that branch. **The assertion
+that caught it was the one written to refuse to skip on a missing directory**, which is why macOS
+went red in 1m43s rather than reporting a pass on an empty set. Fixed by searching for both layouts
+instead of naming a path that cannot be checked from a Windows machine. Review then found a second
+defect in the fix: the search counted `resources.pak` and the two `chrome_*_percent.pak` files, so
+*"found the locales"* would have passed on a tree where `locales/` had vanished entirely.
+
+**Review found one defect, and only because the exit code was read.** `npm run lint` exited 1 on a
+prettier warning past R54's `--max-warnings 3` ratchet — the exact mistake R194's review had
+recorded one round earlier, caught this time before the commit rather than after.
+
+**Verification is narrower than it looks and the plan says so**: nothing automated launches a
+packaged build on any platform, since `mainElectron.test.ts` runs `out/main/index.js` under the
+development Electron with its own complete `locales/`. Confirmed by hand, on Windows.
+
+**Explicitly not touched, with reasons recorded so nobody revisits them hoping for a win**:
+`dxcompiler.dll`/`dxil.dll` (27 MB, the DirectX 12 shader path), `vk_swiftshader.dll` (6 MB, what
+makes the app work on a machine with broken GPU drivers), `LICENSES.chromium.html` (15 MB, a
+condition of distributing Chromium), and ~10 MB of React development builds inside the asar.
+
+**No version bump.**
+
+---
+
 ## R194 — Save As offered no file type · built ⚠ (one item owed)
 
 **Plan:** `docs/plans/R194-save-as-filters.md`
