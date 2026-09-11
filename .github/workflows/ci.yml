@@ -43,6 +43,31 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
 
+    # R192: without this, a job inherits GitHub's default of 360 minutes. A
+    # Vitest teardown hang on PR #30 burned 6h00m13s on windows-latest *after*
+    # all 166 test files had reported green and with no summary line ever
+    # printed — six hours of a runner slot, six hours before anyone learned
+    # anything was wrong, and a "fail" label on a job that measured nothing.
+    #
+    # 25 is 2.9x the slowest run ever observed here (windows max 8.6 min over
+    # 20 runs; ubuntu 2.9, macOS 3.9) and deliberately generous. The two
+    # errors are not symmetric: a cap set too tight manufactures exactly the
+    # flake class R183-R186 spent a round removing, arriving disguised as the
+    # failure it was meant to catch, while one set too loose merely bounds the
+    # damage less well.
+    #
+    # One value for all three platforms, though Windows is three times slower
+    # than the others — for the reason the `npm run typecheck` step's comment
+    # gives about asymmetric matrices, and because a hang is unbounded on every
+    # platform anyway.
+    # Job-level rather than on the test step: npm ci, the Playwright download
+    # and electron-builder can each stall on a network, and a step-level
+    # timeout guards only the step somebody thought of.
+    #
+    # **This bounds the cost; it does not fix the hang**, whose cause is still
+    # unknown and which R187's Owed entry already describes in another command.
+    timeout-minutes: 25
+
     steps:
       - uses: actions/checkout@v7
 

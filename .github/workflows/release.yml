@@ -58,6 +58,17 @@ jobs:
             args: ''
     runs-on: ${{ matrix.os }}
 
+    # R192, same reasoning as ci.yml, five minutes more because these jobs
+    # package and upload rather than building to a directory and stopping.
+    # 30 is 3.6x the slowest observed release job (windows 8.2 min).
+    #
+    # Guarded here too rather than only where the failure landed: a hung leg of
+    # this matrix holds up `checksums` below, which `needs: release`, so one
+    # stalled platform withholds the assets for all four. That is R182's
+    # finding — a fix covering only the consumer that happened to fail is one
+    # reordering away from the same outage.
+    timeout-minutes: 30
+
     steps:
       - uses: actions/checkout@v7
 
@@ -140,6 +151,9 @@ jobs:
     # `workflow_dispatch` run has no release to read back or upload to.
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
+    # R192. Downloads the release assets, hashes them, uploads one file; ten
+    # minutes is far more than it needs and still bounded.
+    timeout-minutes: 10
     steps:
       - name: Hash every published asset
         env:
