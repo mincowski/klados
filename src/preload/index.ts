@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { DocumentStat, KladosApi, OpenDialogResult, TitleBarTheme } from './api'
+import type { DialogFilter, DocumentStat, KladosApi, OpenDialogResult, TitleBarTheme } from './api'
 
 // Custom APIs for renderer
 const api: KladosApi = {
@@ -11,7 +11,8 @@ const api: KladosApi = {
   },
   // D6 — the document session's IPC seam. Implemented in `src/main/documents.ts`.
   document: {
-    openDialog: (): Promise<OpenDialogResult | null> => ipcRenderer.invoke('document:openDialog'),
+    openDialog: (filters: readonly DialogFilter[]): Promise<OpenDialogResult | null> =>
+      ipcRenderer.invoke('document:openDialog', filters),
     stat: (path: string): Promise<DocumentStat> => ipcRenderer.invoke('document:stat', path),
     mintReadToken: (path: string): Promise<string> =>
       ipcRenderer.invoke('document:mintReadToken', path),

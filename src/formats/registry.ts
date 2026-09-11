@@ -63,3 +63,89 @@ export function getFormatModule(formatId: string): FormatModule | undefined {
 export function supportedExtensionsList(): string {
   return REGISTERED_FORMATS.flatMap((format) => format.capabilities.extensions).join(', ')
 }
+
+/**
+ * A file-type entry for a native file dialog, in Electron's own shape —
+ * `extensions` carry **no leading dot**, which is the one thing about
+ * `FileFilter` that is easy to get wrong and produces a dialog that silently
+ * matches nothing.
+ *
+ * Declared here rather than imported from Electron so this module stays
+ * Electron-free (it is imported by the worker and by tests), and so the value
+ * is plain serializable data that can cross IPC.
+ */
+export interface DialogFilter {
+  readonly name: string
+  readonly extensions: readonly string[]
+}
+
+const ALL_FILES: DialogFilter = { name: 'All files', extensions: ['*'] }
+
+/** `.tsv` → `tsv`. Electron's `FileFilter` wants the extension undotted. */
+function undotted(extension: string): string {
+  return extension.startsWith('.') ? extension.slice(1) : extension
+}
+
+/**
+ * The extension of `fileName`, undotted and lowercased, or `null` when it has
+ * none. Deliberately not `path.extname` — this module is imported by the
+ * renderer and the worker, neither of which has `node:path`.
+ */
+function extensionOf(fileName: string): string | null {
+  const dot = fileName.lastIndexOf('.')
+  // `-1` is no dot at all; `0` is a dotfile (`.gitignore`), whose leading dot
+  // names the file rather than typing it.
+  if (dot <= 0 || dot === fileName.length - 1) return null
+  return fileName.slice(dot + 1).toLowerCase()
+}
+
+/**
+ * R194. Filters for the Open dialog, derived rather than hand-maintained.
+ *
+ * This list used to be a literal in `main/documents.ts` —
+ * `['xml', 'json', 'toml', 'csv', 'tsv', 'tab']` under the name
+ * `'XML/JSON/TOML/CSV documents'` — which was exactly right, and had no way of
+ * staying that way: registering a format does not make anyone revisit the main
+ * process, and the *name* drifts as readily as the extensions. Both halves now
+ * follow `REGISTERED_FORMATS`.
+ */
+export function openDialogFilters(): readonly DialogFilter[] {
+  const names = REGISTERED_FORMATS.map((format) => format.capabilities.displayName)
+  const extensions = REGISTERED_FORMATS.flatMap((format) =>
+    format.capabilities.extensions.map(undotted)
+  )
+  return [{ name: `${names.join('/')} documents`, extensions }, ALL_FILES]
+}
+
+/**
+ * R194. Filters for Save As on an open document.
+ *
+ * **The document's own extension leads**, because Electron appends the *first*
+ * extension of the selected filter when the user types a bare name. Every
+ * format but CSV declares a single extension today, so the rule is currently
+ * invisible — but CSV declares `.csv`, `.tsv` and `.tab`, and saving a `.tsv`
+ * file must not quietly turn it into a `.csv`. `core/types.ts` gives
+ * `[".xml", ".xsd", ".svg"]` as the shape it expects, so this stops being
+ * invisible the moment any format declares its second extension.
+ *
+ * A file with no extension, or one the format does not declare, gets the
+ * format's first — there is no better answer, and it is what the old
+ * behaviour (nothing at all) failed to provide.
+ *
+ * An unknown `formatId` yields All-files alone: the previous behaviour, rather
+ * than a throw, for a case `getFormatCapabilities` documents as impossible for
+ * a document this app actually opened.
+ */
+export function saveAsDialogFilters(formatId: string, fileName: string): readonly DialogFilter[] {
+  const capabilities = getFormatCapabilities(formatId)
+  if (capabilities === undefined) return [ALL_FILES]
+
+  const declared = capabilities.extensions.map(undotted)
+  const current = extensionOf(fileName)
+  const ordered =
+    current !== null && declared.includes(current)
+      ? [current, ...declared.filter((extension) => extension !== current)]
+      : declared
+
+  return [{ name: `${capabilities.displayName} documents`, extensions: ordered }, ALL_FILES]
+}
