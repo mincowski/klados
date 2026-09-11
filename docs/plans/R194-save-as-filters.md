@@ -1,10 +1,13 @@
 # R194 — Save As offers no file type, so it can save a file the app cannot reopen
 
-<!-- status: open -->
+<!-- status: built-caveat -->
 
-**Open.** Found by the project lead during R166's manual Save As check
+**Built, one item owed.** Found by the project lead during R166's manual Save As check
 (`docs/plans/R164-release-security-hardening.md` § 10) — the pass confirmed the dialog opens, and
 the dialog turned out to be wrong.
+
+Both dialogs now take their filters from the format registry, and **no file extension is named
+anywhere in `src/main`**. Owed: one confirmation at the native dialog, which no test can drive.
 
 ## 1. The defect
 
@@ -125,3 +128,59 @@ just performed: Save As on a JSON document, type a bare name, confirm `.json` on
 ## 6. Version
 
 **No bump** — 1.0.0 until first release, and this is a defect fix inside it.
+
+---
+
+## 7. Results
+
+**Landed as planned**, including § 2's second half: the Open dialog's hardcoded list is gone too,
+and **no file extension is named anywhere in `src/main`**.
+
+| | |
+|---|---|
+| `src/formats/registry.ts` | `DialogFilter`, `openDialogFilters()`, `saveAsDialogFilters()` |
+| `src/main/documents.ts` | both handlers take `filters: FileFilter[]`; the literal list removed |
+| `src/preload/api.ts`, `index.ts` | both signatures widened |
+| `src/renderer/session/documentSession.ts` | the two call sites supply them |
+| `test/dialogFilters.test.ts` | new, 13 tests |
+| `test/documentSession.test.ts` | one test that the session actually sends them |
+| `src/core/types.ts` | **unchanged** |
+
+`npm test` 2014 passed / 5 skipped / 167 files. `npm run typecheck` and `npm run lint` clean.
+
+### Acceptance
+
+1–5 are covered by the 13 unit tests, including the two fallbacks (no extension, foreign
+extension), the unknown-`formatId` degrade-to-All-files, a dotfile not being read as an extension,
+a trailing dot, and case-insensitive matching. 6 is a grep. 7 is the suite.
+
+**Acceptance 1's second clause — "typing `foo` writes `foo.json`" — is Electron's behaviour, not
+this code's**, and is the manual half: the filters are asserted, what the OS dialog does with them
+is not. That is the same boundary R166 hit and is stated here rather than implied by a green suite.
+
+### Review
+
+**Two findings, both mine, both in this round's own work.**
+
+**`npm run lint` exited 1 and I read it as passing.** R54 ratchets it at `--max-warnings 3`; three
+hand-written multi-line signatures added prettier warnings, taking it to 6. The check I had been
+running — grepping the output for the `✖` summary line — printed `0 errors, 6 warnings` and looked
+fine, because **I never read the exit code**. This is the shape `FINDINGS.md` records from R191: a
+predicate that cannot fail loudly reports success. Fixed with `eslint --fix`; the lesson is that
+`npm run lint` is checked by its exit status, not by grepping its output.
+
+**A comment asserted something its own text falsified.** The new block in `main/documents.ts`
+claimed *"no extension string appears anywhere in `src/main` now"* while quoting the removed
+literal three lines above — so a grep for the property the comment claims would have hit the
+comment. Rewritten to describe the old list rather than reproduce it. R182 had to fix a stale count
+in a comment in this same file; a claim that is false about the file it sits in is the same defect
+caught earlier.
+
+Nothing else. The IPC widening was checked rather than assumed: `ipcMain.handle` catches a throw
+inside the handler and rejects the caller's `invoke`, so a malformed filters array cannot crash the
+main process — which matters because R171 exists for a main-process crash.
+
+### Owed
+
+**The native dialog itself**, once: Save As on a JSON document, type a bare name, confirm `.json`
+on disk. One gesture, and the same manual boundary R164 § 10 describes.
