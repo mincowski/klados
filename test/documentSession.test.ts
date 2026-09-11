@@ -1814,7 +1814,7 @@ describe('createDocumentSession (D6)', () => {
       expect(outcome).toEqual({ ok: false, message: 'No document is open.' })
     })
 
-    it('saveAs tells the dialog the document type, leading with its own extension (R194)', async () => {
+    it('saveAs tells the dialog the extension the file already has (R194)', async () => {
       // `test/dialogFilters.test.ts` covers what the filters should be; this
       // covers that the session actually sends them. Without it the two halves
       // could each be right while nothing connected them — and the symptom
@@ -1831,7 +1831,7 @@ describe('createDocumentSession (D6)', () => {
       await session.saveAs()
 
       expect(saveAsDialog).toHaveBeenCalledWith('C:/docs/data.json', [
-        { name: 'JSON documents', extensions: ['json'] },
+        { name: 'JSON files', extensions: ['json'] },
         { name: 'All files', extensions: ['*'] }
       ])
     })

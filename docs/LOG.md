@@ -53,6 +53,18 @@ R191 entry in a new place, a predicate that cannot fail loudly reporting success
 **asserted something its own text falsified**, claiming no extension string appears in `src/main`
 while quoting the removed literal three lines above.
 
+**The Save As rule changed after review, and the question that changed it is the finding.** The list
+originally came from `FormatCapabilities.extensions`; the project lead asked whether saving a CSV as
+`.tsv` actually changes the separator. It does not and cannot — invariant 6 writes the byte buffer
+verbatim, and `sniffDialect` takes only bytes and has no filename parameter, so *this* app is
+unharmed by the mislabel and every other tool is not. **The error was conflating two questions**:
+that field answers "which files can this format open", where Save As asks "which extensions may this
+document be written under". The `.abc` case generalises it — a file whose author chose an extension
+this app has never heard of should be offered that extension, not a guess assembled from a format
+the file never claimed. Save As now offers the extension the file already has plus `*.*`, takes no
+`formatId`, and lost the registry lookup, the ordering rule and the foreign-extension branch with
+it.
+
 **Owed:** the native dialog, once. The filters are asserted as data and the session is asserted to
 send them; what no harness can drive is the OS dialog — the same boundary R164 § 10 describes.
 

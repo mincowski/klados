@@ -6,8 +6,10 @@
 (`docs/plans/R164-release-security-hardening.md` § 10) — the pass confirmed the dialog opens, and
 the dialog turned out to be wrong.
 
-Both dialogs now take their filters from the format registry, and **no file extension is named
-anywhere in `src/main`**. Owed: one confirmation at the native dialog, which no test can drive.
+Save As offers **the extension the file already has**, then All files — see § 4a, which records the
+rule this plan originally specified and why the project lead was right to replace it. The Open
+dialog takes its list from the format registry, and **no file extension is named anywhere in
+`src/main`**. Owed: one confirmation at the native dialog, which no test can drive.
 
 ## 1. The defect
 
@@ -71,18 +73,17 @@ export function openDialogFilters(): readonly DialogFilter[]
 export function saveAsDialogFilters(formatId: string, fileName: string): readonly DialogFilter[]
 ```
 
-**`saveAsDialogFilters` leads with the file's own extension.** Today every format but CSV declares
-one extension, so the rule is invisible — but `src/core/types.ts`:139 gives `[".xml", ".xsd",
-".svg"]` as the shape it expects, and CSV already declares three. Saving `data.tsv` must not offer
-`.csv` first. The rule:
+**`saveAsDialogFilters` offers the file's own extension and nothing else.** See § 4a — an earlier
+version of this section specified the format's whole declared list with the file's extension
+leading, and that was wrong.
 
 ```
-extensions = format's declared list, with the current file's extension moved to the front
-             if it is in that list; otherwise the declared list unchanged
+extensions = [the extension the file already has]   — or All files alone, if it has none
 ```
 
-so a `.tsv` file keeps `.tsv`, a file with no extension or a foreign one gets the format's first,
-and an unknown `formatId` falls back to All files alone — today's behaviour, not a crash.
+So `export.csv` is offered `.csv` and never `.tsv`; `payload.abc` is offered `.abc`, an extension
+this application has never heard of; and `data`, with no extension, gets All files alone. **No
+`formatId` is involved at all** — the signature is `saveAsDialogFilters(fileName)`.
 
 **Both dialogs take their filters as an IPC argument.** `openDialog()` becomes
 `openDialog(filters)` and `saveAsDialog(defaultPath)` becomes `saveAsDialog(defaultPath, filters)`;
@@ -94,6 +95,35 @@ main forwards them to Electron and stops knowing any extension. `src/preload/api
 display strings and extension lists handed to a native dialog, which validates them; they grant no
 filesystem access, and the path the dialog returns is what it always was. `secureHandle`'s sender
 guard (R164 § 2e) still gates who may call. This widens the IPC payload, not the IPC authority.
+
+## 4a. The rule this section used to specify, and why it was wrong
+
+**Corrected after review by the project lead, before the round merged.** The original § 3 built the
+Save As list from `FormatCapabilities.extensions` — every extension the document's format declares,
+with the file's own leading. The question that undid it: *does saving a CSV as `.tsv` actually
+change the separator?*
+
+**It does not, and cannot.** Invariant 6 means Save writes the byte buffer verbatim; nothing
+regenerates the document. Measured rather than reasoned: `sniffDialect(source, start)` takes only
+bytes and has no filename parameter, so a comma file called `.tsv` still parses as comma-separated
+— *this* application is unharmed, and every other tool that trusts the extension is not.
+
+**The error was conflating two different questions.** `FormatCapabilities.extensions` answers
+*"which files can this format open?"*. Save As asks *"which extensions may this document be written
+under?"*. They are not the same set, and for CSV the gap is a dialog offering a conversion that
+cannot happen.
+
+**The second half is worse and more general**, and it is the argument that settled the design: an
+`.abc` file that happens to contain XML is opened by content, and whoever named it `.abc` had a
+reason. Offering it `.xml`, `.xsd` and `.svg` — a list from a format the *file* never claimed —
+discards the one piece of information the user actually supplied. **The file already knows its
+extension; the format is guessing.**
+
+The replacement is smaller in every direction: no `formatId`, no registry lookup, no ordering rule,
+no "what if the extension is foreign" branch, because a foreign extension is simply carried
+through. § 4's third rejected option — deriving the filter from the path in main — was rejected on
+the grounds that "it offers exactly one extension", which turns out to be the requirement rather
+than the flaw. It stays rejected only on *where* the logic lives, not on what it computes.
 
 ## 4. Rejected
 
@@ -110,12 +140,12 @@ and no `defaultPath` value changes that.
 
 ## 5. Acceptance
 
-1. Save As on a `.json` document offers `JSON documents (*.json)` selected, plus `All files`;
-   typing `foo` with no extension writes `foo.json`.
-2. Save As on a `.tsv` document offers `.tsv` **first**, not `.csv`.
-3. A document whose file has no extension, or one outside its format's list, gets the format's
-   first declared extension.
-4. An unrecognized `formatId` yields All-files only, and does not throw.
+1. Save As on a `.json` document offers `JSON files (*.json)` selected, plus `All files`; typing
+   `foo` with no extension writes `foo.json`.
+2. Save As on a `.csv` document offers `.csv` and **never** `.tsv` or `.tab`.
+3. An extension the application does not recognize is carried through — `payload.abc` offers
+   `.abc`.
+4. A file with no extension yields All-files only.
 5. `openDialogFilters()` equals the list main hardcodes today, derived — asserted against the
    registry so the label and the extensions both follow a newly registered format.
 6. No extension string appears anywhere in `src/main/`.
@@ -133,8 +163,8 @@ just performed: Save As on a JSON document, type a bare name, confirm `.json` on
 
 ## 7. Results
 
-**Landed as planned**, including § 2's second half: the Open dialog's hardcoded list is gone too,
-and **no file extension is named anywhere in `src/main`**.
+**Landed with one rule replaced** — § 4a — and including § 2's second half: the Open dialog's
+hardcoded list is gone too, and **no file extension is named anywhere in `src/main`**.
 
 | | |
 |---|---|
@@ -143,6 +173,7 @@ and **no file extension is named anywhere in `src/main`**.
 | `src/preload/api.ts`, `index.ts` | both signatures widened |
 | `src/renderer/session/documentSession.ts` | the two call sites supply them |
 | `test/dialogFilters.test.ts` | new, 13 tests |
+| `saveAsDialogFilters` | takes `fileName` only — **no `formatId`**, after § 4a |
 | `test/documentSession.test.ts` | one test that the session actually sends them |
 | `src/core/types.ts` | **unchanged** |
 
@@ -184,3 +215,25 @@ main process — which matters because R171 exists for a main-process crash.
 
 **The native dialog itself**, once: Save As on a JSON document, type a bare name, confirm `.json`
 on disk. One gesture, and the same manual boundary R164 § 10 describes.
+
+### The rule changed after review, and that is § 4a
+
+The Save As list originally came from `FormatCapabilities.extensions`. **The project lead's question
+— does saving a CSV as `.tsv` actually change the separator? — is what undid it**, and the answer is
+the finding: no, because invariant 6 writes the byte buffer verbatim, and `sniffDialect` takes only
+bytes so nothing in this app is even confused by the mislabel. Everything outside it is.
+
+The general form is worth more than the CSV case. **`FormatCapabilities.extensions` answers a
+different question than Save As asks** — "what can this format open" versus "what may this document
+be written as" — and the `.abc` case makes the cost plain: a file whose author chose an extension
+this app has never heard of should be offered that extension, not a guess assembled from a format
+the file never claimed.
+
+**The correction made the code smaller in every direction**: no `formatId` parameter, no registry
+lookup, no ordering rule, no foreign-extension branch. § 4's third rejected option had been
+dismissed because "it offers exactly one extension" — which turned out to be the requirement.
+
+**This is the second round running where a plan of mine was wrong about a rule and the correction
+came from a question rather than a test** (R172's copyright was the first). Both were caught before
+merging, both by someone asking what a value would actually be rather than reading what the plan
+claimed.

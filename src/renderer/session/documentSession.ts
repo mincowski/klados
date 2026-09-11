@@ -2136,7 +2136,7 @@ export function createDocumentSession(deps: DocumentSessionDeps = {}): DocumentS
     // — which format detection then may not recognise on reopen.
     const picked = await api.document.saveAsDialog(
       filePath,
-      saveAsDialogFilters(state.document.formatId, state.document.fileName)
+      saveAsDialogFilters(state.document.fileName)
     )
     if (picked === null) return { ok: true, cancelled: true }
     // Re-checked after the dialog resolves — it waits on the user, so it

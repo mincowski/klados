@@ -118,34 +118,38 @@ export function openDialogFilters(): readonly DialogFilter[] {
 }
 
 /**
- * R194. Filters for Save As on an open document.
+ * R194. Filters for Save As: **the file's own extension, then All files.**
  *
- * **The document's own extension leads**, because Electron appends the *first*
- * extension of the selected filter when the user types a bare name. Every
- * format but CSV declares a single extension today, so the rule is currently
- * invisible — but CSV declares `.csv`, `.tsv` and `.tab`, and saving a `.tsv`
- * file must not quietly turn it into a `.csv`. `core/types.ts` gives
- * `[".xml", ".xsd", ".svg"]` as the shape it expects, so this stops being
- * invisible the moment any format declares its second extension.
+ * Note what it does not take — a `formatId`. Save As needs no format knowledge
+ * at all, and an earlier version of this function that took one was wrong in a
+ * way worth recording, because the mistake is easy to repeat.
  *
- * A file with no extension, or one the format does not declare, gets the
- * format's first — there is no better answer, and it is what the old
- * behaviour (nothing at all) failed to provide.
+ * It offered every extension the document's format declares, leading with the
+ * file's own. That conflates two different questions.
+ * `FormatCapabilities.extensions` answers *"which files can this format
+ * open?"*; Save As asks *"which extensions may this document be written
+ * under?"*. For CSV the first list is `.csv`, `.tsv`, `.tab` — so a
+ * comma-delimited document was offered `.tsv`, **implying a conversion that
+ * cannot happen**: invariant 6 means Save writes the byte buffer verbatim, so
+ * the result is a file full of commas called `.tsv`. Nothing in this app breaks
+ * (`sniffDialect` reads the delimiter from content and never from the name),
+ * but every other tool trusts the extension.
  *
- * An unknown `formatId` yields All-files alone: the previous behaviour, rather
- * than a throw, for a case `getFormatCapabilities` documents as impossible for
- * a document this app actually opened.
+ * The other half of the same conflation: an `.abc` file that happens to contain
+ * XML is opened by content, and its author has a reason for calling it `.abc`.
+ * Offering `.xml`, `.xsd` and `.svg` there — a list the document has nothing to
+ * do with — is a guess where the file already gave the answer.
+ *
+ * So: whatever the file is called now, plus `*.*`. An extension this app has
+ * never heard of is carried through unchanged, which is the point.
+ *
+ * **A file with no extension gets All files alone.** There is no current ending
+ * to offer, and inventing the format's canonical one is the same guess in
+ * smaller clothing — someone who opened a file called `data` did so knowing it
+ * had no extension.
  */
-export function saveAsDialogFilters(formatId: string, fileName: string): readonly DialogFilter[] {
-  const capabilities = getFormatCapabilities(formatId)
-  if (capabilities === undefined) return [ALL_FILES]
-
-  const declared = capabilities.extensions.map(undotted)
+export function saveAsDialogFilters(fileName: string): readonly DialogFilter[] {
   const current = extensionOf(fileName)
-  const ordered =
-    current !== null && declared.includes(current)
-      ? [current, ...declared.filter((extension) => extension !== current)]
-      : declared
-
-  return [{ name: `${capabilities.displayName} documents`, extensions: ordered }, ALL_FILES]
+  if (current === null) return [ALL_FILES]
+  return [{ name: `${current.toUpperCase()} files`, extensions: [current] }, ALL_FILES]
 }
