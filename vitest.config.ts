@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
+import { playwright } from '@vitest/browser-playwright'
 
 // M5e-PLAN.md R10: two projects, not one changed config. The node project
 // is the existing 841-test suite, untouched glob and untouched speed. The
@@ -64,7 +65,13 @@ export default defineConfig({
           ...timeouts,
           browser: {
             enabled: true,
-            provider: 'playwright',
+            // R193: an imported object, not the string `'playwright'` this
+            // was through v3. Vitest 4 split the browser providers into their
+            // own packages, so the name had nowhere to resolve from — and the
+            // failure is worth knowing because it does not mention providers
+            // moving: the config simply reports "Browser Mode was enabled, but
+            // provider was not specified anywhere".
+            provider: playwright(),
             headless: true,
             instances: [{ browser: 'chromium' }]
           }
