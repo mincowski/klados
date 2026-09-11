@@ -1,9 +1,13 @@
 # R195 — the installer carries 54 languages the application does not have
 
-<!-- status: open -->
+<!-- status: built -->
 
-**Open.** Found answering a question about install size after R190: the packaged application is
+**Built.** Found answering a question about install size after R190: the packaged application is
 356 MiB, of which **45 MiB is `locales/` — 55 Chromium `.pak` files, one per language.**
+
+**Result: `locales/` 45 MiB → 1 MiB, the unpacked application 356 → 312 MiB**, the asar untouched,
+and the packaged app launches. § 3 is the finding: the obvious-looking `en` deletes every locale,
+and nothing tells you.
 
 ## 1. What this is and is not
 
@@ -114,3 +118,64 @@ Windows, and the plan says so rather than implying three-platform coverage it do
 ## 6. Version
 
 **No bump.** Packaging configuration; no application code changes.
+
+---
+
+## 7. Results
+
+**Landed as planned**, one configuration key and one guard.
+
+| | before | after |
+|---|---|---|
+| `locales/` | 45 MiB, **55 files** | 1 MiB, **1 file** (`en-US.pak`) |
+| unpacked application | 356 MiB | **312 MiB** |
+| `app.asar` | 31 MB | 31 MB (untouched) |
+
+The packaged application launches — main, renderer, GPU and utility processes, nothing on stderr.
+`npm test` 2030 passed / 5 skipped. `typecheck` and `lint` clean.
+
+### Acceptance
+
+All five. Criterion 4 was verified by mutation rather than by a green suite: changing the value to
+`en` turns two assertions red, with the failure message naming the trap —
+
+```
+electronLanguages ["en"] matches no file in node_modules/electron/dist/locales.
+electron-builder would delete every locale, the build would succeed, and the app
+would launch — see the header of this file.
+```
+
+### The finding, and why it needed a test
+
+**Three separate signals that should have caught `en` are all absent, and each was verified by
+building it rather than assumed:**
+
+| | |
+|---|---|
+| the build | **succeeds** |
+| the "no locales found matching wanted languages" warning | **does not fire** — it is emitted only when *nothing* was deleted, and deleting everything is the silent path |
+| the resulting application | **launches cleanly**, nothing on stderr |
+
+So the wrong value produces a build that passes every check this project has, ships, and starts.
+The failure arrives later as a missing string in a Chromium-drawn menu, with nothing connecting it
+to a line in `electron-builder.yml`. That is the argument for a test over a comment: a comment
+warns whoever reads it, and this fails whoever does not.
+
+### Review
+
+**Found one defect, and only because the exit code was read.** `npm run lint` exited 1 on a
+prettier warning in the new test, taking it past R54's `--max-warnings 3` ratchet. R194's review
+recorded exactly this mistake — grepping lint's output instead of checking its status — so this is
+the immediate re-test of that lesson, and this time it was caught before the commit rather than
+after.
+
+Nothing else. No application code changed; the asar is byte-for-byte the size R190 left it.
+
+### Owed
+
+**Nothing by this round**, but its verification is narrower than it looks and the plan says so:
+**nothing automated launches a packaged build on any platform.** `mainElectron.test.ts` starts
+`out/main/index.js` under the development Electron, which keeps its own complete `locales/` and is
+untouched by this option. `ci.yml` runs `electron-builder --dir` on all three platforms, so an
+invalid option fails there — but "the application still works with one locale" was confirmed by
+hand, on Windows only.

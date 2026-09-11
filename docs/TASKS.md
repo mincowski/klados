@@ -120,7 +120,7 @@ so a reader of an old commit message can still find out what `R41` was.
 | **R192** | built | `docs/plans/R192-ci-job-timeouts.md` |
 | **R193** | built | `docs/plans/R193-vitest-5.md` |
 | **R194** | built ⚠ | `docs/plans/R194-save-as-filters.md` |
-| **R195** | **OPEN** | `docs/plans/R195-locale-trim.md` |
+| **R195** | built | `docs/plans/R195-locale-trim.md` |
 
 ### Pre-`R` milestones
 
