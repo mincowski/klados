@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { DocumentStat, KladosApi, OpenDialogResult, TitleBarTheme } from './api'
+import type { DialogFilter, DocumentStat, KladosApi, OpenDialogResult, TitleBarTheme } from './api'
 
 // Custom APIs for renderer
 const api: KladosApi = {
@@ -11,15 +11,19 @@ const api: KladosApi = {
   },
   // D6 — the document session's IPC seam. Implemented in `src/main/documents.ts`.
   document: {
-    openDialog: (): Promise<OpenDialogResult | null> => ipcRenderer.invoke('document:openDialog'),
+    openDialog: (filters: readonly DialogFilter[]): Promise<OpenDialogResult | null> =>
+      ipcRenderer.invoke('document:openDialog', filters),
     stat: (path: string): Promise<DocumentStat> => ipcRenderer.invoke('document:stat', path),
     mintReadToken: (path: string): Promise<string> =>
       ipcRenderer.invoke('document:mintReadToken', path),
     getPathForFile: (file: File): string => webUtils.getPathForFile(file),
     write: (path: string, bytes: ArrayBuffer): Promise<void> =>
       ipcRenderer.invoke('document:write', path, bytes),
-    saveAsDialog: (defaultPath: string): Promise<OpenDialogResult | null> =>
-      ipcRenderer.invoke('document:saveAsDialog', defaultPath),
+    saveAsDialog: (
+      defaultPath: string,
+      filters: readonly DialogFilter[]
+    ): Promise<OpenDialogResult | null> =>
+      ipcRenderer.invoke('document:saveAsDialog', defaultPath, filters),
     watch: (path: string, key: string): Promise<void> =>
       ipcRenderer.invoke('document:watch', path, key),
     unwatch: (key: string): Promise<void> => ipcRenderer.invoke('document:unwatch', key),

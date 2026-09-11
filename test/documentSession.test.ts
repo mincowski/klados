@@ -1814,6 +1814,28 @@ describe('createDocumentSession (D6)', () => {
       expect(outcome).toEqual({ ok: false, message: 'No document is open.' })
     })
 
+    it('saveAs tells the dialog the extension the file already has (R194)', async () => {
+      // `test/dialogFilters.test.ts` covers what the filters should be; this
+      // covers that the session actually sends them. Without it the two halves
+      // could each be right while nothing connected them — and the symptom
+      // would be the original defect, a dialog showing `*.*`, which no unit
+      // test would have contradicted.
+      const saveAsDialog = vi.fn().mockResolvedValue(null)
+      const session = createDocumentSession({
+        parse: fakeParse,
+        parseFromUrl: fakeParseFromUrl,
+        api: fakeApi({ saveAsDialog })
+      })
+      await session.openPath('C:/docs/data.json')
+
+      await session.saveAs()
+
+      expect(saveAsDialog).toHaveBeenCalledWith('C:/docs/data.json', [
+        { name: 'JSON files', extensions: ['json'] },
+        { name: 'All files', extensions: ['*'] }
+      ])
+    })
+
     it('saveAs writes to the chosen path and updates filePath/fileName', async () => {
       let written: { path: string; bytes: ArrayBuffer } | null = null
       const api = fakeApi({

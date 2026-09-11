@@ -63,3 +63,93 @@ export function getFormatModule(formatId: string): FormatModule | undefined {
 export function supportedExtensionsList(): string {
   return REGISTERED_FORMATS.flatMap((format) => format.capabilities.extensions).join(', ')
 }
+
+/**
+ * A file-type entry for a native file dialog, in Electron's own shape —
+ * `extensions` carry **no leading dot**, which is the one thing about
+ * `FileFilter` that is easy to get wrong and produces a dialog that silently
+ * matches nothing.
+ *
+ * Declared here rather than imported from Electron so this module stays
+ * Electron-free (it is imported by the worker and by tests), and so the value
+ * is plain serializable data that can cross IPC.
+ */
+export interface DialogFilter {
+  readonly name: string
+  readonly extensions: readonly string[]
+}
+
+const ALL_FILES: DialogFilter = { name: 'All files', extensions: ['*'] }
+
+/** `.tsv` → `tsv`. Electron's `FileFilter` wants the extension undotted. */
+function undotted(extension: string): string {
+  return extension.startsWith('.') ? extension.slice(1) : extension
+}
+
+/**
+ * The extension of `fileName`, undotted and lowercased, or `null` when it has
+ * none. Deliberately not `path.extname` — this module is imported by the
+ * renderer and the worker, neither of which has `node:path`.
+ */
+function extensionOf(fileName: string): string | null {
+  const dot = fileName.lastIndexOf('.')
+  // `-1` is no dot at all; `0` is a dotfile (`.gitignore`), whose leading dot
+  // names the file rather than typing it.
+  if (dot <= 0 || dot === fileName.length - 1) return null
+  return fileName.slice(dot + 1).toLowerCase()
+}
+
+/**
+ * R194. Filters for the Open dialog, derived rather than hand-maintained.
+ *
+ * This list used to be a literal in `main/documents.ts` —
+ * `['xml', 'json', 'toml', 'csv', 'tsv', 'tab']` under the name
+ * `'XML/JSON/TOML/CSV documents'` — which was exactly right, and had no way of
+ * staying that way: registering a format does not make anyone revisit the main
+ * process, and the *name* drifts as readily as the extensions. Both halves now
+ * follow `REGISTERED_FORMATS`.
+ */
+export function openDialogFilters(): readonly DialogFilter[] {
+  const names = REGISTERED_FORMATS.map((format) => format.capabilities.displayName)
+  const extensions = REGISTERED_FORMATS.flatMap((format) =>
+    format.capabilities.extensions.map(undotted)
+  )
+  return [{ name: `${names.join('/')} documents`, extensions }, ALL_FILES]
+}
+
+/**
+ * R194. Filters for Save As: **the file's own extension, then All files.**
+ *
+ * Note what it does not take — a `formatId`. Save As needs no format knowledge
+ * at all, and an earlier version of this function that took one was wrong in a
+ * way worth recording, because the mistake is easy to repeat.
+ *
+ * It offered every extension the document's format declares, leading with the
+ * file's own. That conflates two different questions.
+ * `FormatCapabilities.extensions` answers *"which files can this format
+ * open?"*; Save As asks *"which extensions may this document be written
+ * under?"*. For CSV the first list is `.csv`, `.tsv`, `.tab` — so a
+ * comma-delimited document was offered `.tsv`, **implying a conversion that
+ * cannot happen**: invariant 6 means Save writes the byte buffer verbatim, so
+ * the result is a file full of commas called `.tsv`. Nothing in this app breaks
+ * (`sniffDialect` reads the delimiter from content and never from the name),
+ * but every other tool trusts the extension.
+ *
+ * The other half of the same conflation: an `.abc` file that happens to contain
+ * XML is opened by content, and its author has a reason for calling it `.abc`.
+ * Offering `.xml`, `.xsd` and `.svg` there — a list the document has nothing to
+ * do with — is a guess where the file already gave the answer.
+ *
+ * So: whatever the file is called now, plus `*.*`. An extension this app has
+ * never heard of is carried through unchanged, which is the point.
+ *
+ * **A file with no extension gets All files alone.** There is no current ending
+ * to offer, and inventing the format's canonical one is the same guess in
+ * smaller clothing — someone who opened a file called `data` did so knowing it
+ * had no extension.
+ */
+export function saveAsDialogFilters(fileName: string): readonly DialogFilter[] {
+  const current = extensionOf(fileName)
+  if (current === null) return [ALL_FILES]
+  return [{ name: `${current.toUpperCase()} files`, extensions: [current] }, ALL_FILES]
+}

@@ -5,8 +5,9 @@
  * ambient global — can import the same declaration.
  */
 import type { TitleBarTheme } from '../shared/titleBar'
+import type { DialogFilter } from '../formats/registry'
 
-export type { TitleBarTheme }
+export type { TitleBarTheme, DialogFilter }
 
 /**
  * The platform strings this application branches on, spelled out rather than
@@ -50,8 +51,14 @@ export interface KladosApi {
     write(contents: string): Promise<void>
   }
   document: {
-    /** Shows the native Open dialog. Resolves `null` if the user cancels. */
-    openDialog(): Promise<OpenDialogResult | null>
+    /** Shows the native Open dialog. Resolves `null` if the user cancels.
+     *
+     * R194: `filters` is supplied by the caller rather than built here,
+     * because the main process must not know which extensions belong to which
+     * format (invariant 8) — and because importing `formats/registry` there
+     * would pull every parser into the main bundle for a list of strings.
+     * `formats/registry.ts`'s `openDialogFilters()` produces it. */
+    openDialog(filters: readonly DialogFilter[]): Promise<OpenDialogResult | null>
     /** `fs.stat` plus a write-access probe — read before `read()` so D6's
      * size-limit checks (soft cap confirm, hard ceiling refusal) never have
      * to load bytes just to decide whether to. */
@@ -74,8 +81,18 @@ export interface KladosApi {
      * can't write to. */
     write(path: string, bytes: ArrayBuffer): Promise<void>
     /** Shows the native Save As dialog, seeded with `defaultPath`. Resolves
-     * `null` if the user cancels. */
-    saveAsDialog(defaultPath: string): Promise<OpenDialogResult | null>
+     * `null` if the user cancels.
+     *
+     * R194: `filters` matters here in a way it does not for Open. Electron
+     * appends an extension only from the *selected* filter, so a dialog with
+     * none writes a bare typed name with no extension at all — and format
+     * detection leans on the extension, so the file may then not reopen.
+     * `formats/registry.ts`'s `saveAsDialogFilters(formatId, fileName)`
+     * produces it, leading with the document's own extension. */
+    saveAsDialog(
+      defaultPath: string,
+      filters: readonly DialogFilter[]
+    ): Promise<OpenDialogResult | null>
     /** M3-PLAN.md F8 (§11.3), R52 (`R51-main-process.md`). Starts
      * watching `path` for external changes under `key` — the renderer's own
      * tab identity (`session/tabs.ts`'s `TabId`) — replacing whatever `key`

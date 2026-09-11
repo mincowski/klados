@@ -16,6 +16,62 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R194 — Save As offered no file type · built ⚠ (one item owed)
+
+**Plan:** `docs/plans/R194-save-as-filters.md`
+
+**Found by the project lead during R166's manual Save As check** — the pass confirmed the dialog
+opens, and the dialog turned out to be wrong. `showSaveDialog` was called with `{ title,
+defaultPath }` and **no `filters`**, so the type dropdown read `*.*`. **Electron appends an
+extension only from the selected filter**, so a name typed without one was written without one.
+
+**Not a papercut.** `selectFormat` picks a module by `detect(head, filename)`, `core/types.ts`
+states that extension match is a strong signal, and **CSV has no content check at all** (R145 § 5).
+Save As is a data-preservation path and it could degrade the file it had just written.
+
+**The Open dialog was the same defect one step earlier**, and nobody had noticed because it was not
+failing: a hand-maintained `['xml','json','toml','csv','tsv','tab']` in the **main process**,
+duplicating what the registry declares. Checked — exactly right today, so no live bug, but the
+shape R190 had just spent a round removing from `electron-builder.yml`, and nothing would send
+anyone back to the main process when R143's YAML registers. Both dialogs now derive their filters
+from `REGISTERED_FORMATS`, label included. **No file extension is named anywhere in `src/main`.**
+
+**Built in `formats/registry.ts` and passed over IPC rather than imported by main**, for a reason
+beyond invariant 8: importing that module pulls all four format modules — the parsers — into the
+main bundle to obtain a list of strings. **`src/core/types.ts` is unchanged**;
+`FormatCapabilities` already carried `extensions` and `displayName`, which is why a defect at the
+OS boundary needed no contract change.
+
+**Save As leads with the file's own extension.** Invisible today — every format but CSV declares
+one — but CSV declares three, and saving `export.tsv` must not offer `.csv` first, because Electron
+appends the *first* extension of the selected filter.
+
+**Two review findings, both in this round's own work.** `npm run lint` **exited 1 and was read as
+passing**: R54 ratchets it at `--max-warnings 3`, three hand-written signatures took it to 6, and
+the check being run grepped the summary line instead of reading the exit code — `FINDINGS.md`'s
+R191 entry in a new place, a predicate that cannot fail loudly reporting success. And a new comment
+**asserted something its own text falsified**, claiming no extension string appears in `src/main`
+while quoting the removed literal three lines above.
+
+**The Save As rule changed after review, and the question that changed it is the finding.** The list
+originally came from `FormatCapabilities.extensions`; the project lead asked whether saving a CSV as
+`.tsv` actually changes the separator. It does not and cannot — invariant 6 writes the byte buffer
+verbatim, and `sniffDialect` takes only bytes and has no filename parameter, so *this* app is
+unharmed by the mislabel and every other tool is not. **The error was conflating two questions**:
+that field answers "which files can this format open", where Save As asks "which extensions may this
+document be written under". The `.abc` case generalises it — a file whose author chose an extension
+this app has never heard of should be offered that extension, not a guess assembled from a format
+the file never claimed. Save As now offers the extension the file already has plus `*.*`, takes no
+`formatId`, and lost the registry lookup, the ordering rule and the foreign-extension branch with
+it.
+
+**Owed:** the native dialog, once. The filters are asserted as data and the session is asserted to
+send them; what no harness can drive is the OS dialog — the same boundary R164 § 10 describes.
+
+**No version bump.**
+
+---
+
 ## Manual pre-release verification — three owed items closed (2026-09-11)
 
 **Plans:** `docs/plans/R172-published-identity.md` § 12,

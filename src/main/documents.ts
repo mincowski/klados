@@ -33,6 +33,7 @@
  * crashed before fetching) doesn't linger.
  */
 import { dialog, protocol, BrowserWindow, app } from 'electron'
+import type { FileFilter } from 'electron'
 import { basename } from 'path'
 import { randomUUID } from 'crypto'
 import type { DocumentStat, OpenDialogResult } from '../preload/api'
@@ -99,27 +100,38 @@ export function registerReadTokenProtocol(): void {
   protocol.handle(READ_TOKEN_SCHEME, (request) => handleReadTokenRequest(request, readTokens))
 }
 
-secureHandle('document:openDialog', async (event): Promise<OpenDialogResult | null> => {
-  const window = BrowserWindow.fromWebContents(event.sender)
-  const options: Electron.OpenDialogOptions = {
-    title: 'Open Document',
-    properties: ['openFile'],
-    filters: [
-      {
-        name: 'XML/JSON/TOML/CSV documents',
-        extensions: ['xml', 'json', 'toml', 'csv', 'tsv', 'tab']
-      },
-      { name: 'All files', extensions: ['*'] }
-    ]
+secureHandle(
+  'document:openDialog',
+  // R194: the filters arrive from the renderer. They used to be a literal
+  // here — one name string over a hand-written list of every extension the
+  // four formats claim — which was exactly right and had no way of staying so:
+  // registering a format does not bring anyone back to the main process, and
+  // the name drifts as readily as the list.
+  //
+  // Derived in `formats/registry.ts` rather than imported here, for a second
+  // reason beyond invariant 8: importing that module pulls all four format
+  // modules — the parsers — into the main bundle, to obtain a list of strings.
+  //
+  // **No file extension is named anywhere in `src/main` now**, which is the
+  // property worth keeping rather than any particular list. Stated without
+  // restating the old literal, so the claim stays true of a grep over this
+  // directory.
+  async (event, filters: FileFilter[]): Promise<OpenDialogResult | null> => {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    const options: Electron.OpenDialogOptions = {
+      title: 'Open Document',
+      properties: ['openFile'],
+      filters
+    }
+    const result =
+      window === null
+        ? await dialog.showOpenDialog(options)
+        : await dialog.showOpenDialog(window, options)
+    if (result.canceled || result.filePaths.length === 0) return null
+    const path = result.filePaths[0]!
+    return { path, fileName: basename(path) }
   }
-  const result =
-    window === null
-      ? await dialog.showOpenDialog(options)
-      : await dialog.showOpenDialog(window, options)
-  if (result.canceled || result.filePaths.length === 0) return null
-  const path = result.filePaths[0]!
-  return { path, fileName: basename(path) }
-})
+)
 
 secureHandle('document:stat', async (_event, path: string): Promise<DocumentStat> => {
   return statDocument(path)
@@ -153,9 +165,16 @@ secureHandle('document:write', async (_event, path: string, bytes: ArrayBuffer):
 
 secureHandle(
   'document:saveAsDialog',
-  async (event, defaultPath: string): Promise<OpenDialogResult | null> => {
+  // R194: `filters` was absent, so the type dropdown read `*.*` — and
+  // Electron appends an extension only from the *selected* filter, so a name
+  // typed without one was written without one. Format detection treats the
+  // extension as a strong signal (`core/types.ts`) and CSV has no content
+  // check at all, so Save As could produce a file this application would not
+  // reopen. Built by `formats/registry.ts`'s `saveAsDialogFilters`, which
+  // leads with the document's own extension.
+  async (event, defaultPath: string, filters: FileFilter[]): Promise<OpenDialogResult | null> => {
     const window = BrowserWindow.fromWebContents(event.sender)
-    const options: Electron.SaveDialogOptions = { title: 'Save Document As', defaultPath }
+    const options: Electron.SaveDialogOptions = { title: 'Save Document As', defaultPath, filters }
     const result =
       window === null
         ? await dialog.showSaveDialog(options)
