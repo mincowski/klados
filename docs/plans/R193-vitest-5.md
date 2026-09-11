@@ -1,10 +1,14 @@
 # R193 — Vitest 3 to 5
 
-<!-- status: open -->
+<!-- status: built -->
 
-**Open.** Dependabot PR #22 has been open since 2026-09-09, red on all three platforms. It closes
-two medium advisories (CVE-2026-84373, `vitest` and `@vitest/mocker`, both development-scope) and
-is two majors, not a bump: **3.2.7 → 5.0.0**.
+**Built.** Dependabot PR #22 had been open since 2026-09-09, red on all three platforms. It
+closes two medium advisories (CVE-2026-84373, `vitest` and `@vitest/mocker`, both
+development-scope) and is two majors, not a bump: **3.2.7 → 5.0.0**.
+
+**All five acceptance criteria met**, counts identical to Vitest 3 and nothing relaxed to get
+there. **And § 4's hypothesis turned out to be right where it can be measured: `npm run test:large`
+now exits 0.** That closes R187's owed item — see § 7.
 
 ## 1. Why the Dependabot PR is red, measured rather than read
 
@@ -99,3 +103,58 @@ green default suite that the class is fixed.
 **No bump.** Development dependencies; nothing shipped changes. The `Platform` type is a shipped
 source change but a type-level one — `src/preload/index.ts` still assigns `process.platform` and
 the emitted JavaScript is byte-identical.
+
+---
+
+## 7. Results
+
+**Landed as planned.** Four files changed plus the lockfile; no test skipped, no timeout widened,
+no `retry`, no new suppression.
+
+### Acceptance
+
+| | | |
+|---|---|---|
+| 1 | counts match Vitest 3 | **2000 passed, 5 skipped, 166 files** — identical |
+| 2 | typecheck and lint clean | 0 errors; the 3 pre-existing `react-hooks` warnings on `Tree.tsx` unchanged |
+| 3 | packaging still works | `--dir` builds, asar 31 MB and four top-level entries as R190 left it, app launches with nothing on stderr |
+| 4 | nothing relaxed | nothing skipped, no timeout raised, no `retry` |
+| 5 | `test:large` run, exit code reported | **exit 0** |
+
+Suite duration **60.8 s → 48.6 s** for the default run. `test:large` 397 s against R187's 350 s,
+on 2042 tests rather than 2038 — the four extra are R191's.
+
+### The measurement that mattered
+
+**`npm run test:large` exits 0.** Under Vitest 3 it exited 1 on one unhandled
+`[vitest-worker]: Timeout calling "onTaskUpdate"` with every test passing, which is R187's owed
+item and the one reproducible instance of this project's teardown problem. Under 5.0.0 the error is
+gone. The Owed table entry is removed and R187 § 14 records the closure beside the claim it
+corrects.
+
+**What this does not establish.** R187's fourth hypothesis — worker reuse after the invariants file
+leaves hundreds of megabytes of garbage — was never tested, and still has not been. Three majors of
+Vitest changed the outcome; *which* change, and whether the mechanism was the one suspected, is
+unknown. The entry is closed on the measurement, not on an explanation.
+
+**And it does not establish that R192's six-hour hang is fixed.** That one appeared once, on
+`windows-latest`, on a run that passed the same commit at every other opportunity. A single green
+`test:large` on one machine is evidence about a related symptom, not proof about an intermittent
+one. What can be said is that the two known instances of "Vitest goes green and then does not shut
+down cleanly" have the same shape, one of them is now measurably gone, and R192's cap bounds the
+other at 25 minutes if it recurs.
+
+### Review
+
+Found one omission: `vitest.config.ts` gained the provider import with no comment, in a file whose
+every other non-obvious value carries one. The error a future reader will hit —
+*"Browser Mode was enabled, but provider was not specified anywhere"* — does not mention that
+providers moved into their own packages, which is exactly the kind of gap this project's config
+comments exist to close. Added.
+
+Nothing else. The three `userEvent` import changes are mechanical; `paletteHoverGuard.test.tsx`
+also had the old path in its prose header, which was updated with it rather than left to go stale.
+
+### Owed
+
+**Nothing.**

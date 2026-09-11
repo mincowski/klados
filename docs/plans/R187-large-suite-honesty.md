@@ -328,3 +328,13 @@ and is **not exposed by Vitest's config**, so it cannot simply be raised.
 **Left open rather than papered over.** Three wrong hypotheses in one round is the signal to stop
 guessing and hand over what was measured; each further attempt costs a six-minute run. Recorded in
 `docs/TASKS.md`'s Owed table.
+
+### Closed by R193 (Vitest 5)
+
+`npm run test:large` **exits 0** under Vitest 5.0.0, with no RPC error and 2042 passed / 5 skipped
+in 397 s. Removed from the Owed table.
+
+**The fourth hypothesis was never tested here, and still has not been.** Worker reuse after the
+invariants file may or may not have been the mechanism; what is known is that three majors of
+Vitest changed the outcome. The honest statement is that the symptom is gone and the cause was
+never isolated — which is why the entry is closed on the measurement rather than on an explanation.

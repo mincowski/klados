@@ -118,7 +118,7 @@ so a reader of an old commit message can still find out what `R41` was.
 | **R187–R189** | built ⚠ | `docs/plans/R187-large-suite-honesty.md` |
 | **R190–R191** | built | `docs/plans/R190-packaging-allowlist.md` |
 | **R192** | built | `docs/plans/R192-ci-job-timeouts.md` |
-| **R193** | **OPEN** | `docs/plans/R193-vitest-5.md` |
+| **R193** | built | `docs/plans/R193-vitest-5.md` |
 
 ### Pre-`R` milestones
 
@@ -141,7 +141,6 @@ disclosed in its own document too; this is the list that did not exist before.
 
 | Owed | Where | Why it is still open |
 |---|---|---|
-| **`npm run test:large` exits 1 with zero test failures**, on one unhandled `[vitest-worker]: Timeout calling "onTaskUpdate"`. All 2038 tests pass. | `docs/plans/R187-large-suite-honesty.md` §14 | Three causes ruled out by measurement: the 500 MB fixture alone (the invariants file in isolation produces **no** RPC error even while timing out for 25 minutes), the browser project (`--project node` still errors), and worker parallelism (`--no-file-parallelism` still errors, and is slower). It appears only when the heavy file runs alongside the rest of the node suite. Vitest does not expose the RPC timeout — it is birpc's default — so it cannot be raised from config. Worker reuse after hundreds of megabytes of garbage is the untested candidate. |
 | **R187 acceptance 4's mutation was not run**: that removing `findSpliceNode`'s Property escalation turns the *splice* tests red while invariant 4 stays green. | `docs/plans/R187-large-suite-honesty.md` §13 | Named rather than dropped. The invariant is no longer standing in for that guard, but the guard itself has not been re-confirmed in this round. |
 | **R185's ceiling has a blind spot: a 2.7× per-node regression passes silently.** Measured by injecting cost into `intern()` — the 3× ratio only fires at 5.2×. | `docs/plans/R183-ci-flakes.md` §13, `test/namespaceResolution.test.ts` | **Tightening the ratio was tried and failed**: 1.5× shipped and was reverted one CI run later, because `macos-latest`'s paired ratios ranged 0.737–2.078 and the hardware cannot support a tighter wall-clock bound. Closing it needs the *mechanism* asserted — that no per-node namespace work runs on a document with no declarations — rather than its wall-clock shadow. A different piece of work, not a bigger number. |
 | **R183 acceptance 2: twenty consecutive clean `main` runs.** The three tests that were failing are fixed on measurement and mutation, not on observed CI. | `docs/plans/R183-ci-flakes.md` §13 | Only accumulated runs can confirm it, and the round cannot wait for them. Check the next time CI history is being read anyway. |

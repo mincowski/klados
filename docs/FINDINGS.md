@@ -473,6 +473,25 @@ the shell's own `grep`/`sed`. Full account: `docs/plans/R47-repo-hygiene.md`.
 
 ---
 
+**A global type that resolves only because a test dependency dragged it in is a dependency nobody
+declared.** `tsconfig.web.json` sets `"types": ["vite/client"]` — no Node globals, correctly, since
+a renderer under `contextIsolation` has none — and it also compiles `src/preload/*.d.ts` and the
+browser tests. `src/preload/api.ts` used `NodeJS.Platform` and typechecked cleanly, not
+because the web project declared `@types/node` but because the browser tests import `vitest` and
+Vitest 3's type surface pulled it into the program. Vitest 5 stopped doing so, and a routine
+dependency bump produced `TS2503: Cannot find namespace 'NodeJS'` in a file nobody had touched.
+
+**An explicit `types` array does not bound what globals a program has.** It bounds what is loaded
+*from `node_modules/@types`* — anything a compiled file `import`s can still bring its own globals
+along transitively. So the array reads like a guarantee and is not one, and the gap is invisible
+until an unrelated upgrade closes it.
+
+**Fix at the boundary, not by widening `types`.** Adding `"node"` would have made the error go away
+and given the renderer's type program `process`, `Buffer` and the rest — types for an environment
+that does not exist at runtime under `contextIsolation`, which is worse than the error. Naming the
+union in `src/preload/api.ts` (R193) keeps the renderer's declared environment honest.
+
+
 ## Known-wrong, not yet fixed
 
 - **The path query grammar (`core/path/parse.ts`'s `NAME_CHAR`) is ASCII-only** — `/[A-Za-z0-9_.:-]/`
