@@ -16,6 +16,41 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## Manual pre-release verification — three owed items closed (2026-09-11)
+
+**Plans:** `docs/plans/R172-published-identity.md` § 12,
+`docs/plans/R164-release-security-hardening.md` § 10
+
+Not a round: the three checks that needed a person and an installed application, run at last
+against a local `npm run package` build. **No release was needed** — the NSIS installer a tag
+produces is the same artifact, which is largely why these had sat owed longer than they deserved.
+
+**R172 — the published identity, read out of the Windows registry.** ARP `Publisher` and
+`DisplayName` both `Klados`, and the uninstall key is `318f6304-c1a1-5b48-8b0d-d9b77e332a6b`
+**unbraced**, under `HKEY_CURRENT_USER` as D-091's per-user install requires. The unbraced name is
+the property the whole pin exists for. **A cross-check came free**: `EstimatedSize` is 354.9 MiB
+against a locally measured 356 MiB — a pre-R190 build would have carried another 1.16 GB, so the
+registry independently confirms the packaging allowlist reaches a real installer and not only the
+`--dir` output R190 measured. Still owed, and narrower: the `.deb`'s `Maintainer`, readable from the
+release artifact with `dpkg-deb -I` — no Debian machine, no install.
+
+**R164 — dropping a link on the title bar does nothing.** Re-confirmed against the empty-path `stat`
+fix, which is why the entry stayed open after § 8e's pass had already observed the result.
+Permanently manual: a harness can dispatch a `drop` event but not the OS drag that carries a real
+link.
+
+**R166 — the last two parts of the sandboxed lifecycle.** The native Save As dialog opens, and an
+external change renders as a notification rather than merely arriving. **The board had gone stale
+here**, claiming Save, Save As, file watching and an edit cycle were all unexercised when the plan's
+own § 9 recorded three of those as done rounds ago — the four-places problem, this time between a
+plan document and `TASKS.md` rather than inside `CLAUDE.md`.
+
+**And the Save As check found a defect**: `showSaveDialog` is called with no `filters`, so the type
+dropdown reads `*.*` and a name typed without an extension saves without one — which format
+detection then cannot recognise on reopen. Scoped as R194.
+
+---
+
 ## R193 — Vitest 3 to 5 · built
 
 **Plan:** `docs/plans/R193-vitest-5.md`
