@@ -5,7 +5,7 @@
  * `mouseover` on whichever row slides underneath it when the page scrolls
  * — no synthetic `dispatchEvent` reproduces this, since that never moves
  * the OS-level cursor the browser is actually tracking. So this uses
- * `userEvent.hover` (`@vitest/browser/context`), which drives Playwright's
+ * `userEvent.hover` (`vitest/browser`), which drives Playwright's
  * real `locator.hover()` — a genuine pointer move, not a dispatched event —
  * to park the cursor over an early row before scrolling happens.
  *
@@ -14,7 +14,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { SETTLE_MS } from './support/wait'
-import { userEvent } from '@vitest/browser/context'
+import { userEvent } from 'vitest/browser'
 import { createRoot, type Root } from 'react-dom/client'
 import { resetTabsForTests } from '../src/renderer/session/tabs'
 import { Palette } from '../src/renderer/components/Palette/Palette'

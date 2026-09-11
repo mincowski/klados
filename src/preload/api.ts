@@ -8,6 +8,32 @@ import type { TitleBarTheme } from '../shared/titleBar'
 
 export type { TitleBarTheme }
 
+/**
+ * The platform strings this application branches on, spelled out rather than
+ * reached for as `NodeJS.Platform`.
+ *
+ * R193. This file is compiled by the *web* project as well as the node one
+ * (`tsconfig.web.json` includes `src/preload/*.d.ts`), and that project's
+ * `types` array is `["vite/client"]` — it declares no Node globals, correctly,
+ * since a renderer under `contextIsolation` has no Node. `NodeJS.Platform`
+ * nevertheless resolved there, as a **transitive leak**: the web project also
+ * compiles the browser tests, those import `vitest`, and Vitest 3's type
+ * surface pulled `@types/node` into the program. Vitest 5 does not, so the
+ * upgrade turned a latent dependency into a type error rather than creating
+ * one.
+ *
+ * Naming the union here is the fix rather than adding `"node"` to the web
+ * project's `types`: the preload boundary exists to hand the renderer plain
+ * data, and the renderer's type program should not gain `process`, `Buffer`
+ * and the rest so that one string can be spelled.
+ *
+ * The trailing `(string & {})` keeps the union open — `process.platform` has
+ * values beyond these three (`freebsd`, `aix`, …) and preload assigns it
+ * directly — while still offering the three this application tests for as
+ * completions.
+ */
+export type Platform = 'darwin' | 'win32' | 'linux' | (string & {})
+
 export interface OpenDialogResult {
   readonly path: string
   readonly fileName: string
@@ -75,7 +101,7 @@ export interface KladosApi {
     /** Resolved once in preload (`process.platform` is available there) so
      * the renderer never needs its own IPC round trip just to branch on
      * platform for macOS's traffic-light inset or Linux's native frame. */
-    readonly platform: NodeJS.Platform
+    readonly platform: Platform
     /** No-op on macOS/Linux (there is no overlay to recolour there) —
      * still safe to call unconditionally so the renderer doesn't need its
      * own platform branch just to skip it. Persists `theme` to disk too,

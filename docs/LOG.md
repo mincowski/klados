@@ -16,6 +16,50 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R193 — Vitest 3 to 5 · built
+
+**Plan:** `docs/plans/R193-vitest-5.md`
+
+**Dependabot PR #22 had been red on all three platforms since 2026-09-09** — two medium
+development-scope advisories, and two majors rather than a bump: **3.2.7 → 5.0.0**.
+
+**Reproduced in a worktree with the PR's own lockfile rather than read off the CI log**, which
+showed only one of three breakages because `typecheck` gates the test step.
+
+**The first is the interesting one.** `src/preload/api.ts: Cannot find namespace 'NodeJS'` — and it
+is `typecheck:web`, not `typecheck:node`. `tsconfig.web.json` sets `"types": ["vite/client"]` and
+declares **no Node globals**, which is correct: a renderer under `contextIsolation` has no Node.
+`NodeJS.Platform` resolved there anyway, because the web project also compiles the browser tests,
+those import `vitest`, and Vitest 3's type surface pulled `@types/node` into the program. **The
+upgrade did not create the problem; it removed the accident that was hiding it.** Fixed by naming
+the union in `api.ts` rather than adding `"node"` to the renderer's types — the preload boundary
+exists to hand the renderer plain data, and giving it `process` and `Buffer` so one string can be
+spelled is fixing the wrong end.
+
+**The second and third are ordinary migration.** `browser.provider` stopped being a string in v4
+(providers split into their own packages, so `provider: playwright()` from
+`@vitest/browser-playwright` — a new dependency, agreed first, and the same capability repackaged);
+and `@vitest/browser/context` is now a stub whose own source reads
+`// Vitest resolves "vitest/browser" as a virtual module instead` before throwing, so three files'
+`userEvent` imports moved.
+
+**The bar was that the counts match, and they do: 2000 passed, 5 skipped, 166 files**, identical to
+Vitest 3, with nothing skipped, no timeout widened and no `retry`. A major that silently stops
+collecting a file reports green by doing less, which is R187's shape. Suite 60.8 s → 48.6 s.
+`electron-builder --dir` verified too (R157), asar unchanged at 31 MB.
+
+**`npm run test:large` now exits 0**, and that closes R187's owed item — under Vitest 3 it exited 1
+on one unhandled `[vitest-worker]: Timeout calling "onTaskUpdate"` with every test passing. **The
+plan said this was a hypothesis it did not rest on, and the distinction still holds after the
+fact**: three majors changed the outcome, but R187's fourth hypothesis was never tested and the
+mechanism is still unknown. The entry is closed on the measurement, not on an explanation — and
+**it does not establish that R192's six-hour hang is fixed**, that one having appeared once on
+`windows-latest` on a commit that passed everywhere else.
+
+**No version bump**; the `Platform` change is type-level and the emitted JavaScript is unchanged.
+
+---
+
 ## R192 — a hung job ran for six hours · built
 
 **Plan:** `docs/plans/R192-ci-job-timeouts.md`
