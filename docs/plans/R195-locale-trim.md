@@ -179,3 +179,37 @@ Nothing else. No application code changed; the asar is byte-for-byte the size R1
 untouched by this option. `ci.yml` runs `electron-builder --dir` on all three platforms, so an
 invalid option fails there — but "the application still works with one locale" was confirmed by
 hand, on Windows only.
+
+### The guard was itself the recurring mistake, and CI caught it
+
+**The first version of `test/electronLanguages.test.ts` went red on macOS.** It read
+`node_modules/electron/dist/locales/*.pak`, which is the Windows and Linux layout; **macOS Electron
+keeps locales as `.lproj` directories inside the framework bundle**, so the directory does not exist
+and all three data-driven assertions failed.
+
+`docs/FINDINGS.md` names this as the project's most repeated error — *measured in one condition,
+concluded about another* — and this is another instance, made while writing a guard against a
+different silent failure. It was verified on Windows and asserted about every platform, in a file
+whose entire subject is electron-builder branching on platform. **electron-builder's own code, cited
+three lines above the one that was wrong, does exactly that branch**: `.pak` under `locales` for
+Windows and Linux, `.lproj` beside the framework Resources for macOS.
+
+**The assertion that caught it was the one written to refuse to skip.** Its comment said *"a
+silently-skipped test is how this class of check stops meaning anything"* — and because it asserted
+a non-empty set rather than skipping on a missing directory, macOS went red in 1m43s instead of
+reporting a pass on nothing. The design held; the path did not.
+
+**Fixed by searching rather than naming a path.** `findLocaleNames` walks `node_modules/electron/dist`
+collecting `.lproj` directory names and `.pak` files, so both layouts are found without this file
+knowing the macOS bundle path — which cannot be checked from a Windows machine and would be one
+upstream rename away from silently finding nothing again. Measured at **1 ms** for 55 names.
+
+**Review then found a second defect in the fix.** The first search counted every `.pak` under
+`dist/`, which includes `resources.pak`, `chrome_100_percent.pak` and `chrome_200_percent.pak` —
+none of them locales. They never match `en-US`, so no assertion was wrong, but *"found the locales"*
+would have passed on a tree where `locales/` had vanished entirely, standing on three files that are
+not locales. `.pak` collection is now restricted to files whose parent directory is `locales`, which
+is also the only directory electron-builder touches.
+
+Both failure modes are mutation-verified: `en` turns two assertions red, and a missing locale tree
+turns three red.

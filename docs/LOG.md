@@ -46,6 +46,17 @@ with a message naming the trap.
 `en-US` is also right on macOS, whose framework ships `en.lproj`: `"en-us".startsWith("en-")` is
 true. The same asymmetry that makes `en` wrong makes `en-US` right on both.
 
+**The guard was itself the recurring mistake, and CI caught it.** Its first version read
+`dist/locales/*.pak`, the Windows and Linux layout; **macOS keeps locales as `.lproj` directories
+inside the framework bundle**, so all three data-driven assertions failed there. Measured on
+Windows, asserted about every platform — in a file whose subject is electron-builder branching on
+platform, three lines below a citation of the code that does exactly that branch. **The assertion
+that caught it was the one written to refuse to skip on a missing directory**, which is why macOS
+went red in 1m43s rather than reporting a pass on an empty set. Fixed by searching for both layouts
+instead of naming a path that cannot be checked from a Windows machine. Review then found a second
+defect in the fix: the search counted `resources.pak` and the two `chrome_*_percent.pak` files, so
+*"found the locales"* would have passed on a tree where `locales/` had vanished entirely.
+
 **Review found one defect, and only because the exit code was read.** `npm run lint` exited 1 on a
 prettier warning past R54's `--max-warnings 3` ratchet — the exact mistake R194's review had
 recorded one round earlier, caught this time before the commit rather than after.
