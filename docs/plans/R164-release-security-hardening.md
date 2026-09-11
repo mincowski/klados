@@ -480,16 +480,10 @@ had not. Deleted rather than named.
 
 ## 9. Owed
 
-- **R164 — re-confirm the link drop after the empty-path fix.** The first manual pass (§8e) ran
-  it and the window did **not** navigate on any surface tried — the title bar, its icons, or the
-  tab strip — but it also surfaced the empty-path `stat` defect, so the check is worth repeating
-  against the fix rather than treated as passed. Still manual for §2e's original reason: native drag-drop
-  cannot be dispatched from the harness.
-- **R166 — the manual lifecycle under `sandbox: true`, now narrower.** Open, edit, Save and
-  Save As were **run by hand and all worked**; **file watching is now automated** in both shapes
-  (direct write and atomic rename-over), so it is no longer owed at all. What remains manual is
-  only the parts a harness cannot drive: the native file dialogs Save As opens, and confirming the
-  watcher-driven *notification* renders as a notification rather than merely arriving.
+- ~~**R164 — re-confirm the link drop after the empty-path fix.**~~ **Done, 2026-09-11** — see
+  § 10.
+- ~~**R166 — the manual lifecycle under `sandbox: true`, now narrower.**~~ **Done, 2026-09-11** —
+  see § 10.
 - **R167 — its first genuine exercise is the `v1.x` tag.** The dry-run covers the hashing logic;
   `gh release download` against a real draft release cannot be rehearsed without making one.
 **Not owed, resolved:** `@electron-toolkit/preload` was left declared when R166 removed its only
@@ -498,3 +492,42 @@ answered — **removed**, one dependency line and one lockfile entry, no transit
 only edge was a peer dependency on `electron` it shared with the app. `@electron-toolkit/utils` is
 a different package, still imported by `main/index.ts`, and stays. This is R155's point applied
 rather than deferred: a dead dependency is a permanent Dependabot signal, not a cosmetic one.
+
+---
+
+## 10. The two manual checks, run (2026-09-11)
+
+Both against an installed build from `npm run package` — the same NSIS artifact a tag produces,
+which is what made these cheap enough to do at last: no release required.
+
+### R164 — dropping a link on the title bar
+
+**Confirmed: nothing happens.** A hyperlink dragged out of a browser and dropped on the title bar
+did not navigate the window, which is the behaviour § 2e asked for and the first manual pass (§ 8e)
+observed *before* the empty-path `stat` fix. Re-running it against the fix is the whole point of
+the owed entry, since § 8e's pass had surfaced a defect alongside the result.
+
+Still manual, permanently, for § 2c's reason: **a test harness can dispatch a `drop` event but not
+the OS-level drag that carries a real link.** The event-level guard is automated and stays so; only
+the gesture needed a person.
+
+### R166 — the two parts a harness cannot drive
+
+**The native Save As dialog opens**, and **the watcher-driven external change renders as a
+notification** offering reload or keep-changes — not merely arriving in state. Those were the only
+two items § 9 still listed after file watching became automated in both shapes.
+
+**`docs/TASKS.md`'s Owed row for this had gone stale** and claimed considerably more: that "Save,
+Save As, file watching and an edit cycle" were all unexercised, when § 9 above had already recorded
+Save and Save As as run by hand and file watching as automated. The board overstated the debt for
+several rounds. Corrected in the same commit as this section — and it is exactly the four-places
+problem `CLAUDE.md` opens with, appearing between a plan document and the board rather than within
+`CLAUDE.md` itself.
+
+### What the Save As check turned up instead
+
+**`showSaveDialog` is called with no `filters`** (`main/documents.ts:155`), so the file-type
+dropdown reads `*.*` and a name typed without an extension is saved without one. Format detection
+treats the extension as its strong signal, so Save As can produce a file this application will not
+recognise when it is reopened. Reported by the project lead from this pass; scoped as **R194**, not
+fixed here.

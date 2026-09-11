@@ -485,3 +485,52 @@ That is why this round's marker is `built-caveat` and not `built`, and the check
 §7's exclusions all hold: no manifest was written, no code signing, the `v1.0.0` tag was not moved,
 and no other package manager was researched. **No version bump** — `package.json` stays at `1.0.0`
 under the standing decision to hold it until the first release, and nothing here changes behaviour.
+
+---
+
+## 12. Verified on an installed machine (2026-09-11)
+
+§11 landed the values and `test/publishedIdentity.test.ts` holds them at their source. What it could
+not do is confirm that electron-builder's *resolution* — config value to installer to registry —
+produces them. That is now done for Windows.
+
+A local `npm run package` build (no release needed; the NSIS installer is the same artifact a tag
+produces) was installed and the uninstall key read back:
+
+```
+HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\318f6304-c1a1-5b48-8b0d-d9b77e332a6b
+    DisplayName       REG_SZ  Klados
+    Publisher         REG_SZ  Klados
+    DisplayVersion    REG_SZ  1.0.0
+    Comments          REG_SZ  A desktop viewer and source-level editor for hierarchical data files …
+    EstimatedSize     REG_DWORD  0x58b8d
+```
+
+| owed | expected from | observed | |
+|---|---|---|---|
+| ARP `Publisher` | `package.json` `author.name` | `Klados` | ✓ |
+| ARP `DisplayName` | `productName` via `uninstallDisplayName` | `Klados` | ✓ |
+| uninstall key name | `nsis.guid`, **unbraced** | `318f6304-c1a1-5b48-8b0d-d9b77e332a6b` | ✓ |
+| hive | per-user, one-click (D-091) | `HKEY_CURRENT_USER` | ✓ |
+
+**The unbraced key name is the one worth calling out.** §10 records that `nsis.guid` passes through
+as `UNINSTALL_APP_KEY` unchanged (`NsisTarget.js:157–163`), and the observed key has no braces
+around it. That is the property the whole pin exists for: anything keying installed state off this
+name — a package manager, an updater, an upgrade check — finds the same string across versions
+regardless of what `appId` ever becomes.
+
+**An unplanned cross-check came free.** `EstimatedSize` is `0x58b8d` = **354.9 MiB**, against a
+post-R190 `win-unpacked` measured locally at 356 MiB. A build made before R190's packaging
+allowlist would have carried an additional 1.16 GB of `spike/fixtures/`, so the registry value is
+independent evidence that R190 reaches a real installer and not only the `--dir` output the round
+measured.
+
+### Still owed
+
+**The `.deb`'s `Maintainer`.** Narrower than §11 assumed, and it needs neither a Debian machine nor
+an install: `release.yml` builds the package, and `dpkg-deb -I klados_1.0.0_amd64.deb` prints the
+control fields from the artifact. Expect `Maintainer: mincowski <8300485+mincowski@users.noreply.github.com>`
+— deliberately *not* `author.name`, which is the split R172b exists to make.
+
+macOS's `NSHumanReadableCopyright` is readable the same way, from `Info.plist` inside the `.app`,
+and is already covered at its source by `test/publishedIdentity.test.ts`.
