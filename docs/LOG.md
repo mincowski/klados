@@ -16,6 +16,59 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R196–R197 — the README is the landing page · built
+
+**Plan:** `docs/plans/R196-readme-landing-page.md`
+
+**The last pre-release item, and the only requested one that is not a defect.** 236 lines, all
+correct, all written for someone who had already decided to use Klados: four paragraphs before the
+first actionable thing, Download as the *second* section, and every feature — the table view, the
+palette, Raw-mode editing — buried in sentences rather than scannable.
+
+**R196** puts a feature list directly under the tagline, ending with Download; then the screenshot;
+then the existing sections re-pitched for a non-developer. **Development stays technical and the
+plan names it as out of scope**, so a "less technical" pass cannot swallow the one section whose
+readers are developers. No fact changed except one that was already wrong (below).
+
+**R197** replaces the hero image. The old one was light-left/dark-right **butted at a hard vertical
+line through the centre**, slicing the table mid-column and cutting the Tree out of the dark half —
+it read as a rendering fault rather than a comparison. Now a **diagonal split, dark upper-left**.
+
+**The decision was made by looking, and the renders had to be debugged twice.** `PLANNING.md` §1
+asks for visual decisions to be rendered before they are settled; here the first pass used the
+*opposite* diagonal, and the second drew an amber seam **90° out** — CSS gradients stripe
+perpendicular to their angle, so using the split line's own angle drew a line *across* the join.
+The project lead caught the second by looking at the image. A solid-colour geometry test isolated
+it in one run, and should have come first.
+
+**Two reversals, both against sound written arguments**, which is §1's whole table in miniature.
+Dark-lower-right won the argument and lost to four real composites side by side, because
+upper-left's diagonal crosses the empty region right of the Tree instead of the Raw pane's code.
+And the seam — built on the reasonable theory that a drawn boundary reads as intent where a butt
+join reads as a glitch — was rejected on sight: *"it could be cool if it would have some effect,
+but like that it doesn't help."* Recorded beside the clip it would have decorated rather than
+dropped.
+
+**The capture is now `scripts/screenshot-panes.mjs`, because the image it replaces could not be
+regenerated.** The old composite was hand-made, so a UI change silently dated it and nobody could
+refresh it without redoing unknown steps — R190's argument about the packaging blocklist and R155's
+about spikes, in a third place. It seeds the document through **`klados.sessionRestore`** (no
+harness can drive the native Open dialog — R164 §10), opens the Raw pane **through the command
+palette** (invariant 10 makes it the one surface reaching every command), and **waits for
+`31.655 children`** rather than for a duration (R159). Compositing is `clip-path` in Playwright's
+Chromium — no new dependency. It reproduces the picture, not the bytes: consecutive runs differ by
+a caret blink and sub-pixel antialiasing, which the results section states rather than leaving to
+be found as a suspected bug.
+
+**One stale fact corrected:** the README still said `npm run test:large` *"currently fails with a
+worker timeout"* and took *"around twenty minutes"*. R187–R189 fixed the failures and R193 made it
+exit 0 in six minutes; the Owed table and `FINDINGS.md` were updated in those rounds and the README
+was missed.
+
+**No version bump.**
+
+---
+
 ## R195 — the installer carried 54 languages the application does not have · built
 
 **Plan:** `docs/plans/R195-locale-trim.md`
