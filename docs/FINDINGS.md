@@ -340,6 +340,26 @@ focus ring — so it gets reported as a rendering artefact, not as a missing sty
 scrollers focusable (`docs/plans/R91-focus-into-content.md`); `.detail` was the one with no rule,
 found by R106 (`docs/plans/R106-detail-focus-ring.md`).
 
+**A test helper that returns `false` for input it does not recognize reports a pass it has not
+earned.** R191's guard resolves `electron-builder.yml`'s `files:` patterns against the repository
+and asserts what would be packaged. Its matcher understood two forms — a literal name and
+`dir/**` — and returned `false` for anything else. Mutating the config to the broad `**/*` (the
+exact defect the round removed) therefore left the assertion *"ships nothing else the repository
+contains"* **green**: the matcher did not recognize the pattern, so it found nothing selected, so
+nothing was wrong. The most important assertion in the file was passing on a configuration it had
+not parsed.
+
+**The shape is general**: any predicate over a syntax — a glob, a selector, a version range, a
+pattern in a config file — that answers "no match" for input outside the subset it implements will
+answer "nothing is wrong" for exactly the inputs nobody anticipated. Throw instead, and name the
+input. A narrow matcher is fine; a *silent* one is not.
+
+**It was only visible because the mutation run's per-assertion results were read** rather than the
+suite's red/green. Two of the four assertions did fail, so the suite was correctly red and the
+round would have shipped the hole with a passing acceptance criterion. That is the argument for
+what R183 asks for — verify by mutation — being an instruction to read *which* assertions moved.
+
+
 ---
 
 ## Fonts

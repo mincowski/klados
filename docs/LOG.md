@@ -16,6 +16,96 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R192 — a hung job ran for six hours · built
+
+**Plan:** `docs/plans/R192-ci-job-timeouts.md`
+
+**Found by a red check on R190's own pull request.** `gh pr checks` reported `fail` on
+`windows-latest` after **6h00m13s** — which is GitHub's default 360-minute job ceiling, not a test
+result. Neither workflow set `timeout-minutes`, so every job had inherited it.
+
+**It was not a failure.** All 166 test files reported ✓ with zero failures, and then Vitest never
+printed its summary line and never exited: five hours fifty-two minutes of silence between
+`✓ node test/wheelDelta.test.ts` and the cancellation. The same commit passed ubuntu and macOS in
+under three minutes each, and passed Windows in **6m48s** on an unchanged re-run.
+
+**R187 already owes a line about this shape** — `test:large` "exits 1 on one unhandled Vitest RPC
+error with all 2038 tests passing". Different command, same failure to shut down cleanly after a
+green run; three hypotheses about that one were disproved by measurement and it was left in the
+Owed table rather than guessed at a fourth time.
+
+**This round bounds the cost and does not fix the hang**, which the plan says in its own § 2 rather
+than letting the round look like it closed that item. What it removes is six hours of a runner
+slot, six hours before anyone learns something is wrong, and a `fail` label on a job that measured
+nothing — R182's argument verbatim, a red run that is an absence of evidence rather than evidence
+of a defect.
+
+**Sized against measurement**, 20 runs per workflow, successful jobs only: `ci.yml` Windows median
+7.0 and max 8.6 minutes, ubuntu 2.9, macOS 3.9; `release.yml` Windows 8.2 and everything else under
+4.2. **25 minutes for `ci.yml`, 30 for `release.yml`'s matrix, 10 for `checksums`** — 2.9× the
+slowest job ever observed, 12–14× below the 360 it replaces. **Deliberately generous, because the
+two errors are not symmetric**: a tight cap manufactures exactly the flake class R183–R186 spent a
+round removing, arriving disguised as the failure it was meant to catch.
+
+**One value per workflow rather than per platform**, though Windows is three times slower — the
+same argument `ci.yml` already makes about asymmetric matrices, and a hang is unbounded everywhere.
+**Job-level rather than step-level**, since `npm ci`, a Playwright download and `electron-builder`
+can each stall and a step timeout guards only the step someone thought of. **Both workflows**,
+because `checksums` `needs: release` and one stalled leg withholds the assets for all four.
+
+**No version bump.**
+
+---
+
+## R190–R191 — the installer shipped the repository · built
+
+**Plan:** `docs/plans/R190-packaging-allowlist.md`
+
+**Found by accident, checking something else.** Dependabot's one unpatched high alert
+(`extract-zip`) is scoped `runtime`, so the question was whether it reaches the shipped
+application. It does not — the asar's `node_modules` holds thirteen packages and `electron` is not
+among them, the npm `electron` package being a build-time downloader. But answering it meant
+opening `app.asar`, and the archive was **1202 MB**.
+
+**`electron-builder.yml`'s `files:` held only negative patterns.** electron-builder's default is
+`**/*`, and exclusions *narrow* that default rather than replacing it, so the rule in force was
+*ship the entire working tree except these six patterns*. The application — `out/` — is **eight
+files and 2.0 MB**, 0.17% of what was being packaged.
+
+**The two consequences are not the same size, and conflating them would have produced the wrong
+fix.** `spike/fixtures/` accounted for 1166 MB, but it is gitignored and neither workflow runs
+`fixtures:generate`, so **a tagged release never carried it**; that 1.16 GB only ever hit someone
+who had generated fixtures locally. What *did* ship from a CI runner is tracked: `docs/` (105
+files, every plan document), `test/` (171), `assets/`, `scripts/`, `.vscode/`, `tools/`,
+`.claude/`, `CLAUDE.md` and ten more root files.
+
+**The argument for an allowlist was written in the file.** The exclusion list named three
+tsconfigs; the repository has five, because two were added later and nothing prompts anyone back to
+a packaging config. It excluded `README.md` and not `CLAUDE.md`, which did not exist when the line
+was written. The 1.2 GB is a symptom big enough to notice; the two tsconfigs are the same defect at
+a size nobody would ever notice, and they had shipped for months. **R190** replaced the list with
+`out/**`, `package.json`, `LICENSE` (D-094).
+
+**`node_modules` is absent from that list and still packs**, which had to be verified rather than
+assumed — electron-builder collects production dependencies outside the `files` matcher. Built with
+exactly those three patterns: four top-level asar entries, `node_modules` present at 22.7 MB.
+**1202 MB → 31 MB**, and the packaged app launches clean.
+
+**R191 guards it, and the mutation run found a hole in the guard itself.** `selects()` returned
+`false` for any pattern outside its two-form vocabulary, so mutating the config to a broad `**/*`
+left *"ships nothing else the repository contains"* **green** — the most important assertion in the
+file passing on a configuration it had not parsed. It throws now. `FINDINGS.md` gains the general
+shape, because a silent predicate over any syntax fails the same way, and because it was only
+visible by reading *which* assertions moved rather than that the suite went red.
+
+**Not done, deliberately:** the 22.7 MB of `node_modules` is roughly half React development and
+server builds an Electron renderer never loads. Different question, different risk; recorded in the
+plan's § 9 rather than started.
+
+**No version bump.**
+
+---
+
 ## R187–R189 — `npm run test:large` failed, and what it was hiding · built ⚠ (one item owed)
 
 **Plan:** `docs/plans/R187-large-suite-honesty.md`
