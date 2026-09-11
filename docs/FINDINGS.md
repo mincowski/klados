@@ -360,6 +360,22 @@ round would have shipped the hole with a passing acceptance criterion. That is t
 what R183 asks for — verify by mutation — being an instruction to read *which* assertions moved.
 
 
+**A preload method that drops an argument is type-correct, and both sides of it can be green.**
+`api.ts` declared `saveAsDialog(defaultPath, filters)`; `preload/index.ts` implemented
+`(defaultPath) => invoke(channel, defaultPath)`. TypeScript accepts this and always will — a
+function of fewer parameters is assignable where more are expected, which is ordinary sound
+function subtyping, not a gap in the config. The renderer-side test mocked the bridge away, and
+R51's exposed-surface test asserts shape rather than arity, so a one-argument implementation
+satisfied it.
+
+**The contextBridge is therefore a seam where types and unit tests on both sides can all pass while
+the argument never arrives.** `test/preloadForwarding.test.ts` (R194) is the guard: it mocks
+`electron`, imports the real preload, and asserts every forwarder passes all of its arguments to
+`ipcRenderer.invoke` with a matching declared arity. **Add a method to its table when you add one
+to the bridge** — the table is a literal on purpose, because a walk of the object would have to
+guess each method's argument count.
+
+
 ---
 
 ## Fonts

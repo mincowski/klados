@@ -237,3 +237,47 @@ dismissed because "it offers exactly one extension" — which turned out to be t
 came from a question rather than a test** (R172's copyright was the first). Both were caught before
 merging, both by someone asking what a value would actually be rather than reading what the plan
 claimed.
+
+### The fix did not reach the dialog, and the seam that swallowed it
+
+**Reported from `npm run dev`: Save As still showed `*.*` only.** The filters were built correctly,
+passed correctly by the session, and **dropped at the contextBridge**. `api.ts` declared
+`saveAsDialog(defaultPath, filters)`; `preload/index.ts` implemented
+`(defaultPath) => invoke('document:saveAsDialog', defaultPath)`. Main received `undefined` and
+Electron rendered the dialog with no filters — the exact defect the round set out to remove,
+surviving inside its own fix.
+
+It was a partially-applied edit: `openDialog` was updated by hand after a scripted edit failed
+halfway, `saveAsDialog` was not, and nothing said so.
+
+**Three checks looked straight at it and none could see it:**
+
+- **TypeScript cannot express this.** A function of fewer parameters is assignable where more are
+  expected — ordinary, sound function subtyping. `(a: string) => P` **is** a valid
+  `(a: string, b: F[]) => P`. The interface in `api.ts` was correct, the implementation satisfied
+  it, and the argument vanished.
+- **`documentSession.test.ts` mocks this layer away.** The wiring test added earlier in this round
+  asserts `saveAsDialog` was called with the filters — but that `saveAsDialog` is a `vi.fn()`
+  standing in for the bridge. It proves renderer → API. The defect was API → IPC. **A test written
+  specifically to prove the two halves were connected did not reach the join.**
+- **R51's exposed-surface test checks shape, not arity.** It asserts each key exists and is a
+  function, which a one-argument implementation satisfies exactly.
+
+So the bridge had a type system structurally unable to see it and tests on both sides of it.
+
+**`test/preloadForwarding.test.ts`** closes it for every method rather than for the one that broke:
+it mocks `electron`, imports the real preload, calls each forwarder with sentinel arguments, and
+asserts `ipcRenderer.invoke` received all of them — plus that the declared arity matches. Verified
+by reverting to the shipped defect, where **both assertions fail** (`expected 1 to be 2`). The
+table is deliberately a literal rather than a walk of the object: a walk would have to guess each
+method's argument count, and an argument count is precisely what was wrong.
+
+Also verified on the built artifact, not only the source — `out/preload/index.js` now contains
+`document:saveAsDialog", defaultPath, filters)`.
+
+**This is the third defect in this round found by someone running the application.** The first was
+the missing filters, the second was the rule being wrong (§ 4a), and this is the fix not reaching
+the screen. `docs/FINDINGS.md` already opens its recurring-mistakes section with *"the suite tests
+mechanisms; nobody was testing the application"* — that entry now has a fourth instance, and this
+one is sharper than the others because the round had a passing test whose stated purpose was to
+prove exactly the thing that was broken.

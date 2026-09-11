@@ -19,8 +19,11 @@ const api: KladosApi = {
     getPathForFile: (file: File): string => webUtils.getPathForFile(file),
     write: (path: string, bytes: ArrayBuffer): Promise<void> =>
       ipcRenderer.invoke('document:write', path, bytes),
-    saveAsDialog: (defaultPath: string): Promise<OpenDialogResult | null> =>
-      ipcRenderer.invoke('document:saveAsDialog', defaultPath),
+    saveAsDialog: (
+      defaultPath: string,
+      filters: readonly DialogFilter[]
+    ): Promise<OpenDialogResult | null> =>
+      ipcRenderer.invoke('document:saveAsDialog', defaultPath, filters),
     watch: (path: string, key: string): Promise<void> =>
       ipcRenderer.invoke('document:watch', path, key),
     unwatch: (key: string): Promise<void> => ipcRenderer.invoke('document:unwatch', key),
