@@ -86,9 +86,19 @@ files:
 # `"en-us".startsWith("en-")` is true, so it survives. The same asymmetry that
 # makes `en` wrong makes `en-US` right on both platforms.
 #
-# Guarded by `test/electronLanguages.test.ts`, which runs that predicate against
-# the real filenames in `node_modules/electron/dist/locales/`. **Adding a
-# language here needs nothing else; changing this one does.**
+# **Revisit this the day Klados gains translations.** The guard below checks
+# only that the configured value matches a locale that exists, so it would go
+# on passing for a localized application shipping English-only Chromium
+# strings. Nothing else will raise it.
+#
+# Guarded by `test/electronLanguages.test.ts`, which runs that predicate
+# against the real locale names Electron ships — searched rather than read from
+# a fixed path, because the layout differs by platform (`.pak` under
+# `locales/`, or `.lproj` inside the macOS framework bundle).
+#
+# Measured both ways: **installed 356 -> 312 MiB, installer 88.6 -> 81.3 MB.**
+# The download saves far less than the disk does because `.pak` files are
+# text-heavy and compress well, so most of the 45 MiB was never on the wire.
 electronLanguages:
   - en-US
 win:

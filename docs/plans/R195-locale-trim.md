@@ -129,6 +129,7 @@ Windows, and the plan says so rather than implying three-platform coverage it do
 |---|---|---|
 | `locales/` | 45 MiB, **55 files** | 1 MiB, **1 file** (`en-US.pak`) |
 | unpacked application | 356 MiB | **312 MiB** |
+| installer (`setup.exe`) | 88.6 MB | **81.3 MB** |
 | `app.asar` | 31 MB | 31 MB (untouched) |
 
 The packaged application launches — main, renderer, GPU and utility processes, nothing on stderr.
@@ -213,3 +214,46 @@ is also the only directory electron-builder touches.
 
 Both failure modes are mutation-verified: `en` turns two assertions red, and a missing locale tree
 turns three red.
+
+### Is this what other applications do? Surveyed rather than assumed
+
+Asked by the project lead, and answered from the Electron and CEF applications installed on the
+development machine rather than from recollection:
+
+| application | locale files |
+|---|---|
+| **Docker Desktop** | **1** — and it is exactly `en-US.pak` |
+| VS Code | 55 |
+| Obsidian | 55 |
+| Logi Options+ | 55 |
+| Steam (CEF) | 55 |
+
+**Most applications do not trim, and one serious one does — landing independently on the same value
+this round chose.** So the practice is neither universal nor fringe, and `electronLanguages` is a
+first-class electron-builder option rather than a workaround.
+
+The two that keep all 55 and are worth naming are **VS Code and Obsidian, both of which are
+localized applications**. For them those files are arguably wanted. That is the distinction that
+makes this round reasonable here and would make it wrong there: **Klados has no translations at
+all.**
+
+**And almost nothing in this application can display a Chromium-localized string.** There is no
+`Menu` import anywhere in `src/main/` — no application menu, and no context menu, which Electron
+does not draw unless the application builds one. The native Open and Save As dialogs are drawn and
+localized by the operating system, not from these files, so R194's work is unaffected either way.
+What remains is DevTools, error pages for a loader that only reads local files, and print preview.
+
+**The saving is not symmetric, and the download gains least:**
+
+| | before | after | |
+|---|---|---|---|
+| installed | 356 MiB | 312 MiB | **−44 MiB, 12%** |
+| installer | 88.6 MB | 81.3 MB | **−7.3 MB, 8%** |
+
+`.pak` files are text-heavy and compress well under LZMA, so most of the 45 MiB was never on the
+wire. Anyone quoting this round as a bandwidth saving should quote 7.3 MB, not 44.
+
+**The standing risk, recorded because nothing else will raise it**: the guard checks only that the
+configured value matches a locale that exists. It would keep passing for a localized Klados shipping
+English-only Chromium strings. `electron-builder.yml`'s comment says so at the line someone adding
+i18n would have to touch.
