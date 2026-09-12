@@ -98,19 +98,55 @@ commands exist to serve.
 a scan of however many million matches"*. The mechanism, the file and the rendering path are already
 there. `diagnosticMarkers` never got it, because § 2's assumption said it never needed it.
 
-## 5. R200
+## 5. R200 — cap the records, keep every position
 
-**(a) Cap what is stored.** Keep the first N per diagnostic code, then one summary entry naming the
-total. The compiler convention, and § 3's reason for preferring it to a single collapsed diagnostic.
+**The naive cap loses the scrubber, and loses it in the worst way.** Parsers walk forward, so the
+first N diagnostics are (very nearly) the first N *by offset*. Capping the list at 100 and drawing
+the strip from it would put every mark in the top slice and leave the rest of the document looking
+clean — **a strip that actively misreports where the problems are**, which is worse than today's
+unreadable solid block. This section exists because that was this plan's first design.
 
-**(b) Bucket the scrubber's diagnostic markers** through the same path `matchMarkers` uses.
+The fix is to notice that **the scrubber never needed the diagnostics**. `matchMarkers` takes
+`(rowIndex, starts: Int32Array, bucketCount)` — an array of *offsets* — and answers each bucket with
+`countMatchesInRange`, a binary search, rather than a scan. The strip wants a **distribution**, not
+records. So the two consumers split:
+
+| | Kept | Cost per diagnostic |
+|---|---|---|
+| **(a) The navigable list** — `diagnostics`, read by the panel, the counters and next/prev | **capped**: first N per code, plus one summary entry | ~150 B (object + message string) |
+| **(b) The position index** — a parallel `Int32Array` of offsets and `Uint8Array` of severities | **uncapped**: every diagnostic, always | **5 B**, no allocation per item |
+
+**(c) The scrubber buckets (b)** through the path `matchMarkers` already uses.
+
+**Nothing is lost from the strip.** 2 M diagnostics cost 10 MB as parallel typed arrays against
+~300 MB as objects — a 30× reduction that still records *every* site — and `UI-FEEDBACK.md`:902 made
+exactly this argument for search four milestones ago:
+
+> **Do not emit one marker per match** — 1.2 M matches on a 200 MB document is 1.2 M DOM nodes, and
+> the strip can only resolve a few hundred positions anyway.
+
+A strip a few hundred pixels tall cannot render 2 M distinct positions under any design. Bucketing
+discards nothing the display could have shown; the per-diagnostic DOM node was always spending
+2 M allocations to draw a few hundred distinguishable heights.
+
+The cap then applies only where a bound is genuinely needed: **a human cannot step through two
+million entries**, and the message strings are what actually exhaust memory.
+
+**This is also the shape invariant 2 asks for** — parallel typed arrays rather than an object per
+item — which is why (b) is affordable enough to leave uncapped at all.
 
 ## 6. Non-functional expectations (`PLANNING.md` § 3)
 
-These are part of the specification, because the natural implementation of (a) gets them wrong:
+These are part of the specification, because the natural implementation gets them wrong:
 
 - **The cap applies at emit, not at render.** A cap enforced by a consumer leaves the multi-million
   object array already allocated, which is the cost this round exists to remove.
+- **The position index is not sorted by construction.** `countMatchesInRange`'s binary search needs
+  ascending offsets, and emission order is *nearly* but not strictly ascending: XML's unwind loop
+  emits `xml.unclosed-element` at each open frame's `nameStart` after reaching EOF, which runs
+  backwards. `diagnosticNav.ts:16` already sorts defensively for this reason and its comment says
+  so. **Sort the index once, when the parse ends — not per render**, which is the trap
+  `diagnosticNav` currently falls into with a full copy-and-sort per keypress.
 - **It belongs in one shared place, not four.** Each format has its own `ParserState.emit`
   (`xml:142`, `json:114`, `toml:136`, `csv:92`), all four identical but for the `fatal` flag. Four
   copies of a budget check is how three of them later drift; the budget is one small shared module
@@ -126,8 +162,9 @@ These are part of the specification, because the natural implementation of (a) g
   exactly that.
 - **The displayed counts must stay truthful.** `StatusBar` and `StatisticsPanel` derive their error
   and warning counts by filtering the list. Once the list is capped, filtering it **understates the
-  real total** — the counters need a separate running count the cap does not touch. A status bar
-  reading "100 warnings" for a file with two million is a worse defect than the one being fixed.
+  real total** — and the position index's `Uint8Array` of severities already holds the answer, so
+  the counters read their totals from there rather than from a separate tally. A status bar reading
+  "100 warnings" for a file with two million is a worse defect than the one being fixed.
 
 ## 7. The visual decision is not settled here (`PLANNING.md` § 1)
 
@@ -142,6 +179,10 @@ lead before adopting either.** No preference is recorded here on purpose.
 
 ## 8. Rejected
 
+**Drawing the strip from the capped list.** § 5 — the first N diagnostics are the first N by offset,
+so the strip would show a clean document below the cap. A scrubber that misreports where the
+problems are is worse than one that is merely unreadable.
+
 **Collapsing to one diagnostic per fault.** § 3 — it answers *what* and discards *where*, which is
 the half the scrubber and the diagnostic-navigation commands exist to serve.
 
@@ -149,13 +190,17 @@ the half the scrubber and the diagnostic-navigation commands exist to serve.
 
 **Deduplicating diagnostics by offset.** Different from bucketing, and the existing comment argues
 against it correctly: diagnostics clustered at one offset are meaningful. Bucketing changes how many
-*markers* are drawn, not which diagnostics exist.
+*markers* are drawn, not which positions are recorded.
 
 **Virtualizing the scrubber strip.** More machinery than bucketing, for a strip whose whole height
 is a few hundred pixels — and bucketing is already built and already proven on the sibling source.
 
 **Raising the cap high enough that nobody hits it.** The failure is unbounded input, not a
 badly-chosen bound; a 10 M-row file exists.
+
+**Capping the position index too, "for symmetry".** It is 5 bytes per entry in typed arrays, it is
+what makes § 5's guarantee true, and a bound on it would reintroduce exactly the defect this
+section's first entry rejects.
 
 **Making a Fatal halt the parse, so § 11.1's model becomes true.** Out of scope, and a bigger change
 than it looks: invariant 5 wants a partial tree, and `state.fatal` is load-bearing elsewhere — the
@@ -167,21 +212,28 @@ implements — a documentation fix, not a parser change.
 
 ## 9. Acceptance
 
-1. A CSV with 500,000 long rows produces a diagnostic count **bounded by the cap** — asserted on
+1. A CSV with 500,000 long rows produces a **capped** `diagnostics` length — asserted on
    `store.diagnosticCount`.
-2. **The same holds for a non-CSV format** — an XML fixture with a malformed attribute on every one
-   of 100,000 elements is bounded identically, asserted the same way. This is what pins § 2's
-   finding that the defect is general, and stops the cap being quietly implemented as a CSV feature.
-3. The scrubber renders **at most bucket-count** diagnostic markers, asserted by counting DOM nodes
+2. **The position index for that same file records all 500,000**, and the scrubber's markers are
+   **distributed across the full height of the strip**, not clustered in its first N. Asserted on
+   the bucket occupancy, since this is the claim § 5 exists to make and the one a naive cap breaks
+   silently.
+3. **The same holds for a non-CSV format** — an XML fixture with a malformed attribute on every one
+   of 100,000 elements is bounded and indexed identically, asserted the same way. This pins § 2's
+   finding that the defect is general and stops the cap being implemented as a CSV feature.
+4. The scrubber renders **at most bucket-count** diagnostic markers, asserted by counting DOM nodes
    in the browser project.
-4. `StatusBar`'s warning count shows the **true** total for that file, not the capped list's length.
-5. `diagnosticNav` still reaches every diagnostic that was stored.
-6. The budget lives in **one** module, consulted by all four `ParserState.emit` bodies — asserted by
-   there being no fifth copy, and by acceptance 2 passing without a CSV-specific branch.
-7. `CONCEPT.md` § 11.1 no longer claims parsing stops at the first failure.
-8. Existing `scrubberModel.test.ts`, `diagnosticNav.test.ts` and `csvParse.test.ts` stay green, or
-   their changed expectations are named in the results.
-9. `npm test`, `npm run typecheck`, `npm run lint` clean.
+5. `StatusBar`'s warning count shows the **true** total for that file, not the capped list's length.
+6. `diagnosticNav` still reaches every diagnostic that was **retained**, and the summary entry names
+   how many were not.
+7. The budget and the index live in **one** module, consulted by all four `ParserState.emit` bodies
+   — asserted by acceptance 3 passing without a CSV-specific branch.
+8. The position index is sorted **once** per parse, not per render — asserted by `diagnosticNav` no
+   longer copying and sorting on every keypress.
+9. `CONCEPT.md` § 11.1 no longer claims parsing stops at the first failure.
+10. Existing `scrubberModel.test.ts`, `diagnosticNav.test.ts` and `csvParse.test.ts` stay green, or
+    their changed expectations are named in the results.
+11. `npm test`, `npm run typecheck`, `npm run lint` clean.
 
 ## 10. Version
 
