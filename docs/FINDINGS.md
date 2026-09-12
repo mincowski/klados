@@ -523,11 +523,21 @@ union in `src/preload/api.ts` (R193) keeps the renderer's declared environment h
   R200 corrects its wording; the cost of not doing so is already in the tree — `scrubberModel.ts:55`
   cites §11.1 to justify one DOM node per diagnostic. Full account:
   `docs/plans/R200-diagnostic-volume.md` §2.
+- **Nothing in the codebase calls `String.prototype.normalize`, so NFC never matches NFD.** A needle
+  or name written `é` (U+00E9) does not match the same text stored as `e` + U+0301, in Find, in the
+  grid's quick filter, or in path-name resolution — which compares interned **bytes**, so the two
+  spellings are simply different names. Reachable with ordinary files: macOS filesystems and several
+  exporters emit NFD. **Not a small fix**, and the reason is worth knowing before starting:
+  invariant 1 forbids decoding the document and invariant 6 requires Save to write the original
+  bytes, so normalization can only apply to a *comparison* — and it changes lengths, so a match
+  offset found in a normalized window does not map back to a byte offset. That is the same obstacle
+  D-082 already declined for length-changing case mappings. Full account:
+  `docs/plans/R201-unicode-path-names.md` §5.
 - **The path query grammar (`core/path/parse.ts`'s `NAME_CHAR`) is ASCII-only** — `/[A-Za-z0-9_.:-]/`
   — so a query like `//größe` fails to parse as a name at all, before name resolution is ever
   reached. Found while verifying R53's `Interner.lookup` encoding fix: that fix is real and tested,
   but this separate, one-layer-earlier gap means the Palette still can't reach it by typing a
-  non-ASCII query. Widening `NAME_CHAR` to accept Unicode letters is a small, separable follow-up.
+  non-ASCII query. **Planned as R201** (`docs/plans/R201-unicode-path-names.md`), which also records why widening the class alone is only half the fix: `Cursor.peek()` returns a UTF-16 code unit, so astral names fail regardless of the regex.
   Full account: `docs/plans/R53-interner-encoding.md`.
 - **`evaluate.ts`'s intermediate node sets are plain `number[]`**, not the reused-scratch
   `Int32Array` hard rule 2 specifies.
