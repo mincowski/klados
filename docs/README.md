@@ -74,7 +74,19 @@ rather than papered over.
 
 ## Also here
 
-[`screenshots/`](screenshots/) holds images referenced by the documents.
+[`screenshots/`](screenshots/) holds images referenced by the documents. `three-panes.png` — the
+image at the top of the project README — is **generated, not hand-made**:
+
+```bash
+npm run build && node scripts/screenshot-panes.mjs
+```
+
+That script is the documentation for how it is built. Its header explains the diagonal light/dark
+composite, why the document is seeded through session restore rather than the file dialog, and what
+it needs to run (a display, and `npm run fixtures:generate` already done). **The image it replaced
+was hand-made and could not be regenerated**, so a UI change silently dated it — which is why the
+script exists (R197, `plans/R196-readme-landing-page.md`).
+
 [`spikes/`](spikes/) holds spike results — the document a spike leaves behind once its apparatus is
 gone (R155). `M0a-codemirror-and-parsers.md` is the CodeMirror windowing work D-030 and D-031 rest
 on, and `raw-measurements.md` transcribes every figure the harnesses wrote, because a decision
