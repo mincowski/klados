@@ -4,7 +4,9 @@
 
 **Open.** Planned after R201's audit found that nothing in the codebase calls `normalize`, and after
 re-reading R72 §6 and D-082, which investigated the folding half deliberately and accepted it.
-**R205 reverses D-082 and needs a decision before it is built** (§ 7); R202–R204 do not.
+**R205 reverses D-082**, which the project lead accepted along with its one regression (§ 7);
+R202–R204 need no decision. D-082 is updated, not deleted — its measurements stand and its
+conclusion changes.
 
 ## 1. What NFC is
 
@@ -96,17 +98,25 @@ in the original.
 **`String.prototype.normalize` returns a string and no index correspondence.** Building one is the
 work:
 
-- Split the window into **grapheme clusters** (`Intl.Segmenter`), normalize **each cluster**, and
-  record for every output position the original index it came from — an `Int32Array` map alongside
-  the normalized text.
-- Canonical composition joins a starter with its following combining marks, which is a
-  grapheme-cluster boundary, so per-cluster normalization should equal whole-string normalization.
-  **"Should" is not good enough**: assert `segments.map(normalize).join('') === window.normalize('NFC')`
-  over the fixture corpus, and treat a mismatch as a finding rather than rounding it away.
+- **Walk the window in runs, not clusters.** A pure-ASCII run is NFC-stable, so it is copied verbatim
+  with **no `normalize` call** and maps identity. Only a run containing non-ASCII — extended one
+  character to the left, since that character may be the base a combining mark composes onto — is
+  normalized.
+- Record, for every position in the output, the original index it came from: an index map built
+  alongside the normalized text, in one pass.
 - A match at normalized `[i, j)` then maps to original `[map[i], map[j])`, and from there to bytes
   exactly as today.
 
-**The byte path is deliberately left alone** (§ 9), so this applies only where a window is already
+**`Intl.Segmenter` is the obvious way to do this and is rejected on measurement** — 14 ms a window
+against 2.1 ms for the run split, § 8 and § 10. The run rule is what makes the round affordable, so
+it is specified here rather than left to the implementation.
+
+**The split is an optimization of `window.normalize('NFC')`, so that is the assertion**:
+`built === window.normalize('NFC')` over the corpus, not a sample of expected outputs. It held for
+all-ASCII, mixed and fully-decomposed windows while this plan was drafted, and it must be asserted
+because a subtly wrong boundary rule produces text that looks right and matches at the wrong offset.
+
+**The byte path is deliberately left alone** (§ 10), so this applies only where a window is already
 being decoded.
 
 ## 6. R205 — one folding algorithm
@@ -135,10 +145,10 @@ Two things it must carry:
 - **The footnote goes with it.** D-082's UI note exists to warn about a divergence R205 removes.
   Leaving it would warn about behaviour that no longer happens.
 
-## 7. The ordering is load-bearing, and R205 needs a decision
+## 7. The ordering is load-bearing; the `ß`/`ẞ` loss is accepted
 
 **R205 before R204 regresses three of the five documented pairs.** Measured against
-`test/fixtures/confusables.xml`'s own cases, with codepoint escapes and a guard (§ 8):
+`test/fixtures/confusables.xml`'s own cases, with codepoint escapes and a guard (§ 9):
 
 | Pair | plain today | regex today | after R205 alone | after R204 + R205 |
 |---|---|---|---|---|
@@ -155,32 +165,102 @@ and it is why normalization is the prerequisite rather than the optional follow-
 `'ß'.toUpperCase()` is `'SS'` — a length change no normalization form repairs. Today plain finds it;
 after R205 neither mode does.
 
-**So R205 is a trade, not an improvement, and it is the project lead's call.** Today: plain gets
+**R205 is a trade, not an improvement, and it was put to the project lead as one.** Today: plain gets
 3 of 5, regex gets 2 of 5, and which you get depends on a toggle most users will not connect to the
 result. After R204 + R205: **4 of 5, the same answer in both modes.** Better on balance and worse for
 German capital sharp s.
 
+**Decided: the `ß`/`ẞ` loss is accepted, and R205 is in scope.** Recorded here rather than left
+implicit, because the loss is silent — a search for `ß` simply stops finding `ẞ`, with nothing on
+screen to say why — so a later round finding it must be able to see that it was chosen. **The
+ordering constraint is not softened by that decision**: R205 still lands only after R204, or the
+angstrom and ohm pairs regress along with it.
+
 **R202–R204 need no such decision** — they only add matches that are canonically the same character.
 
-## 8. Non-functional expectations (`PLANNING.md` § 3)
+## 8. Cost, measured rather than estimated
 
-- **Normalize per window, never per position.** The defect being replaced (`indexOfCaseInsensitive`)
-  is slow precisely because it allocates and folds per position; a normalization pass that repeats
-  that would be worse than what it fixes.
-- **Skip the whole apparatus when the window is already NFC**, which is the overwhelmingly common
-  case — all-ASCII text is NFC by definition. `normalize()` on an unchanged string is cheap and its
-  result compares equal, so one check per window gates both the Segmenter pass and the index map.
-  **Without this, every ASCII search on a 200 MB document pays for a problem it does not have.**
+**Nothing here is per-document.** `findAll` decodes one window at a time (`textFind.ts:378`, inside
+the per-window loop) and discards it before the next, so every figure below is **per window, live one
+at a time** — the same bound `DECODED_WINDOW_BYTES` already puts on the decoded path.
+
+### Memory, one window
+
+| | |
+|---|---|
+| window text, as today | ~128 KB |
+| + normalized copy | ~118 KB |
+| + index map (`Int32Array`) | ~256 KB |
+| **added by R204** | **~374 KB, transient** |
+
+A 200 MB document costs the same as a 2 MB one. **The index map may be a `Uint16Array`** — window-local
+offsets are under 65,536 — halving it to 128 KB, but a 64 KB all-ASCII window reaches index 65,535
+exactly, so that is a decision for the implementing round with a bounds assertion, not a free win.
+
+### Time, one window
+
+Measured on this machine, 64 KB windows, 20–200 runs each:
+
+| | all-ASCII | mostly ASCII, some NFD | 100% NFD |
+|---|---|---|---|
+| gate — `normalize() === text` | **0.052 ms** | — | — |
+| `Intl.Segmenter` map build | — | — | **13.957 ms** |
+| **run-based map build** | **0.312 ms** | **0.397 ms** | **2.101 ms** |
+
+**`Intl.Segmenter` is rejected on these numbers** (§ 10). At 14 ms a window it is ~43 s on a 200 MB
+document — and it was the obvious implementation, which is why it is measured here rather than
+discovered later.
+
+### The two rounds roughly cancel
+
+R205 replaces the per-position slice-and-fold, on the same windows:
+
+| per window | |
+|---|---|
+| `indexOfCaseInsensitive` today | **1.83 ms** |
+| plain-as-regex (R205) | **0.18 ms** |
+| R204's addition | +0.05 ms (ASCII) … +2.10 ms (all-NFD) |
+
+So on the decoded path: **ASCII-heavy content ends up faster than today** (−1.65 ms saved against
++0.05 ms spent), and fully-decomposed content lands within about half a millisecond a window of where
+it started. R204 alone is a cost; R204 with R205 is close to free.
+
+**And the byte path is untouched** (§ 10), so a plain ASCII needle — most searches, and every search
+for a tag or property name — pays **nothing at all**. The costs above are only ever reached by a
+non-ASCII needle or a regex, which is already the slower path today.
+
+## 9. Non-functional expectations (`PLANNING.md` § 3)
+
+- **Do not use `Intl.Segmenter`.** It is the obvious way to find cluster boundaries and it is
+  **14 ms a window** (§ 8) — ~43 s on a 200 MB document. Measured, not assumed.
+- **Only normalize what can change.** A pure-ASCII run is NFC-stable and maps identity, so it is
+  copied with **no `normalize` call at all**; only a non-ASCII run — plus the one character before
+  it, which may be a base for a combining mark — is normalized. This is the whole difference between
+  2.1 ms and 14 ms in the worst case, and between 0.3 ms and 14 ms in the realistic one.
+- **Gate on the window, not on the document.** `text.normalize('NFC') === text` costs 0.052 ms and
+  skips the entire apparatus for a window that is already NFC. Counter-intuitively, a hand-rolled
+  `charCodeAt` scan for combining marks is **four times slower** (0.204 ms) than letting the native
+  `normalize` answer it — so do not "optimize" the gate into a loop.
+- **Assert the split equals whole-string normalization.** The run-based split is an optimization of
+  `window.normalize('NFC')`, so the test is `built === window.normalize('NFC')` over the corpus, not
+  a sample of expected outputs. It held for all-ASCII, mixed and fully-decomposed windows while this
+  plan was drafted; it must be asserted, because a boundary rule that is subtly wrong produces text
+  that looks right and matches at the wrong offset.
+- **One allocation per window, not per match.** The normalized text and the map are built once and
+  reused for every match in that window.
+- **The index map is a typed array** (invariant 2's shape), not an array of objects.
 - **Author every fixture from `\uXXXX` escapes, and assert the codepoints before asserting
   behaviour.** Not a style preference: R72 hit this writing `confusables.xml`, and **this plan hit it
-  again** — two measurements taken while drafting § 7 were wrong because typing `Å` U+212B into a
-  script let something NFC it away to U+00C5, so the pair silently became one character and the
-  divergence vanished. A test asserting only match counts passes on a normalized fixture and tests
-  nothing.
-- **The index map is an `Int32Array`**, not an array of objects (invariant 2's shape), and is built
-  once per window alongside the normalized text rather than being recomputed per match.
+  again** — two measurements for § 7's table came back wrong because a throwaway script authored by
+  typing `Å` U+212B let something NFC it away to U+00C5, silently erasing the very divergence under
+  test. `FINDINGS.md` carries the generalized entry.
 
-## 9. Rejected
+## 10. Rejected
+
+**`Intl.Segmenter` for cluster boundaries.** The obvious implementation, and **measured at 13.957 ms
+a window** against 2.101 ms for the run-based split in the same worst case — roughly 43 s versus 6 s
+on a 200 MB document. Rejected on the numbers, and recorded here so it is not re-proposed as the
+"correct" way to find boundaries.
 
 **Normalizing the document.** Invariants 1, 6 and 7. Not available at any price, and worth stating
 so nobody proposes it as the simple version.
@@ -207,7 +287,7 @@ syntax (`\-`, `a{`) that parses fine without it — `decodedTextMatches` catches
 property of the content, not the search). Still the better long-term idea and still its own round;
 it does not resolve NFC/NFD, which is not an ambiguity but two spellings of one character.
 
-## 10. Acceptance
+## 11. Acceptance
 
 1. The grid quick filter matches a decomposed cell from a composed query, and the reverse.
 2. `//café` resolves against a document whose element name is decomposed, and `'unrepresentable'`
@@ -221,12 +301,12 @@ it does not resolve NFC/NFD, which is not an ambiguity but two spellings of one 
    since this is the difference between a fix and a regression.
 6. The five pairs in `test/fixtures/confusables.xml` match § 7's "after" column exactly, including
    `ß`/`ẞ` still missing, so the accepted loss is pinned rather than discovered later.
-7. Every new fixture is authored from escapes and guards its codepoints (§ 8).
+7. Every new fixture is authored from escapes and guards its codepoints (§ 9).
 8. If R205 lands: plain and regex return identical counts for all five pairs, and D-082's footnote
    is removed.
 9. `npm test`, `npm run typecheck`, `npm run lint` clean.
 
-## 11. Version
+## 12. Version
 
 **Ask on landing.** Candidate: minor for R202–R204 — searches that previously returned nothing now
 return results, which is a behaviour change users will notice — and the same bump covers R205 if it
