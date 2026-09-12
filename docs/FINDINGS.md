@@ -510,6 +510,19 @@ union in `src/preload/api.ts` (R193) keeps the renderer's declared environment h
 
 ## Known-wrong, not yet fixed
 
+- **No parser stops at the first failure, and `CONCEPT.md` §11.1 says they do.** §11.1 describes
+  opening an invalid document as *"parse to the point of failure, present the partial tree"* — one
+  failure, one position. No parser implements that. `ParserState.fatal` is a **flag, not a halt**
+  (`src/formats/xml/index.ts:146`): the main loop breaks only on `maxDepth` and on an abort signal,
+  and `fatal` is read once at the end to set `complete: !state.fatal` (`:624`), so a file that trips
+  a Fatal is still walked to EOF. Every format also emits recoverable `Severity.Error` diagnostics
+  from inside its per-item loop and keeps going — XML's `unmatched-end-tag` / `expected-attribute`,
+  JSON's `expected-comma-or-close` / `expected-key`, TOML's `expected-equals`, CSV's `long-row`.
+  **A defect that repeats per node therefore produces a diagnostic per node**, and nothing caps the
+  list (`src/core/nodeStore.ts:449` is an unbounded `push`). Trust the parsers over §11.1 until
+  R200 corrects its wording; the cost of not doing so is already in the tree — `scrubberModel.ts:55`
+  cites §11.1 to justify one DOM node per diagnostic. Full account:
+  `docs/plans/R200-diagnostic-volume.md` §2.
 - **The path query grammar (`core/path/parse.ts`'s `NAME_CHAR`) is ASCII-only** — `/[A-Za-z0-9_.:-]/`
   — so a query like `//größe` fails to parse as a name at all, before name resolution is ever
   reached. Found while verifying R53's `Interner.lookup` encoding fix: that fix is real and tested,
