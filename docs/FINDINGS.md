@@ -303,6 +303,9 @@ once and measured no divergence at all — a fixture that passed while testing n
 files from `\uXXXX` escapes, and **assert the codepoints are present before asserting behaviour**,
 or the test cannot tell a fixed bug from a destroyed fixture. Compatibility mappings (the micro sign,
 sharp s) survive, so most of the file still looks correct — which is what makes it hard to spot.
+**This applies to throwaway measurement scripts exactly as it does to tracked fixtures**, and the
+entry did not say so until it had to: R202's §7 table was measured wrong twice before the guard
+caught it, because a one-off script authored by typing the characters had already lost U+212B.
 Full account: `docs/plans/R72-path-query.md` §6.
 
 **U+2329/U+232A (the "angle bracket" pair) have a canonical decomposition to U+3008/U+3009, the CJK
@@ -532,7 +535,7 @@ union in `src/preload/api.ts` (R193) keeps the renderer's declared environment h
   bytes, so normalization can only apply to a *comparison* — and it changes lengths, so a match
   offset found in a normalized window does not map back to a byte offset. That is the same obstacle
   D-082 already declined for length-changing case mappings. Full account:
-  `docs/plans/R201-unicode-path-names.md` §5.
+  **Planned as R202–R205** (`docs/plans/R202-unicode-comparison.md`), which also separates the three comparison sites: the grid filter is one call, name resolution is bounded by name count, and only Find has the offset problem.
 - **The path query grammar (`core/path/parse.ts`'s `NAME_CHAR`) is ASCII-only** — `/[A-Za-z0-9_.:-]/`
   — so a query like `//größe` fails to parse as a name at all, before name resolution is ever
   reached. Found while verifying R53's `Interner.lookup` encoding fix: that fix is real and tested,
