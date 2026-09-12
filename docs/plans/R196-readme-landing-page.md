@@ -121,7 +121,32 @@ because "rewrite the README for a less technical audience" would otherwise swall
 
 All five. Notes on two of them:
 
-**Criterion 4 — "no fact changes" — has one deliberate exception, and it is a correction.** The
+**Criterion 4 — "no fact changes" — did not survive contact, and § 2's promise that the checksum
+instructions would keep their content is the part that went.** After the first implementation the
+project lead edited the README directly, and the trims are the answer to a question this plan did
+not ask: *how much of this does a landing page owe a visitor at all?*
+
+- **The checksum section is gone**, replaced by one line — *"Every release also includes a
+  `SHA256SUMS.txt` with checksums for each build, if you want to verify your download."* Three
+  platform-specific commands and two paragraphs of trust rationale were the longest thing between
+  a visitor and the feature list. Anyone who actually wants to verify a download knows what a sums
+  file is.
+- **The "most tools of this kind…" paragraph is gone.** The bullets already said it.
+- **The feature bullets were reordered** — table view, then size, then the palette — and *"this is
+  the thing Klados is for"* was cut as telling rather than showing.
+- **The Raw bullet now says editing is only possible there**, which is a real fact the pane list
+  had left implicit.
+
+Recorded rather than quietly absorbed, because § 2 stated the opposite and a results section that
+matched the plan instead of the file would be the failure `CLAUDE.md` describes.
+
+**And the "The screenshot" subsection was removed from Development after review**: how to
+regenerate a documentation image is not README material. It moved to
+[`docs/README.md`](../README.md)'s *Also here*, beside the `screenshots/` directory it describes —
+where someone asking "where did this image come from?" is already looking. The script's own header
+remains the primary documentation, as it was.
+
+**One further correction was in scope and is a correction.** The
 Development section said `npm run test:large` *"currently fails with a worker timeout"* and takes
 *"around twenty minutes"*. Both stopped being true: R187–R189 fixed the ten failures and R193 made
 it exit 0, at **six minutes**. The README was the last place still carrying the old claim — the

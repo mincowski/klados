@@ -3,27 +3,23 @@
 **A desktop viewer and source-level editor for hierarchical data files — XML, JSON, TOML and CSV.**
 
 - **Repeating children become a table.** A file with two thousand `<car>` elements turns into a
-  grid with one row per car — sortable, filterable, exportable. This is the thing Klados is for.
+  grid with one row per car — sortable, filterable, exportable.
+- **Big files stay usable** — built to stay responsive into the hundreds of megabytes.
+- **A command palette at `Ctrl+Shift+P`**, where *every* command in the app can be found.
+- **Keyboard-native.** Everything has a shortcut, and `F1` lists them.
+- **Edit the real source.** The Raw pane is the file itself, not a rendering of a model.
 - **Your file comes back exactly as it went in.** Saving never reformats: comments, key order,
   quoting, indentation and line endings all survive untouched.
-- **Edit the real source.** The Raw pane is the file itself, not a rendering of a model.
-- **Keyboard-native.** Everything has a shortcut, and `F1` lists them.
-- **A command palette at `Ctrl+Shift+P`**, where *every* command in the app can be found.
-- **Big files stay usable** — built to stay responsive into the hundreds of megabytes.
 - **[Download for Windows, macOS or Linux →](https://github.com/mincowski/klados/releases)**
 
 ![Klados showing a 10 MB XML file as a tree, a table of its repeating children, and its source, with the dark theme in the upper left and the light theme in the lower right](docs/screenshots/three-panes.png)
-
-Most tools of this kind show you a tree, or show you text. Klados shows you both, plus that third
-thing: **when a node contains a list of similar children, their contents are collected into a
-table** — which is usually what you actually wanted to look at.
 
 Three panes, kept in sync:
 
 - **Tree** — the document's structure
 - **Detail** — the selected node's contents as tables; repeating children become a grid you can
   sort, filter, pin columns in, and export
-- **Raw** — the source text, exactly as it is on disk
+- **Raw** — the source text, exactly as it is on disk, editing is only possible here
 
 ## Download
 
@@ -41,33 +37,8 @@ normal for small free software, and here is how to get past it:
 Signing certificates cost money and Klados is free, so this is likely to stay true. If that
 trade-off doesn't suit you, [building it yourself](#development) takes about two minutes.
 
-### Checking that your download is intact
-
-Every release includes a `SHA256SUMS.txt` file — a fingerprint of each file, written by the build
-that produced them. Because the builds are unsigned and there is no auto-updater, the download is
-the whole trust decision, so this is how you confirm you got the real thing: it proves your copy is
-byte-for-byte what the build made, whatever it travelled through on the way.
-
-This is optional. If you want to do it, download `SHA256SUMS.txt` next to the installer and run one
-of these in the same folder:
-
-```bash
-# Linux
-sha256sum -c SHA256SUMS.txt --ignore-missing
-```
-
-```bash
-# macOS
-shasum -a 256 -c SHA256SUMS.txt --ignore-missing
-```
-
-```powershell
-# Windows (PowerShell) — compare the printed hash against the matching line in the file
-Get-FileHash -Algorithm SHA256 .\klados-1.0.0-setup.exe
-```
-
-`--ignore-missing` is what lets you check just the one file you downloaded, instead of needing all
-of them.
+Every release also includes a `SHA256SUMS.txt` with checksums for each build, if you want to verify
+your download.
 
 ## What it does today
 
@@ -202,18 +173,6 @@ npm run fixtures:generate
 
 Expect a couple of minutes and about a gigabyte of disk. Tests that need them skip cleanly when
 they are absent.
-
-### The screenshot
-
-The image at the top of this file is generated, not hand-made — so it can be refreshed when the UI
-changes rather than quietly going out of date:
-
-```bash
-npm run build && node scripts/screenshot-panes.mjs
-```
-
-It launches the built application, opens a fixture in each theme, and composites the two frames on
-the diagonal. It needs `npm run fixtures:generate` to have been run, and a display.
 
 ## Contributing
 
