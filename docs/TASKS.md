@@ -119,7 +119,7 @@ so a reader of an old commit message can still find out what `R41` was.
 | **R190–R191** | built | `docs/plans/R190-packaging-allowlist.md` |
 | **R192** | built | `docs/plans/R192-ci-job-timeouts.md` |
 | **R193** | built | `docs/plans/R193-vitest-5.md` |
-| **R194** | built ⚠ | `docs/plans/R194-save-as-filters.md` |
+| **R194** | built | `docs/plans/R194-save-as-filters.md` |
 | **R195** | built | `docs/plans/R195-locale-trim.md` |
 | **R196–R197** | built | `docs/plans/R196-readme-landing-page.md` |
 
@@ -149,7 +149,6 @@ disclosed in its own document too; this is the list that did not exist before.
 | **R183 acceptance 2: twenty consecutive clean `main` runs.** The three tests that were failing are fixed on measurement and mutation, not on observed CI. | `docs/plans/R183-ci-flakes.md` §13 | Only accumulated runs can confirm it, and the round cannot wait for them. Check the next time CI history is being read anyway. |
 | **R184: sixteen browser test files still end `paint()` with a 50 ms sleep**, the same shape as the two R183 fixed. None has flaked yet. | `docs/plans/R183-ci-flakes.md` §5 | Each call site's condition is different and R154 established that quiescence can return *before the work starts*, so this is per-call-site work rather than a find-and-replace — a round, not a follow-up. |
 | **R186: nothing stops a new fixed-duration wait being added.** R159 published the vocabulary and eighteen files kept the sleep anyway. | `docs/plans/R183-ci-flakes.md` §7 | Deliberately last: a guard written before R184's conversions would ship with an allowlist of eighteen entries, which proves nothing. |
-| **R194: the Save As dialog itself has not been seen with its new filters.** The filters are asserted as data and the session is asserted to send them; what no test can drive is the native dialog, and Electron's own rule that it appends the selected filter's first extension to a bare typed name. | `docs/plans/R194-save-as-filters.md` §7 | One gesture: Save As on a JSON document, type a name with no extension, confirm `.json` on disk. The same manual boundary R164 §10 describes — a harness can assert everything up to the OS dialog and nothing past it. |
 | **R172: the `.deb`'s `Maintainer` has not been read off a built package.** The Windows half is **done** — see §12. | `docs/plans/R172-published-identity.md` §12 | Narrowed from "never read back off an installed machine": a Windows install was made and the registry read on 2026-09-11, confirming all three values it owed. What is left needs no Debian machine and no install — `release.yml` builds the `.deb`, and `dpkg-deb -I` reads its control fields straight out of the artifact. |
 | **R167's checksum job has never run for real.** The hashing logic is dry-run; `gh release download` against a real draft release is not. | `docs/plans/R164-release-security-hardening.md` §9 | By R141/R151's own argument the first genuine exercise is a `v*` tag, and a draft release cannot be rehearsed without making one. |
 | **R46's p90 thumb-drag frame time was never measured.** The fix stands on the read-count mechanism (`test/scrollbarCoalescing.test.tsx`), not a re-confirmed frame time. | `docs/plans/R43-grid-sizing-and-scroll.md` | No display in this environment. Flagged rather than silently substituted. |
