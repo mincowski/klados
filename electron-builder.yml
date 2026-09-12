@@ -145,6 +145,21 @@ mac:
     - NSDownloadsFolderUsageDescription: Klados opens files from your Downloads folder.
   notarize: false
 dmg:
+  # R198: no blockmap. A blockmap is a content-chunk index letting
+  # `electron-updater` fetch only the changed blocks between versions, and this
+  # application has no updater — `electron-updater` is not a dependency and
+  # nothing calls `autoUpdater`.
+  #
+  # **The same reasoning already removed two other things and stopped one step
+  # short of here.** `mac.target` dropped the zips because they "exist almost
+  # entirely for `electron-updater`… two assets serving nobody", and
+  # `nsis.differentialPackage` turned the blockmap off for Windows in the same
+  # words. The dmg was simply never revisited, so the first real release built
+  # two of them. Found by reading the draft's asset list, not by any check.
+  #
+  # `dmg-builder/out/dmg.js` gates creation on exactly this flag:
+  # `writeUpdateInfo === false ? null : createBlockmap(...)`.
+  writeUpdateInfo: false
   # `${arch}` is not optional here, and leaving it out was a real bug: the
   # release builds both architectures, both dmgs were named
   # `klados-<version>.dmg`, and one silently overwrote the other — so the
@@ -179,6 +194,24 @@ linux:
   # *absent*, which was correct while `author.name` was still a person.
   maintainer: mincowski <8300485+mincowski@users.noreply.github.com>
   category: Utility
+# R198: publish the artifacts, not the update metadata.
+#
+# Left implicit, electron-builder infers a GitHub provider and uploads
+# `latest.yml`, `latest-mac.yml` and `latest-linux.yml` beside the installers —
+# update *feeds*, read by `electron-updater` to discover a new version. This
+# application has no updater, so the first release published three files that
+# nothing will ever fetch, and `SHA256SUMS.txt` dutifully hashed all three.
+#
+# `provider: github` restates the inference rather than changing it; owner and
+# repository are still derived the same way. `publishAutoUpdate: false` is read
+# in `app-builder-lib/out/publish/updateInfoBuilder.js`, which skips writing the
+# channel file entirely.
+#
+# **This does not disable publishing.** The installers, the dmgs, the AppImage
+# and the .deb are uploaded exactly as before.
+publish:
+  provider: github
+  publishAutoUpdate: false
 appImage:
   artifactName: ${name}-${version}.${ext}
 npmRebuild: false

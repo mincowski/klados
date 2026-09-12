@@ -16,6 +16,49 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R198 — the release published update metadata for an updater that does not exist · built
+
+**Plan:** `docs/plans/R198-drop-updater-artifacts.md`
+
+**Found by reading the first real release's asset list, minutes before publishing it.** The `v1.0.0`
+draft carried **ten assets, five of them serving `electron-updater`**: `latest.yml`,
+`latest-mac.yml`, `latest-linux.yml`, and a `.blockmap` beside each dmg. **This application has no
+updater** — `electron-updater` is not a dependency and nothing in `src/` calls `autoUpdater`, both
+checked rather than assumed — so half the release was plumbing nothing will ever fetch, and
+`SHA256SUMS.txt` hashed all five.
+
+**A correction, not a new decision: the reasoning was already in the file twice, and stopped one
+step short both times.** `mac.target` dropped the zips as *"two assets serving nobody"* for exactly
+this reason, and `nsis.differentialPackage` turned the blockmap off for Windows in almost the same
+words. But the dmg target was never revisited — so the first release built two blockmaps under a
+rule that had already rejected the Windows one — and the `latest*.yml` feeds were never considered
+at all, because nothing prompts you to think about a publish-time artifact while configuring a
+target.
+
+Fixed with `dmg.writeUpdateInfo: false` and `publish: { provider: github, publishAutoUpdate:
+false }`. **Both gates were read out of `node_modules` before being written down**, because the
+round's real risk is not that an option is wrong but that it is **inert**: an option that silently
+does nothing would leave the same five assets on the next draft and look identical until someone
+read the list again. `dmg-builder/out/dmg.js` is `writeUpdateInfo === false ? null :
+createBlockmap(...)`; `app-builder-lib/out/publish/updateInfoBuilder.js` skips the channel file on
+`publishAutoUpdate === false`.
+
+`provider: github` restates the inference rather than changing it — a publish block is needed to
+carry the flag — and **publishing is not disabled**: the installers, dmgs, AppImage and `.deb`
+upload as before.
+
+**Verified where this machine could**: a Windows build now emits no `latest.yml`, and the installer
+is byte-size unchanged at 81.3 MB. The dmg blockmap and the mac/linux feeds need a publishing build
+on other platforms, so that half was confirmed on the re-tagged draft.
+
+**Found by looking at the output, not by any check** — `FINDINGS.md`'s recurring line about this
+project in another place, and an argument for D-095's rehearsal even while a tag is still free to
+move.
+
+**No version bump.**
+
+---
+
 ## R196–R197 — the README is the landing page · built
 
 **Plan:** `docs/plans/R196-readme-landing-page.md`
