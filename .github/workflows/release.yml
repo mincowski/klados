@@ -7,6 +7,17 @@ name: Release
 # **draft** release, which is electron-builder's own default and is kept on
 # purpose — three runners finish at different times, and a draft lets them
 # accumulate onto one release that a human publishes after looking at it.
+#
+# **D-095 — once any release has been published, rehearse with
+# `workflow_dispatch` before moving a tag.** The dispatch path builds every
+# target and produces the same inspectable draft, but creates **no git tag**;
+# it skips only the version assertion and the `checksums` job. Moving a tag
+# after publication leaves `SHA256SUMS.txt` describing bytes the tag no longer
+# points at — and for unsigned builds with no auto-updater that file is the
+# only integrity signal a downloader has. Delete the rehearsal draft before
+# tagging: a later run reuses an existing draft of the same name.
+#
+# It does not apply to a first release, when a tag is still free to move.
 on:
   push:
     tags: ['v*']

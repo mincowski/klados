@@ -3235,3 +3235,46 @@ and would imply these patterns govern it.
 
 **Rejected:** adding a `spike` exclusion to the existing list (fixes the symptom, leaves the rot);
 `asar: false`, `extraResources` and `directories.app`, none of which is what was wrong.
+
+### D-095 — rehearse a release with `workflow_dispatch` before tagging, once anything has been published · `settled`
+
+`release.yml` runs on a `v*` tag **and** on `workflow_dispatch`. The two paths build identically —
+same 4-job matrix, same `npm run package --publish always`, and both produce a **draft** release
+that a human publishes. They differ in exactly three things:
+
+| | `workflow_dispatch` | tag push |
+|---|---|---|
+| tag-matches-`package.json` assertion | skipped | runs |
+| `checksums` job → `SHA256SUMS.txt` | skipped | runs |
+| git tag created or moved | **no** | yes |
+
+The dispatch path creates no git tag: electron-publish looks a release up by name rather than by
+tag because, in its own words, *"we draft release and don't create git tag"*
+(`electron-publish/out/gitHubPublisher.js`).
+
+**Decided: once any release has been published, rehearse with `workflow_dispatch` before moving a
+tag.** Inspect the draft it produces, delete it, then tag.
+
+**The reason is R167's checksums, not caution in general.** Moving a tag after publication leaves
+`SHA256SUMS.txt` describing bytes the tag no longer points at — and since the builds are unsigned
+with no auto-updater, that file is the *only* integrity signal a downloader has, and the README
+tells them to use it. It also produces the "same version, different bytes" state R141's version
+assertion exists to prevent.
+
+**It does not apply to the first release, and that is the point worth remembering.** Before
+anything is published a tag is free to move: no download URLs depend on it, no checksums have been
+issued, and a failed packaging build costs one `git push --force`. So v1.0.0 was tagged directly,
+and the expected cost was lower for it — one build if the packaging works, two only if it does not,
+against the rehearsal's unconditional two. **The rule switches on at publication, not at v1.1.**
+
+**Why a rule at all, when the tag path also produces an inspectable draft.** It does, and that is
+why rehearsing buys nothing before publication. What it buys afterwards is that a packaging failure
+— the `.deb`, AppImage and dmg targets are built *only* here, never by `ci.yml`, which stops at
+`--dir` — happens while the tag still points where it did. `release.yml`'s own header records the
+cost of learning this the other way: three of the first ten commits broke only when a tag started a
+release build, "each costing a deleted draft release and a moved tag".
+
+**Delete the rehearsal draft before tagging.** `getOrCreateRelease` matches an existing release by
+name and reuses it if it is a draft, so a later tag run uploads into the same one. At an unchanged
+version the filenames collide and are overwritten, but an asset the tagged build did not produce
+can otherwise survive into a published release.
