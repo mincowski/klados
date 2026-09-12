@@ -1,15 +1,15 @@
 # R194 — Save As offers no file type, so it can save a file the app cannot reopen
 
-<!-- status: built-caveat -->
+<!-- status: built -->
 
-**Built, one item owed.** Found by the project lead during R166's manual Save As check
+**Built.** Found by the project lead during R166's manual Save As check
 (`docs/plans/R164-release-security-hardening.md` § 10) — the pass confirmed the dialog opens, and
 the dialog turned out to be wrong.
 
 Save As offers **the extension the file already has**, then All files — see § 4a, which records the
 rule this plan originally specified and why the project lead was right to replace it. The Open
 dialog takes its list from the format registry, and **no file extension is named anywhere in
-`src/main`**. Owed: one confirmation at the native dialog, which no test can drive.
+`src/main`**. **Nothing owed:** the native dialog was confirmed by hand on 2026-09-12 (§ 8).
 
 ## 1. The defect
 
@@ -281,3 +281,21 @@ the screen. `docs/FINDINGS.md` already opens its recurring-mistakes section with
 mechanisms; nobody was testing the application"* — that entry now has a fourth instance, and this
 one is sharper than the others because the round had a passing test whose stated purpose was to
 prove exactly the thing that was broken.
+
+---
+
+## 8. The manual confirmation (2026-09-12)
+
+**Done, and it passes.** The project lead ran the one gesture no harness can: Save As on a JSON
+document in the built application, confirming the dialog offers the document's own type and that a
+bare typed name is written with its extension.
+
+That closes the round's only owed item. The split was never about confidence in the filters — those
+are asserted as data, and the session is asserted to send them — but about Electron's own rule that
+it appends the selected filter's first extension, which lives on the far side of a boundary a test
+cannot cross (R164 § 10).
+
+Worth recording that **the owed entry was not this round's real risk.** The defect that actually
+shipped was the preload bridge silently dropping the argument, and it was found by the project lead
+running `npm run dev` — not by this check, and not by any test, including the one written in this
+round specifically to prove the two halves were connected.
