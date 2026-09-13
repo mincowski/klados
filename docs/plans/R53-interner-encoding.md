@@ -1,9 +1,13 @@
 # R53 — `Interner.lookup` assumes UTF-8, and answers "not in this document" when it is wrong
 
-<!-- status: built-caveat -->
+<!-- status: built -->
 
-**Built — with one adjacent gap found and reported, not fixed here (see Results).** Register:
-`docs/TASKS.md`.
+**Built.** One adjacent gap was found and reported rather than fixed here (see Results) — the path
+grammar's ASCII-only `NAME_CHAR`, which blocked the non-ASCII query this round's fix resolves, one
+layer before it was reached. **`docs/plans/R201-unicode-path-names.md` closed it**, replacing
+`NAME_CHAR` with `RESERVED_NAME_CHARS` and advancing the cursor by code point, so `//größe` and an
+astral name both resolve end to end. This document went to `built` in R206–R208's round, which is
+when the stale Owed row was noticed. Register: `docs/TASKS.md`.
 
 From `docs/FINDINGS.md`'s known-wrong list, where it carries a qualifier no other entry does:
 

@@ -103,7 +103,19 @@ function TitleBarButtons(props: {
 function Title(): JSX.Element {
   const state = useDocumentSession()
   if (state.phase !== 'ready') {
-    return <span className="title-bar-title">Klados</span>
+    // R208: the bare app name goes through `-tail` rather than sitting as
+    // loose text, because `.title-bar-title` is a flex container and
+    // `text-box-trim` applies to block containers — a flex *item* is one,
+    // an anonymous run of text inside a flex container is not. Without the
+    // wrapper this one state would keep the old, uncorrected alignment
+    // while every other state got the fixed one, which is worse than
+    // either. `-tail` is the non-shrinking run, which a name that never
+    // truncates is.
+    return (
+      <span className="title-bar-title">
+        <span className="title-bar-title-tail">Klados</span>
+      </span>
+    )
   }
   const { fileName, filePath, dirty } = state.document
   const { head, tail } = splitForMiddleTruncation(fileName)

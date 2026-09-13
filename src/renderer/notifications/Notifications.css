@@ -45,8 +45,19 @@
  * The 1px `--surface-border` hairline on the other three sides is not
  * decoration — §2's own measurement is that light theme's `--elev-2-bg` and
  * the pane behind it are the *same* colour (`--gray-0`), so a neutral
- * notification is white-on-white without it, and it's also what gives
- * `info` (no severity colour at all) a defined shape.
+ * notification is white-on-white without it.
+ *
+ * R206 (`R206-disclosed-ui-defects.md` § 1): the left edge no longer draws
+ * in `--surface-border`. R57 gave `info` the neutral edge precisely because
+ * it has no severity, and `--surface-border` measured **1.31:1 against
+ * `--elev-2-bg` in light, 1.67:1 in dark** — so the one level defined by not
+ * having a colour was also the only one with no visible left edge.
+ * `--notification-edge` is that same neutral edge at a step that clears 3:1
+ * in both themes; a warning and an error still differ from it only in the
+ * edge *colour*. The hairline on the other three sides is unchanged and
+ * still below 3:1, which is recorded as accepted rather than fixed —
+ * raising it means raising the application's frame colour (42 consumers) or
+ * splitting this surface off the tier R60 deliberately unified.
  */
 .notification {
   pointer-events: auto;
@@ -59,7 +70,7 @@
   background: var(--elev-2-bg);
   box-shadow: var(--elev-2-shadow);
   border: var(--border-width) solid var(--surface-border);
-  border-left: 3px solid var(--surface-border);
+  border-left: 3px solid var(--notification-edge);
   color: var(--surface-fg);
   font-family: var(--font-ui);
   font-size: var(--font-size-ui);

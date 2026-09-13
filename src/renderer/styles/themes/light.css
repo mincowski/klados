@@ -55,6 +55,22 @@
    * "Later — a Klados-drawn title bar"). */
   --mark-fg: var(--amber-mark-light);
 
+  /* R206 (`R206-disclosed-ui-defects.md` § 1) — the neutral 3px severity
+   * edge, which `info` keeps because it has no severity colour (R57 § 4).
+   * It used to be `--surface-border`, measured at 1.31:1 against
+   * `--elev-2-bg` here, so the one notification level defined by *not*
+   * having a colour was also the one with no visible left edge at all.
+   * `--gray-500` clears 3:1 against both its neighbours in both themes —
+   * 4.27:1 against `--elev-2-bg` and the pane behind it, which in this
+   * theme are the same `--gray-0`.
+   *
+   * Deliberately not `--diagnostic-info-*`: that would invent a severity
+   * hue for the level R57 defines by having none. This token is the neutral
+   * edge made *visible*, not a fourth diagnostic colour. The 1px hairline on
+   * the other three sides stays `--surface-border` — the project lead's
+   * call, looking at both rendered side by side. */
+  --notification-edge: var(--gray-500);
+
   --diagnostic-warning-fg: var(--amber-600);
   --diagnostic-warning-bg: var(--amber-100);
   --diagnostic-error-fg: var(--red-600);

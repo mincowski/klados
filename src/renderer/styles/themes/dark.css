@@ -58,6 +58,10 @@
   /* M5d-PLAN.md R1 — see light.css's own comment on this token. */
   --mark-fg: var(--amber-mark-dark);
 
+  /* R206 — see light.css's own comment on this token. 3.81:1 against
+   * `--elev-2-bg` and 4.20:1 against the pane behind it. */
+  --notification-edge: var(--gray-500);
+
   --diagnostic-warning-fg: var(--amber-400);
   --diagnostic-warning-bg: var(--amber-900);
   --diagnostic-error-fg: var(--red-400);
