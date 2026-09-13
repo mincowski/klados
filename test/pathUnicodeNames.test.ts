@@ -167,3 +167,36 @@ describe('R201 — the reserved set is what ends a name', () => {
     expect(parsePath(`//x[and${ASTRAL}]`, resolverFor([...names, 'x'])).ok).toBe(true)
   })
 })
+
+describe('R203 — a path query resolves across NFC and NFD', () => {
+  const COMPOSED = 'caf\u00e9'
+  const DECOMPOSED = 'cafe\u0301'
+
+  it('guards its own fixtures', () => {
+    expect(codePoints(COMPOSED)).toEqual([0x63, 0x61, 0x66, 0x00e9])
+    expect(codePoints(DECOMPOSED)).toEqual([0x63, 0x61, 0x66, 0x65, 0x0301])
+  })
+
+  it('//caf\u00e9 resolves against a document whose element name is decomposed', () => {
+    // Acceptance 2 of `docs/plans/R202-unicode-comparison.md`. The two
+    // spellings render identically, so before R203 a user typing the name
+    // they could see got an empty result with nothing to explain it.
+    const { store, source } = parseXml(`<root><${DECOMPOSED}>1</${DECOMPOSED}><other/></root>`)
+    expect(run(store, source, `//${COMPOSED}`)).toHaveLength(1)
+    expect(run(store, source, `//${DECOMPOSED}`)).toHaveLength(1)
+  })
+
+  it('resolves the reverse, and inside a predicate', () => {
+    const { store, source } = parseXml(
+      `<root><item ${COMPOSED}="x"><${COMPOSED}>1</${COMPOSED}></item><item/></root>`
+    )
+    expect(run(store, source, `//${DECOMPOSED}`)).toHaveLength(1)
+    expect(run(store, source, `//item[@${DECOMPOSED}="x"]`)).toHaveLength(1)
+  })
+
+  it('does not make an unrelated name resolve', () => {
+    const { store, source } = parseXml(`<root><${DECOMPOSED}>1</${DECOMPOSED}></root>`)
+    expect(run(store, source, '//cafe')).toHaveLength(0)
+    expect(run(store, source, '//caf\u00e8')).toHaveLength(0)
+  })
+})
