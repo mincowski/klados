@@ -122,6 +122,8 @@ Search for the id to jump to one.
 | **D-100** | The title bar's optical alignment comes from `text-box-trim`, not a measured constant |  |
 | **D-101** | XML namespace resolution is removed; a prefixed name is the name as written |  |
 | **D-102** | Dark keeps a shadow, tuned to the ceiling a black shadow has on a near-black pane |  |
+| **D-103** | Every repeating group is its own table; the coverage floor is deleted, not retuned |  |
+| **D-104** | Five tables at once, each sized to its own rows |  |
 
 ---
 
@@ -391,11 +393,16 @@ one URI grouped together; D-101 reverses that. This entry's own argument is unto
 either reading — it is about shape versus name, not about which name — but it was the
 sentence R134 pointed at when it changed the key, so it is worth saying which one is meant.
 
-### D-014 — Coverage is a floor, not a majority · `settled`
+### D-014 — Coverage is a floor, not a majority · `superseded by D-103`
 
 An 80% threshold made a second qualifying group arithmetically impossible, since two groups
 cannot both exceed 80%. Now ≥2 members and ≥5%, with the largest group rendering as a grid
 and the remainder as a list. Multiple stacked grids deferred past v1.
+
+**Superseded by D-103 (R210).** The coverage floor is gone rather than retuned, the largest
+group no longer wins anything, and the stacked grids this entry deferred are built. The
+reasoning above is still correct about the 80% threshold it was written against — it is the
+question that stopped existing, not the answer.
 
 ### D-015 — Transparent wrappers are descended through · `settled`
 
@@ -3685,3 +3692,85 @@ structure is light's.
 **Light is untouched**, which the plan called out in advance as the tempting generalization
 ("make the two themes consistent") and a regression if taken: light's shadow is the one mechanism
 that works unaided there, where `--surface-bg` and `--elev-2-bg` are the same colour.
+
+---
+
+### D-103 — Every repeating group is its own table; the coverage floor is deleted, not retuned (R210) · `settled`
+
+**Supersedes D-014.** Decided by the project lead: every group of two or more same-named composite
+children renders as its own table, in document order, and everything else lists beneath. One
+sentence, no conditions, no winner, no tie-break.
+
+**What was wrong was not the threshold, it was the competition.** `detectGrid` promoted the
+*largest* qualifying group, so three `<a>` and two `<b>` gave an `<a>` table, and adding two
+more `<b>` switched the whole view to a `<b>` table with the `<a>` rows dropping into the list
+beneath. **The view was a function of the document's data rather than its structure**, and nothing
+on screen explained the choice. Ties broke on first appearance, which the implementation's own
+comment called arbitrary.
+
+**`GRID_MIN_COVERAGE` went with it because the question it answered went with it.** Coverage asked
+*"is this group dominant enough to be **the** table?"*. Under one table per group there is no
+**the**. What remains is "table or list?", which `GRID_MIN_MEMBERS >= 2` already answers, so
+`CONCEPT.md` §13's open question closes by deletion rather than by guessing a better number.
+
+**And the floor had a cliff nobody had found.** Spread children evenly across 21 groups and each
+covers 4.76%: nothing qualified and **no table rendered at all**. At 20 groups there was a table;
+at 21 there was none. That is a discontinuity in a threshold whose own comment admitted it was a
+guess awaiting real documents.
+
+**It degenerates to the old behaviour for the common case**, which is why this is not a disruptive
+change: 1000 `<car>` plus one `<metadata>` is still one table, because `metadata` has a single
+member and stays in the list.
+
+**Rejected: one unioned table**, the other predictable model, measured out. On a merged feed the
+two groups shared no column names at all, so the union was five rows by four columns with every
+row half empty. Worse, `GRID_COLUMN_CAP` is 60 with survival past it decided by *frequency*, so
+unioning many groups pushes rarer groups' columns into the overflow picker and renders their rows
+blank — data-dependent disappearance, the exact unpredictability being removed, one level down.
+
+**Rejected: raising the threshold.** Keeps the arbitrary winner and moves the cliff to a different
+group count.
+
+**Left available: merging groups on column overlap.** D-013 rejected shape as a *splitter*; merging
+on overlap is the opposite direction and its reasoning does not reach it.
+
+**Detection is one pass, and that is part of the decision rather than an implementation detail.**
+Collecting each group's members with a second pass per group is O(children × groups) — 649 ms at
+100 groups over 200,000 children, against 13 ms for one bucketing pass — and it is the obvious way
+to extend the old code. `collectGroupMembers` is deleted rather than called in a loop.
+
+**A side effect worth recording as the main one for anybody reading this from CSV.** The two
+functions used *different* eligibility tests: detection counted with `isGridEligible` (children
+**or** scalar facets, widened by D-088 precisely for CSV), collection collected with
+`hasChildren`. A CSV row is attributes-only by R145 §2's design, so **every CSV document since
+CSV shipped detected a row group and collected zero members** — an empty table above a list of
+anonymous `Object` rows. One pass means one eligibility test, so the class cannot recur.
+
+### D-104 — Five tables at once, each sized to its own rows (R211) · `settled`
+
+**`GRID_TABLE_CAP = 5`**, chosen by the project lead from 2, 5, 10 and 20 rendered in the running
+application against a document with 21 equal groups, in a window tall enough to show each whole
+stack in one frame. The plan called five a measurement placeholder rather than a recommendation;
+rendering did not argue against it.
+
+**The cap is a budget, not a judgement about the document.** Each table is a live virtualizer
+against a parent D9 says may have two million children, and column collection is bounded by it —
+~46 ms for every group at 100 groups against 2.1 ms capped at five. Groups past it are **listed**,
+in document order, with a line saying how many, so nothing disappears and which tables render
+stays a function of document order rather than of size.
+
+**Each stacked table is sized to its own rows**, bounded at 320px, rather than sharing the pane
+through `flex: 1` — five tables dividing the pane equally would give a two-row group the same
+height as a twenty-four-row one. **A single table is untouched**: R43/D-071's `flex: 1` and its
+230px floor still apply, so the common case is pixel-identical to before this round.
+
+**A name heading appears only when there is more than one table.** With one, the section heading
+and the table together are unambiguous, and a repeated name costs a row of chrome in the common
+case for nothing — §9.4's elevation budget applied to vertical space.
+
+**Commands act on the focused table.** The controller registry held a single slot, which with
+several grids would have handed every palette command to whichever registered last — D-103's
+arbitrary target, moved into the command layer where it is invisible. Two details are
+load-bearing: the grid's identity is a ref rather than the controller object, because `Grid`
+re-registers its controller on every sort, filter and column change; and focus is never cleared on
+blur, because running a palette command moves focus into the palette.

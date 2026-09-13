@@ -329,6 +329,22 @@ decision rather than a measurement one. **Generalizes past shadows**: on a near-
 darkening effect — a scrim, a pressed state, an inset — is working inside the same 1.171:1, and
 should be checked against that before being specified.
 
+**Two functions that must agree about what a thing *is* will eventually disagree, and the failure
+is silent.** `detectGrid` decided which children were grid-eligible with `isGridEligible` (has
+children **or** has scalar facets); `collectGroupMembers` decided which children were members with
+`hasChildren`. A CSV row is attributes-only by design, so **every CSV document detected a row
+group of N and then collected zero members** — an empty table above a list of anonymous `Object`
+rows, in a format that shipped in v1 and whose signature feature is that table. **Neither function
+was wrong on its own**, which is why it survived the round that built CSV and every test since:
+the CSV test built its members with `childrenOf` directly rather than through the path the
+application takes, so it asserted the columns were right while the rows were never collected.
+R210 closed it by deleting the second function — **one pass means one predicate, so the two cannot
+drift** — rather than by making the predicates match, which would have left the shape intact. The
+tell to look for: two functions in different files, each taking the same arguments and each
+deciding membership of the same set. Also the sixth instance of *"a component measured cleanly
+while the pipeline around it was not"*, and the first found by removing the pipeline rather than
+by measuring it.
+
 **A fixture of look-alike characters cannot be authored by typing them.** U+212B ANGSTROM SIGN and
 U+2126 OHM SIGN are *canonical singletons*: any NFC-normalising step between writing and disk
 replaces them with U+00C5 and U+03A9, silently. `test/fixtures/confusables.xml` was written that way

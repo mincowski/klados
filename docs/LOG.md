@@ -16,6 +16,61 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R210–R211 — one table per group, and the CSV table that never had rows · built
+
+**Plan:** `docs/plans/R210-grid-grouping.md` · **Decisions:** D-103, D-104
+
+**The Detail view used to pick a winner.** `detectGrid` promoted the largest qualifying group to
+be *the* table, so three `<a>` and two `<b>` gave an `<a>` table — and adding two more `<b>`
+switched the whole view, dropping the `<a>` rows into the list beneath. The view was a function
+of the document's data rather than its structure. Now every group of two or more renders as its
+own table, in document order, and adding members to one group cannot change which groups render.
+
+**`GRID_MIN_COVERAGE` went with the model that needed it**, not because 5% was the wrong number
+but because "is this group dominant enough to be *the* table" stops being a question. It also
+carried a cliff nobody had found: 21 evenly-sized groups each cover 4.76%, so nothing qualified
+and **no table rendered at all** — a table at 20 groups, none at 21. `CONCEPT.md` §13's open
+question closes by deletion.
+
+**And it fixed a shipped format.** Detection counted eligible children with `isGridEligible` and
+`collectGroupMembers` collected them with `hasChildren` — two functions that had to agree about
+what a group member is, and did not. A CSV row is attributes-only by R145's own design, so **every
+CSV document since CSV shipped detected a row group of N and then collected zero members**: an
+empty table above a list of anonymous `Object` rows. Confirmed in the built application before
+and after. One pass means one predicate, so it is fixed by construction rather than by making the
+two match.
+
+**One pass was a specification, not a preference.** Collecting members with a second pass per group
+is O(children × groups): 649 ms at 100 groups over 200,000 children, against 13 ms for the
+bucketing pass. `spike/r210-grid-models.ts` was re-run against the shipped code to confirm it —
+and had to be repaired first, because it called `Interner`'s removed second constructor argument
+and read `detection.grid`. It had been unrunnable since R209 landed, which nothing noticed.
+
+**Five tables at once**, chosen by the project lead from 2, 5, 10 and 20 rendered in the running
+application; the rest list beneath with a line saying how many. Each stacked table is sized to its
+own rows rather than sharing the pane, so a two-row group is not as tall as a twenty-four-row one,
+and a **single** table is pixel-identical to before — it keeps R43's `flex: 1`, and gains no name
+heading it does not need.
+
+**The plural broke the command layer, quietly.** The grid controller was a single slot, so with
+five grids mounted every palette command would have gone to whichever registered last — the same
+arbitrary target, moved somewhere it could not be seen. It now tracks the focused grid, with two
+details that are load-bearing: the grid's identity is a ref rather than the controller object
+(`Grid` re-registers on every filter keystroke), and focus is never cleared on blur (running a
+palette command puts focus in the palette). Verified in the built app: Ctrl+2 returns to the table
+you were last in, and `Filter Grid Rows` follows it.
+
+**The review found the round's own comment lying.** The stacked-table height used chrome constants
+written as `41 + 24` under a comment saying they were measured in the running application. They
+were estimates; the real values are 44 and 23, and every stacked table was clipping 2px off its
+last row. A test now asserts a table whose rows fit does not scroll, mutation-verified against the
+old constants.
+
+Version **1.1.0** — the first minor since publication, and the first round in five to change what
+an existing document looks like on purpose.
+
+---
+
 ## R212 — dark's elevation shadow, measured against a ceiling nobody had computed · built
 
 **Plan:** `docs/plans/R212-dark-elevation-shadow.md` · **Decision:** D-102

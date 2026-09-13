@@ -129,7 +129,7 @@ so a reader of an old commit message can still find out what `R41` was.
 | **R202–R205** | built | `docs/plans/R202-unicode-comparison.md` |
 | **R206–R208** | built | `docs/plans/R206-disclosed-ui-defects.md` |
 | **R209** | built | `docs/plans/R209-drop-namespaces.md` |
-| **R210–R211** | **OPEN** | `docs/plans/R210-grid-grouping.md` |
+| **R210–R211** | built | `docs/plans/R210-grid-grouping.md` |
 | **R212** | built | `docs/plans/R212-dark-elevation-shadow.md` |
 
 ### Pre-`R` milestones
