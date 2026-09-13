@@ -224,6 +224,30 @@ under different parents are separate because `detectGrid` groups one parent's ow
 because their resolved ids differ. A test whose outcome survives a change to the mechanism it was
 written for is worth annotating rather than leaving to look untouched.
 
+### A CI failure this round did not cause, and one record it nearly orphaned
+
+`windows-latest` went red after the contract commit, on `interner.test.ts`'s wall-clock budget:
+**509.2 ms against `< 500 ms`**. It is not a regression. The same loop measures **82.7 ms before
+R209 and 83.4 ms after** on one machine — the removed colon scan ran in `add()`, fifty times, and
+was never in the hot path — and the previous CI run on this branch passed on a commit whose
+successor does not touch interning at all.
+
+`R183-ci-flakes.md` §6 forbids raising such a ceiling without a measurement, and §6's first
+branch says what to do once the measurement clears the code: **the shape is wrong for CI, not the
+constant.** So the test now asserts the algorithmic property instead — interning is a hash lookup,
+so growing the distinct-name count 100× must not grow the cost per occurrence. Measured **1.48×**;
+the mutation run (collapsing every hash into one bucket, so `intern` must scan candidates) takes it
+to **89.3×** against a 5× bound. Both halves run back to back in the same test, so contention lands
+on both. The absolute ceiling survives only as a catastrophe net.
+
+**And investigating it found a record this round had already orphaned.** `docs/TASKS.md`'s Owed
+table carried R185's *"the ceiling has a blind spot: a 2.7× per-node regression passes silently"*,
+pointing at a wall-clock ratio test **in `test/namespaceResolution.test.ts`** — the file § 7's
+acceptance 4 had this round rewrite. The test was deleted before anyone noticed the entry named it.
+It closes here, and by removal rather than by repair: the entry said closing it needed *the
+mechanism* asserted, that no per-node namespace work runs on a declaration-free document, and R209
+removed the per-node namespace work.
+
 ### Acceptance
 
 1. **Met.** `inv:price` and `s:price` are two names before and after a real `spliceSubtree` —

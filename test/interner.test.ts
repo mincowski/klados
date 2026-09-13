@@ -42,19 +42,69 @@ describe('Interner', () => {
     expect(interner.text(idA)).not.toBe(interner.text(idB))
   })
 
-  it('interns 1,000,000 occurrences of 50 distinct names in under 500ms, size === 50', () => {
-    const names = Array.from({ length: 50 }, (_, i) => utf8(`distinct-name-${i}`))
-    const interner = new Interner()
-
-    const start = performance.now()
-    for (let i = 0; i < 1_000_000; i++) {
-      const bytes = names[i % 50]!
-      interner.intern(bytes, 0, bytes.length)
+  /**
+   * **This asserted a wall-clock budget and flaked on CI; the shape was wrong,
+   * not the constant.** It measured one run of 1,000,000 interns against
+   * `< 500 ms` — comfortable on a developer machine (p50 **83 ms**, measured)
+   * and marginal on a contended `windows-latest` runner, which came in at
+   * **509.2 ms** during R209 and passed on the same branch one commit earlier.
+   *
+   * `R183-ci-flakes.md` § 6 is explicit that raising the ceiling is not
+   * available without a measurement, because it is the move that hides a real
+   * regression. The measurement was taken: the same loop is **82.7 ms before
+   * R209 and 83.4 ms after** on one machine, so CI was seeing the same code
+   * roughly six times slower, not slower code. § 6's own first branch then
+   * applies — *the test's shape is wrong for CI, not its constant.*
+   *
+   * **So it asserts the algorithmic property instead, which no machine's speed
+   * can move.** Interning is a hash lookup, so the cost of one occurrence must
+   * not grow with how many *distinct* names the table already holds. Growing
+   * that count 100× measures **1.48×** here; losing the hash index and
+   * scanning candidates would be nearer 100×. Both halves run back to back on
+   * the same hardware in the same test, so contention lands on both.
+   *
+   * The absolute ceiling stays as a catastrophe net rather than a precision
+   * instrument, and is set from what a regression looks like — an order of
+   * magnitude — instead of from what a clean run measures.
+   */
+  it('interning costs the same per occurrence however many distinct names exist', () => {
+    function run(distinct: number): { ms: number; size: number } {
+      const names = Array.from({ length: distinct }, (_, i) => utf8(`distinct-name-${i}`))
+      const interner = new Interner()
+      const start = performance.now()
+      for (let i = 0; i < 1_000_000; i++) {
+        const bytes = names[i % distinct]!
+        interner.intern(bytes, 0, bytes.length)
+      }
+      return { ms: performance.now() - start, size: interner.size }
     }
-    const elapsed = performance.now() - start
 
-    expect(interner.size).toBe(50)
-    expect(elapsed).toBeLessThan(500)
+    /** Median of three, the shape `pathPredicateBudget.test.ts` already uses —
+     * one GC pause must not decide the verdict. */
+    function median(distinct: number): number {
+      const samples: number[] = []
+      let size = -1
+      for (let i = 0; i < 3; i++) {
+        const r = run(distinct)
+        samples.push(r.ms)
+        size = r.size
+      }
+      expect(size).toBe(distinct)
+      samples.sort((a, b) => a - b)
+      return samples[1]!
+    }
+
+    const few = median(50)
+    const many = median(5000)
+
+    // 100× the distinct names, measured at 1.48× the time. A candidate scan
+    // instead of a hash lookup would be two orders of magnitude, so 5× is
+    // generous against noise and nowhere near the failure it guards.
+    expect(many / few).toBeLessThan(5)
+
+    // The catastrophe net: anything quadratic blows through this by minutes,
+    // and the slowest hardware yet observed for the 50-name case is 509 ms.
+    expect(few).toBeLessThan(5000)
   })
 
   it('text() decodes lazily and is stable across calls', () => {

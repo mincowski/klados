@@ -95,6 +95,22 @@ makes it reachable more often; it did not create it. That is `docs/plans/R210-gr
 **Found on the way:** `DECISIONS.md`'s index table stopped at D-097 — D-098 through D-100 were
 added last round without indexing them, my own miss, and D-094/D-095 had never been indexed at all.
 
+**A CI failure this round did not cause.** `windows-latest` went red on `interner.test.ts`'s
+wall-clock budget — 509.2 ms against 500 — and it is not a regression: the same loop is 82.7 ms
+before R209 and 83.4 ms after on one machine, and the removed colon scan ran fifty times in `add()`,
+never in the hot path. `R183-ci-flakes.md` §6 forbids raising such a ceiling without measuring,
+and once the measurement clears the code its own first branch applies: **the shape is wrong for CI,
+not the constant.** The test now asserts the algorithmic property instead — growing the distinct-name
+count 100× must not grow the per-occurrence cost, measured 1.48×, and 89.3× under a mutation that
+collapses every hash into one bucket.
+
+**Investigating it found a record this round had already orphaned.** The Owed table carried R185's
+"the ceiling has a blind spot", pointing at a wall-clock ratio test **in**
+`test/namespaceResolution.test.ts` — the file acceptance 4 had this round rewrite. The test was
+deleted before anyone noticed the entry named it. It closes by removal: the entry said closing it
+needed the *mechanism* asserted, that no per-node namespace work runs on a declaration-free
+document, and there is no per-node namespace work left.
+
 **Cost:** 861 lines removed against 308 added, D-101, R134–R137 marked superseded, 2127 tests
 passing. Version stays at 1.0.0 against the plan's own minor candidate — the project lead's call
 for the fourth round running, and this is the first of the four that changes what an existing
