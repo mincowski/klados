@@ -308,9 +308,10 @@ it does not resolve NFC/NFD, which is not an ambiguity but two spellings of one 
 
 ## 12. Version
 
-**Ask on landing.** Candidate: **minor**, covering R201–R205 together — searches and queries that
-previously returned nothing now return results, and one search (`ß` for `ẞ`) stops returning one.
-That is a behaviour change users will notice, not a defect fix.
+Asked on landing, per `CLAUDE.md`. Candidate was **minor**, covering R201–R205 together — searches
+and queries that previously returned nothing now return results, and one search (`ß` for `ẞ`) stops
+returning one. **The project lead chose no bump**, for the second round running: `package.json`
+stays at 1.0.0 and a later round carries R199–R205 together.
 
 ## 13. Results
 
