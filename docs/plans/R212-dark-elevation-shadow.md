@@ -1,8 +1,13 @@
 # R212 — the elevation shadow does nothing in dark
 
-<!-- status: open -->
+<!-- status: built -->
 
-**Open.** Raised by the project lead while looking at R206's rendered comparison: *"in light mode
+**Built.** Dark's `--elev-2-shadow` is now `0 6px 16px rgba(0, 0, 0, 0.55)` — a value between
+this plan's (a) and (b), chosen by the project lead from six rendered in the running application —
+and `.raw-wrapping-overlay` has the tier's hairline (§ 5). `CONCEPT.md` §9.3 is amended and D-102
+records the decision. **The plan's own recommendation (b) and its §4 alternative (e) were both
+wrong**, for the same reason: the round measured a hard ceiling neither of them knew about. See
+§ 9. Raised by the project lead while looking at R206's rendered comparison: *"in light mode
 the shadow shows nicely, but in dark mode it doesn't. I guess it is still there, just hard to see
 because the background is dark. Should the shadow become lighter than the background?"*
 
@@ -139,3 +144,115 @@ own § 5 rejects bundling unrelated cosmetics for exactly this reason.
 **Ask on landing.** Candidate: patch — an appearance change in one theme with no capability
 change. If the outcome is (e), it is a token value and a `CONCEPT.md` correction and arguably not
 even that.
+
+
+## 9. Results — built
+
+### What landed
+
+`src/renderer/styles/themes/dark.css` — `--elev-2-shadow: 0 6px 16px rgba(0, 0, 0, 0.55)`, up from
+`0 2px 8px rgba(0, 0, 0, 0.3)`. Light is untouched (§ 7).
+
+`src/renderer/components/Raw/Raw.css` — `.raw-wrapping-overlay` gets
+`border: var(--border-width) solid var(--surface-border)`, closing § 5's first finding.
+
+`test/elevationBorders.test.ts` — the enumeration gains `Raw.css` and `Notifications.css`, **and
+stops being the authority**: a new test walks `src/renderer` for every stylesheet declaring
+`background: var(--elev-2-bg)` and fails if one is not listed. § 5's finding was not really "this
+surface has no border" — it was "a hand-maintained list of surfaces went four rounds out of date
+while its own test passed", and adding one entry would have left that intact.
+
+`test/elevationShadow.test.ts` — new. Four assertions on the token itself: not `none` and alpha at
+least 0.5; near-black rather than inverted; light's two-layer pair intact; and dark's
+`--elev-2-bg` still stepped off `--surface-bg`, invariant 9's first half. Mutation-verified —
+restoring the old `rgba(0,0,0,.3)` fails the first, an inverted white value fails the second.
+
+`docs/CONCEPT.md` — § 6.4's requirement, met: §9.3's dark bullet is reordered so the border and
+the step come first and the shadow last, the ceiling below is written into the section, and the
+key+ambient sentence is marked as light's.
+
+### The ceiling, which is the round's actual finding
+
+**A black shadow on `--surface-bg` cannot exceed 1.171:1, at any opacity, over any blur.** That
+ratio is `--gray-900` (`#14171e`, relative luminance 0.0086) against pure black — the whole budget.
+For comparison the background step alone is 1.101:1, and the hairline is 1.836:1.
+
+This is why both of this plan's own candidate answers were wrong. **(b) was recommended as "a real
+cast shadow"** — it measures 1.07:1–1.12:1, which is a real *change* but not a real mechanism, and
+adopting it under that description would have left the next person believing dark's shadow does
+work the border is actually doing. **(e), setting it to `none`, was argued from "the shadow
+contributes nothing measurable"** — measurement says a stronger value contributes little rather
+than nothing, and over the grid's alternating row bands that little is visible.
+
+The candidate the measurement makes interesting is §3's **(d)**, the inversion, rejected there as
+"the card *emitting* light". It measures **best of the six**, 1.14:1 to 1.41:1, and now there is a
+reason: a near-black pane has luminance headroom upward and none downward, so a white shadow is not
+a weaker option — it is the only strong one. Still rejected, but on consistency rather than on
+strength, which is a different and more honest rejection. It is also the one the project lead
+originally asked about, so the answer to *"should the shadow become lighter than the background?"*
+is that it is the only thing that would really work, and it is being declined anyway.
+
+**And (c) is now rejected twice over.** §3 rejected the light rim by eye, as reading like a second
+border. All of its 1.20:1–1.41:1 comes from that rim, which paints 1px outside the border box — so
+the arithmetic says exactly what the eye did.
+
+### How it was measured
+
+The full method, because §6.2 asked for numbers rather than adjectives and the apparatus does not
+survive the session:
+
+1. **The real application**, not a mock — Playwright's `_electron` against the built app, the same
+   route `scripts/electron-screenshot.mjs` and `scripts/screenshot-panes.mjs` use, with the
+   document seeded through the restore-on-launch path (a harness cannot drive the native Open
+   dialog). A generated 800-car inventory with **64 distinct child names**, because
+   `GRID_COLUMN_CAP` is 60 and the column picker does not exist below that; 11 tabs, because the
+   overflow menu does not exist until the strip overflows.
+2. **All nine consumers**, per §6.3 — the palette, both grid dropdowns, the tab-strip overflow
+   menu, Find, the shortcuts panel, the statistics panel, the notification stack, and
+   `.raw-wrapping-overlay`.
+3. **One surface opened once, then screenshotted under all seven candidates**, the value set as an
+   inline custom property on `:root`. Identical geometry in every frame is what makes a pixel
+   difference attributable to the shadow and nothing else.
+4. **Differenced against the `none` frame**, over every pixel within 32px outside the surface box,
+   **grouped by the unshadowed colour at each pixel**. The first version did not group, and its
+   "peak delta" landed on a text glyph behind the palette — 34 of 255, entirely misleading. The
+   pane is whichever colours actually cover the ring, and the grid dropdowns' ring is two colours
+   because it is row bands.
+
+**Two surfaces needed the harness to do something unusual**, both recorded because the next person
+will hit them:
+
+- **The notification stack.** Notifications auto-dismiss after 5 s unless they are errors or carry
+  actions, which is shorter than seven screenshots. `Expand All` over 51,200 nodes trips the
+  20,000-node ceiling and pushes a real one, and hovering it pauses the timer
+  (`Notifications.tsx`'s own `onMouseEnter`), so the surface stays alive for the sweep. The
+  external-change notification would have matched what the project lead was looking at more
+  closely, but touching the file on disk did not raise one within the harness's wait.
+- **`.raw-wrapping-overlay` lives for exactly one animation frame** — `enableWrapDeferred` sets it,
+  the next rAF clears it. Seven consecutive screenshots caught it **zero times**. Replacing
+  `window.requestAnimationFrame` with one that queues its callbacks instead of running them holds
+  the frame open indefinitely, and React still paints, since it does not schedule through rAF.
+  Nothing about the app's own CSS changes, which is what makes the capture legitimate.
+  **Two other things were needed to get there, and are why it took three attempts**: the Raw pane's
+  visibility is persisted per profile, so "run the toggle command" is not the same as "have it
+  open"; and only *enabling* wrap shows the overlay, so which way the toggle happens to go decides
+  whether there is anything to capture at all.
+
+**The apparatus is not kept.** `CLAUDE.md`'s test for that is whether anyone will run it again, and
+this drives nine surfaces through UI affordances that move — a fixture generator, a palette query
+per surface, a click target per dropdown. It would rot the way R155's dead spike did. The numbers
+it produced are recorded above instead.
+
+### The review found two stale records
+
+Per `CLAUDE.md`'s review-then-commit pass, reading `git diff`:
+
+- **`docs/FINDINGS.md`'s elevation entry said dark's `--elev-2-bg` is `--gray-700`.** It has been
+  `--gray-850` since R60 — and this is the same entry R206 corrected once already, in the same
+  sentence, for a different stale clause. Corrected.
+- **`docs/TASKS.md` said "Next free id: R212"** while R212's own register row sat above it.
+  Corrected to R213.
+
+### Version
+
+Patch, per § 8's candidate — an appearance change in one theme, no capability change.

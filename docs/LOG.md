@@ -16,6 +16,59 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R212 — dark's elevation shadow, measured against a ceiling nobody had computed · built
+
+**Plan:** `docs/plans/R212-dark-elevation-shadow.md` · **Decision:** D-102
+
+**The question was whether dark's shadow should be visible. The answer turned out to be bounded by
+arithmetic.** `--surface-bg` is `#14171e`, relative luminance 0.0086, so painting it *pure black*
+is 1.171:1 — the entire contrast budget any black shadow has in this theme, at any opacity, over
+any blur. The shipped `rgba(0,0,0,.3)` measured 1.03:1–1.06:1. The strongest sane black value
+measures 1.12:1. The background step alone is 1.101:1 and the hairline border is 1.836:1.
+
+**Both of the plan's own answers were therefore wrong**, and in opposite directions: its
+recommendation (b) called a 1.12:1 change "a real cast shadow", and its §4 alternative (e) argued
+for `none` from "contributes nothing measurable". A stronger value contributes little rather than
+nothing, and over the grid's alternating row bands that little is visible. Dark now draws
+`0 6px 16px rgba(0, 0, 0, 0.55)` — 1.05:1–1.10:1 — chosen by the project lead from six candidates
+rendered in the running application.
+
+**The project lead's original question was whether to invert it**, and the measurement says that is
+the only thing that would really work: a near-black pane has luminance headroom upward and none
+downward, so the white-shadow candidate measured best of the six at 1.14:1–1.41:1. Declined anyway,
+on light's shadow meaning "above the page" and a glow meaning "emitting light" — the themes are
+peers without being different physics.
+
+**Nine surfaces, not one.** The plan was explicit that tuning on the notification stack alone would
+repeat R208's one-sample mistake, so every `--elev-2-shadow` consumer was driven in the built app
+and screenshotted under all seven candidates with identical geometry, then differenced against the
+no-shadow frame over the ring of pixels outside each surface. Two of them fought back and are worth
+knowing about: notifications auto-dismiss in 5 s, which is shorter than seven screenshots (hovering
+pauses the timer, so `Expand All`'s truncation notice held still for the sweep), and
+`.raw-wrapping-overlay` lives for exactly one animation frame, which seven consecutive screenshots
+caught **zero** times until the harness replaced `requestAnimationFrame` with one that queues its
+callbacks and never runs them.
+
+**The first version of the measurement was wrong in a way worth recording.** Its peak delta for the
+palette was 34 of 255 — landing on a *text glyph* behind the surface, not on the pane. Grouping
+every sample by its unshadowed colour fixed it, and made the grid dropdowns measurable at all,
+since their backdrop is two colours rather than one.
+
+**`.raw-wrapping-overlay` got the tier's hairline**, closing the plan's §5 — and the fix is not
+the one entry it needed. `test/elevationBorders.test.ts` enumerated the elevated surfaces by hand,
+that list went four rounds out of date while the test passed, and the round it was found in was a
+different round again. The test now walks `src/renderer` for every stylesheet declaring
+`--elev-2-bg` and fails if one is unlisted.
+
+**Two stale records corrected**, both found in the review pass: `FINDINGS.md` said dark's
+`--elev-2-bg` is `--gray-700` (R60 moved it to `--gray-850`) — in the same sentence R206 had
+already corrected once, for a different stale clause — and `TASKS.md` said "Next free id: R212"
+with R212's own register row above it.
+
+Version stays a patch bump: an appearance change in one theme, no capability change.
+
+---
+
 ## R209 — XML namespace resolution removed, not repaired · built
 
 **Plan:** `docs/plans/R209-drop-namespaces.md` · **Decision:** D-101
