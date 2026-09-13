@@ -16,6 +16,7 @@ gain — the same argument `CLAUDE.md` makes for never renaming an `R` id.
 | `m3-bench.ts` | M3 F10 — the measurement pass for that round. |
 | `m4-bench.ts` | M4 G10 — likewise. |
 | `m5-bench.ts` | M5 H10 — likewise. `docs/LOG.md` cites `m5-bench.ts h2c-worker` as reproducing a 2.84× figure exactly. |
+| `r210-grid-models.ts` | R210 — what the grid rendering models cost as the number of distinct child-name groups under one parent grows. Extends `m2-e10-measure.ts`, which measured one group. Generates its own documents, because group count is the variable under test and every fixture in `spike/fixtures/` is single-group. |
 | `csv-bench.ts` | R150 — CSV store-to-file multipliers at several widths, and parse time at scale. |
 
 These are standalone: run them with `npx tsx spike/<file>.ts`. None is wired into
