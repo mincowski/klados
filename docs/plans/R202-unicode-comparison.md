@@ -1,12 +1,12 @@
 # R202–R205 — Unicode comparison: normalization, then one folding algorithm
 
-<!-- status: open -->
+<!-- status: built -->
 
-**Open.** Planned after R201's audit found that nothing in the codebase calls `normalize`, and after
-re-reading R72 §6 and D-082, which investigated the folding half deliberately and accepted it.
-**R205 reverses D-082**, which the project lead accepted along with its one regression (§ 7);
-R202–R204 need no decision. D-082 is updated, not deleted — its measurements stand and its
-conclusion changes.
+**Built**, all four tasks, in the order § 7 required. Planned after R201's audit found that nothing
+in the codebase calls `normalize`, and after re-reading R72 §6 and D-082, which investigated the
+folding half deliberately and accepted it. **R205 reverses D-082**, which the project lead accepted
+along with its one regression (§ 7); R202–R204 needed no decision. D-082 is superseded rather than
+deleted — its measurements stand and its conclusion changes — by **D-097**. Results in § 13.
 
 ## 1. What NFC is
 
@@ -308,6 +308,122 @@ it does not resolve NFC/NFD, which is not an ambiguity but two spellings of one 
 
 ## 12. Version
 
-**Ask on landing.** Candidate: minor for R202–R204 — searches that previously returned nothing now
-return results, which is a behaviour change users will notice — and the same bump covers R205 if it
-lands with them.
+Asked on landing, per `CLAUDE.md`. Candidate was **minor**, covering R201–R205 together — searches
+and queries that previously returned nothing now return results, and one search (`ß` for `ẞ`) stops
+returning one. **The project lead chose no bump**, for the second round running: `package.json`
+stays at 1.0.0 and a later round carries R199–R205 together.
+
+## 13. Results
+
+**Built.** All nine acceptance criteria met. `npm test` 2121 passing, typecheck and lint clean (exit
+codes captured directly).
+
+### 13a. One rule the plan did not have: the needle decides
+
+The plan applied normalization unconditionally at each site. Implementing it surfaced that this is
+**slightly wrong as well as slower**, and the same argument holds at all three sites, so it became
+the round's one cross-cutting rule: **normalize only when the needle is not pure ASCII.**
+
+NFC *composes*. Normalizing the haystack for an ASCII needle can only **remove** matches — `cafe`
+matches a decomposed `cafe` + U+0301 character for character today, and stops once the text is
+composed — and nothing in NFC produces an ASCII character that was not already there, so there is no
+match it could add back (that is NFK\*'s compatibility mappings, which § 10 rejects). For a regex it
+is worse than neutral: `.` counts one character against a composed `é` and two against a decomposed
+one, so normalizing would silently change what an existing ASCII pattern matches.
+
+It is also what makes the round free for almost everyone. Measured: an ASCII quick filter over
+200,000 rows is unchanged at ~217 ms against a ~214 ms baseline, where unconditional normalization
+cost ~21%; an all-ASCII find window costs 0.05 ms, which is the gate answering on its own.
+
+This is `chooseFindPath`'s own rule — an ASCII needle never pays for Unicode machinery — applied one
+level down. D-097 records it.
+
+### 13b. R202, the grid quick filter
+
+One `fold` helper, needle-gated. Six tests, both directions plus the ASCII permissiveness that must
+not regress.
+
+### 13c. R203, path name resolution
+
+`Interner.lookup` falls back to an NFC-keyed index after an exact byte lookup misses. Built lazily,
+rebuilt when the name table grows (a splice interns into the same table), and **skipped entirely for
+an ASCII query** — where it is not merely an optimization: any name whose NFC form equals an ASCII
+query already *was* that query, so the exact lookup would have found it.
+
+Names are decoded with the **lookup's own encoding** rather than through `text()`'s UTF-8 cache, so
+the index is correct for a document that is not UTF-8. Three things asserted not to happen: no
+normalization at intern time, no answering ahead of R53's `'unrepresentable'`, and no winning over an
+exact byte match when both spellings are interned.
+
+### 13d. R204, Find — two departures, both measured
+
+**The boundary rule.** § 5 specified splitting at ASCII characters. That is correct, and it leaves a
+long non-ASCII run with **no interior mapping**, so a match inside a CJK or Greek passage would
+report the run's start. Boundaries are per *starter* instead — `\p{M}` plus the Hangul V/T jamo
+ranges, which are the only non-Mark code points NFC composes leftwards — memoized by code point.
+Unicode property escapes give the real table for free, which is what `Intl.Segmenter` was going to be
+used for at 14 ms a window.
+
+**The map is piecewise, not dense.** § 5 specified an `Int32Array` from normalized position back to
+original. That is 245 KB a window, and filling it one entry at a time was the single largest cost in
+building it. Adjacent pieces NFC leaves alone coalesce into one run, and `originalIndexOf`
+binary-searches the runs: 21 KB on the realistic case, and the build dropped from 9.3 ms to 1.7 ms.
+
+**Measured per 64 KB window** (`spike/r204-normalization.ts`, kept runnable):
+
+| input | gate | full build | index |
+|---|---|---|---|
+| all ASCII | 0.050 ms | **0.050 ms** | none |
+| mostly ASCII, some NFD | 0.148 ms | **1.745 ms** | 2,733 runs, 21 KB |
+| 100% NFD | 0.639 ms | **4.389 ms** | 20,169 runs, 158 KB |
+
+The worst case is **2× the plan's 2.1 ms estimate**, and that is the price of the interior mapping
+the plan's split did not provide. It is still 3× better than the `Intl.Segmenter` implementation § 9
+rejected, and it is only ever reached by a non-ASCII needle against genuinely decomposed content.
+
+Two memos carry most of the win and are worth knowing before anyone "simplifies" them: a lone
+starter's NFC is looked up by code point rather than normalized as a one-character string (9.3 ms to
+6.0 ms), and a base-plus-marks piece is memoized by its own text, since a document's distinct
+combinations are bounded by its script while the occurrences are one per character (6.2 ms to
+4.4 ms).
+
+### 13e. R205, one folding algorithm
+
+`indexOfCaseInsensitive` is deleted. Plain case-insensitive search is `new RegExp(escape(needle),
+'gi')`, advancing `lastIndex` by **one** so overlapping matches survive — the parity the plan flagged,
+and a test pins `aa` in `aaaa`. Case-sensitive plain search keeps `indexOf`: exact, faster, and
+incapable of disagreeing with a case-sensitive regex about what a literal means.
+
+D-082's UI footnote is removed with the divergence it described.
+
+**§ 7's table, measured after the round rather than predicted:**
+
+| Pair | before | after |
+|---|---|---|
+| `µ` U+00B5 / `μ` U+03BC | plain miss, regex find | **both find** |
+| `Å` U+00C5 / `Å` U+212B | plain find, regex miss | **both find** |
+| `Ω` U+03A9 / `Ω` U+2126 | plain find, regex miss | **both find** |
+| `ß` U+00DF / `ẞ` U+1E9E | plain find, regex miss | **both miss** |
+
+Four of five, the same answer in both modes, exactly as § 7's "after R204 + R205" column said. The
+`ß`/`ẞ` loss is pinned by a test rather than left to be rediscovered, because on screen it is silent.
+
+### 13f. Review
+
+Reviewed against `git diff` per `R` id. Findings fixed before their commits:
+
+- **R201's whitespace guard was `/s/u`, not `/\s/u`** — a regex matching the letter `s`, which would
+  have excluded it from every name in every query. Caught by reading the diff; no fixture happened to
+  exercise it.
+- **A test file's Unicode fixtures were authored by typing the characters**, which is the trap
+  `FINDINGS.md` names and which R72 and this plan's own § 9 both hit. They survived intact this time;
+  converted to escapes anyway, because surviving by luck is not the property the rule asks for.
+- **`Cursor.consumeName` shadowed the free `consumeName(cursor)`** — renamed to `advancePastName`.
+- **A doc comment pointed at `test/pathParse.test.ts`** for assertions that live in
+  `test/pathUnicodeNames.test.ts`.
+
+### 13g. What this closes
+
+`FINDINGS.md`'s two surviving Unicode entries — the `NAME_CHAR` whitelist and *"nothing calls
+`normalize`"* — are both removed, since neither is true any more. R201 § 4's audit stands as the
+record of where they were.

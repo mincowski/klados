@@ -13,6 +13,7 @@
  */
 import type { NodeStore } from '../../../core/nodeStore'
 import type { SourceBuffer } from '../../../core/buffer'
+import { isAsciiOnly } from '../../../core/textFind'
 import type { NodeRef } from '../../../core/types'
 import { cellOf, rowFields } from './gridCell'
 import type { GridColumn } from './gridColumns'
@@ -24,13 +25,38 @@ export interface GridFilters {
 
 export const EMPTY_GRID_FILTERS: GridFilters = { quick: '', perColumn: new Map() }
 
+/**
+ * R202 — fold a cell for comparison against a needle that has already been
+ * folded the same way.
+ *
+ * `normalize` is applied **only when the needle is not pure ASCII**, and that
+ * is a correctness rule before it is a performance one.
+ *
+ * NFC composes: a decomposed `cafe` + U+0301 becomes `café`. So normalizing
+ * the *cell* for an ASCII needle can only ever **remove** matches — `cafe`
+ * matches the decomposed spelling today, character for character, and would
+ * stop once the cell is composed. Nothing in NFC can produce an ASCII
+ * character that was not already there (that is NFK*'s compatibility
+ * mappings, which D-082 rejected), so there is no match it could add back.
+ *
+ * The plan proposed normalizing unconditionally. Measured, that costs ~21% of
+ * a 200,000-row filter pass on all-ASCII content — to make a permissive
+ * result *less* permissive. Gating on the needle makes the common case free
+ * and the uncommon one correct, and matches `chooseFindPath`'s own rule that
+ * an ASCII needle never pays for Unicode machinery.
+ */
+function fold(text: string, needleIsAscii: boolean): string {
+  return needleIsAscii ? text.toLowerCase() : text.normalize('NFC').toLowerCase()
+}
+
 function cellTextLower(
   store: NodeStore,
   source: SourceBuffer,
   row: NodeRef,
-  nameId: number
+  nameId: number,
+  needleIsAscii: boolean
 ): string {
-  return (cellOf(store, source, row, nameId).text ?? '').toLowerCase()
+  return fold(cellOf(store, source, row, nameId).text ?? '', needleIsAscii)
 }
 
 export interface FilterResult {
@@ -70,9 +96,19 @@ export function filterIndices(
   columns: readonly GridColumn[],
   filters: GridFilters
 ): FilterResult {
-  const quick = filters.quick.trim().toLowerCase()
+  // The needle is folded once, here; each cell is folded the same way below.
+  // `quickIsAscii` decides whether either side is normalized at all — see
+  // `fold`. A per-column filter carries its own answer, so one non-ASCII
+  // column filter does not make every other column pay.
+  const quickRaw = filters.quick.trim()
+  const quickIsAscii = isAsciiOnly(quickRaw)
+  const quick = fold(quickRaw, quickIsAscii)
   const perColumn = [...filters.perColumn.entries()]
-    .map(([nameId, text]) => [nameId, text.trim().toLowerCase()] as const)
+    .map(([nameId, text]) => {
+      const trimmed = text.trim()
+      const ascii = isAsciiOnly(trimmed)
+      return [nameId, fold(trimmed, ascii), ascii] as const
+    })
     .filter(([, text]) => text.length > 0)
 
   if (quick.length === 0 && perColumn.length === 0) {
@@ -90,8 +126,8 @@ export function filterIndices(
   const indices: number[] = []
   outer: for (let i = 0; i < members.length; i++) {
     const row = members[i]!
-    for (const [nameId, text] of perColumn) {
-      if (!cellTextLower(store, source, row, nameId).includes(text)) continue outer
+    for (const [nameId, text, ascii] of perColumn) {
+      if (!cellTextLower(store, source, row, nameId, ascii).includes(text)) continue outer
     }
     if (quick.length === 0) {
       indices.push(i)
@@ -101,7 +137,7 @@ export function filterIndices(
     let visibleMatch = false
     let hiddenMatches: number[] | null = null
     for (const [nameId, cell] of rowFields(store, source, row)) {
-      if (!(cell.text ?? '').toLowerCase().includes(quick)) continue
+      if (!fold(cell.text ?? '', quickIsAscii).includes(quick)) continue
       if (visible.has(nameId)) {
         visibleMatch = true
         break

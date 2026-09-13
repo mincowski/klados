@@ -16,6 +16,75 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R201–R205 — Unicode all the way through: the tokenizer, then the comparison · built
+
+**Plans:** `docs/plans/R201-unicode-path-names.md`, `docs/plans/R202-unicode-comparison.md`
+
+**Started from one question — "is `NAME_CHAR` the only place we are stuck on ASCII?" — and the audit
+that answered it found two more.** The path grammar could not tokenize `//größe`, so R53's encoding
+fix had been unreachable from the Palette since it landed. Nothing in the codebase called
+`normalize`, so a name or needle written `café` never matched the same text spelled `cafe` + U+0301.
+And plain and `.*` search folded case through two different algorithms that disagreed at 154 measured
+code points, which D-082 had looked at deliberately and accepted.
+
+**R201 inverted the character class rather than widening it.** The set of characters a name may
+contain is open — it is whatever four formats interned — and the set the grammar reserves is small
+and closed, which is the rule XML's own tokenizer already uses and says so. Widening the regex would
+have been half a fix and would have read as a whole one: `Cursor.peek()` returned a UTF-16 code unit,
+so an astral name yields a lone surrogate that matches no letter property however the class is
+written. The cursor advances by code point now, and an astral CJK Extension B name resolves end to
+end.
+
+**R202–R204 could only ever normalize a comparison, never the document** — invariant 1 forbids
+decoding it, invariant 6 requires Save to write the original bytes. The three comparison sites turned
+out to differ by an order of magnitude each: the grid filter is one call, `Interner.lookup` needs a
+second index bounded by *name count* rather than document size, and only Find has the hard problem.
+
+**The hard problem is that `String.prototype.normalize` returns a string with no index
+correspondence, and NFC changes lengths.** Building the map back is the round. The plan proposed
+splitting the window at ASCII boundaries; that is correct and leaves a long non-ASCII run with no
+interior mapping, so a match inside a CJK passage would report the run's start. Boundaries are per
+starter instead — `\p{M}` plus the Hangul V/T jamo ranges, which are the only non-Mark code points
+NFC composes leftwards. Unicode property escapes give the real table for free, which is exactly what
+`Intl.Segmenter` was going to be used for at 14 ms a window.
+
+**The plan's dense `Int32Array` map was the single largest cost in building it** — 245 KB a window,
+filled one entry at a time. Runs NFC leaves alone are coalesced and the lookup binary-searches them:
+21 KB, and the build went 9.3 ms → 1.7 ms on the realistic case. The worst case (fully decomposed
+content, non-ASCII needle) lands at 4.4 ms, twice the plan's estimate and the price of the interior
+mapping it did not provide.
+
+**R205 deleted the second fold.** Plain case-insensitive search is a literal regex through the same
+engine `.*` mode uses, so the two agree by construction rather than by coincidence — and it is
+10.3× faster, because the old implementation sliced and lowercased the text at every position. The
+order was load-bearing and the plan said so: R205 alone would have regressed angstrom and ohm, which
+are canonical singletons only normalization resolves.
+
+**One rule the plan did not have, and it turned out to be correctness rather than performance.**
+Normalization is gated on the needle at all three sites. NFC *composes*, so normalizing the haystack
+for an ASCII needle can only **remove** matches — `cafe` matches a decomposed `cafe` + U+0301
+character for character today — and nothing in NFC can produce an ASCII character that was not
+already there. For a regex it is worse: `.` counts one character against a composed `é` and two
+against a decomposed one, so an existing ASCII pattern would silently change meaning. The gate is
+also what makes the round free for almost every search: an all-ASCII find window costs 0.05 ms, and
+an ASCII quick filter over 200,000 rows is unchanged.
+
+**The trade the project lead accepted, measured after the fact rather than predicted:** four of the
+five documented look-alike pairs now match, and the answer no longer depends on which mode is
+toggled. `ß`/`ẞ` is the loss — the engine folds upward and `'ß'.toUpperCase()` is `'SS'`, a length
+change no normalization form repairs — and a test pins it, because on screen it is silent.
+
+**Cost:** D-097, D-082 superseded, `FINDINGS.md`'s two Unicode entries removed as no longer true, one
+new spike bench, 2121 tests passing.
+
+**A stale entry found on the way.** `FINDINGS.md`'s first known-wrong item still described
+`CONCEPT.md` §11.1 as claiming parsing halts at the first failure and the diagnostic list as
+unbounded. R200 had made both false the round before and had not updated it. The parser behaviour it
+describes is unchanged, so the entry stays — pointed at the cap and at `store.diagnosticIndex`
+instead.
+
+---
+
 ## R199–R200 — diagnostics were unbounded in every format, and a ragged CSV row said the wrong thing about itself · built
 
 **Plans:** `docs/plans/R200-diagnostic-volume.md`, `docs/plans/R199-csv-ragged-rows.md`

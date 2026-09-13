@@ -220,3 +220,70 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
   return true
 }
+
+describe('Interner.lookup — canonical equivalence (R203)', () => {
+  // Escapes with a codepoint guard, per `docs/FINDINGS.md`.
+  const COMPOSED = 'caf\u00e9'
+  const DECOMPOSED = 'cafe\u0301'
+
+  function internerWith(...names: readonly string[]): Interner {
+    const interner = new Interner()
+    for (const name of names) {
+      const bytes = new TextEncoder().encode(name)
+      interner.intern(bytes, 0, bytes.length)
+    }
+    return interner
+  }
+
+  it('guards its own fixtures', () => {
+    expect([...COMPOSED].map((c) => c.codePointAt(0))).toEqual([0x63, 0x61, 0x66, 0x00e9])
+    expect([...DECOMPOSED].map((c) => c.codePointAt(0))).toEqual([0x63, 0x61, 0x66, 0x65, 0x0301])
+    expect(new TextEncoder().encode(COMPOSED).length).toBe(5)
+    expect(new TextEncoder().encode(DECOMPOSED).length).toBe(6)
+  })
+
+  it('a composed query finds a decomposed name, and the reverse', () => {
+    expect(internerWith(DECOMPOSED).lookup(COMPOSED)).toBe(0)
+    expect(internerWith(COMPOSED).lookup(DECOMPOSED)).toBe(0)
+  })
+
+  it('still prefers the exact byte match when both spellings are interned', () => {
+    // `DECOMPOSED` is interned second, so a fallback that ignored the exact
+    // path would answer 0 for it. The exact lookup must win.
+    const interner = internerWith(COMPOSED, DECOMPOSED)
+    expect(interner.lookup(COMPOSED)).toBe(0)
+    expect(interner.lookup(DECOMPOSED)).toBe(1)
+  })
+
+  it('still returns null for a name the document does not have', () => {
+    expect(internerWith(COMPOSED).lookup('tea')).toBe(null)
+    expect(internerWith(COMPOSED).lookup('caf\u00e8')).toBe(null) // grave, not acute
+  })
+
+  it("keeps R53's 'unrepresentable' ahead of the fallback", () => {
+    // The third state is decided by encoding, before any lookup happens —
+    // a fallback that answered first would collapse it back into `null`,
+    // which is exactly the defect R53 fixed.
+    expect(internerWith(COMPOSED).lookup('\u65e5\u672c\u8a9e', 'windows-1252')).toBe(
+      'unrepresentable'
+    )
+  })
+
+  it('sees names interned after the index was first built', () => {
+    // A splice interns into the same table. The index carries the count it
+    // was built at and rebuilds when that changes.
+    const interner = internerWith(DECOMPOSED)
+    expect(interner.lookup(COMPOSED)).toBe(0)
+    const later = new TextEncoder().encode('na\u0308chste')
+    interner.intern(later, 0, later.length)
+    expect(interner.lookup('n\u00e4chste')).toBe(1)
+  })
+
+  it('answers an ASCII query without consulting the fallback at all', () => {
+    // Not an optimization detail — it is why an ASCII needle stays
+    // permissive. `cafe` matches nothing here, and must not start matching
+    // `café` just because the index composed it.
+    const interner = internerWith(DECOMPOSED)
+    expect(interner.lookup('cafe')).toBe(null)
+  })
+})

@@ -47,21 +47,45 @@ function matchCount(needle: string, caseSensitive: boolean, regex: boolean): num
 }
 
 // R72 §6's own measured table, reproduced against the real fixture and the
-// real findAll rather than assumed still true — every pair diverges, in
-// both directions, and the ASCII control is unaffected across all three
-// columns (the assertion that would fail if the fold were ever made
-// fuzzier "to fix" one of the other rows).
-describe('the measured divergence table (R72 §6)', () => {
+// real `findAll` rather than assumed still true — and **there is no longer a
+// divergence in it**, which is why the numbers below are what they are.
+//
+// `docs/plans/R202-unicode-comparison.md` § 7 predicted this table exactly,
+// as its "after R204 + R205" column, and put the trade to the project lead
+// before either round was built:
+//
+//   - **R204** made both modes see canonical equivalence, so the angstrom
+//     sign and the ohm sign now match their letters in every mode, including
+//     case-sensitive — canonical equivalence has nothing to do with case.
+//   - **R205** deleted `indexOfCaseInsensitive`, so plain and `.*` fold
+//     through the same engine. µ/μ agree now because *both* find it, not
+//     because NFC touched them: it did not, and could not — that pair is a
+//     compatibility relationship, and D-082 rejected NFKC for equating
+//     characters that are not the same character.
+//   - **ß/ẞ is the accepted loss.** Plain used to find it and no longer does:
+//     the engine folds upward and `'ß'.toUpperCase()` is `'SS'`, a length
+//     change no normalization form repairs. Pinned here rather than left to
+//     be rediscovered, because on screen it is silent — a search for ß simply
+//     stops finding ẞ, with nothing to say why.
+//
+// Four of the five pairs now match, and the answer no longer depends on
+// which mode a user happens to have toggled. The ASCII control is unchanged
+// across every column — the assertion that would fail if the fold were ever
+// made fuzzier "to fix" the two rows that remain.
+describe('the measured divergence table (R72 §6, R204, R205)', () => {
   const cases: readonly {
     needle: string
     plain: number
     regexCount: number
     caseSensitive: number
   }[] = [
-    { needle: 'µ', plain: 1, regexCount: 2, caseSensitive: 1 }, // µ vs μ
-    { needle: 'Å', plain: 2, regexCount: 1, caseSensitive: 1 }, // Å vs Å(U+212B)
-    { needle: 'Ω', plain: 2, regexCount: 1, caseSensitive: 1 }, // Ω vs Ω(U+2126)
-    { needle: 'ß', plain: 2, regexCount: 1, caseSensitive: 1 }, // ß vs ẞ
+    // Compatibility, not canonical. R205 made both modes agree by folding
+    // through one engine; NFC left the characters themselves alone.
+    { needle: 'µ', plain: 2, regexCount: 2, caseSensitive: 1 }, // µ vs μ — both find it
+    { needle: 'ß', plain: 1, regexCount: 1, caseSensitive: 1 }, // ß vs ẞ — neither does
+    // Canonical singletons — R204 resolved both, in every mode.
+    { needle: 'Å', plain: 2, regexCount: 2, caseSensitive: 2 }, // Å vs Å(U+212B)
+    { needle: 'Ω', plain: 2, regexCount: 2, caseSensitive: 2 }, // Ω vs Ω(U+2126)
     { needle: 'unit', plain: 7, regexCount: 7, caseSensitive: 7 } // ASCII control
   ]
 
@@ -74,7 +98,20 @@ describe('the measured divergence table (R72 §6)', () => {
     })
   }
 
-  it('every divergent pair in this table has a non-ASCII needle (the condition the footnote keys on)', () => {
+  it('plain and .* now return the same count for every pair (R205)', () => {
+    // The property R205 buys, asserted directly rather than inferred from the
+    // table above: one folding algorithm, so the two modes cannot disagree.
+    // D-082's UI footnote existed to warn about exactly this and is removed
+    // with it.
+    for (const { needle } of cases) {
+      expect(matchCount(needle, false, false), needle).toBe(matchCount(needle, false, true))
+    }
+  })
+
+  it('every pair in this table still has a non-ASCII needle', () => {
+    // The byte path handles ASCII needles and still ASCII-folds. That is only
+    // safe because D-082 measured zero disagreeing pairs for an ASCII needle,
+    // so this keeps the table honest about which path it is exercising.
     for (const { needle } of cases) {
       if (needle === 'unit') continue
       expect(isAsciiOnly(needle)).toBe(false)

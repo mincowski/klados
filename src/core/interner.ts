@@ -27,6 +27,16 @@ export class Interner {
   private readonly byHash = new Map<number, number[]>()
   private readonly textCache: (string | undefined)[] = []
   private readonly decoder = new TextDecoder('utf-8')
+  /** R203's NFC fallback index: `NFC(name) -> id`, built lazily and only
+   * when a lookup has already missed with a non-ASCII query. `null` until
+   * then, which is the common case — an all-ASCII document never builds it,
+   * and neither does a document nobody queries. */
+  private nfcIndex: Map<string, number> | null = null
+  /** What `nfcIndex` was built from. It is rebuilt when either changes: the
+   * name count grows (a splice interns new names into the same table) or a
+   * lookup arrives with a different encoding. */
+  private nfcIndexCount = -1
+  private nfcIndexEncoding = ''
   /** Byte offset of the first `:` within each name (absolute, into
    * `nameBytes`, the same convention as `starts`/`ends`), or `-1` when the
    * name has no prefix — populated only when `namespaces` is `true`
@@ -156,11 +166,82 @@ export class Interner {
     if (bytes === null) return 'unrepresentable'
     const hash = fnv1a32(bytes, 0, bytes.length)
     const candidates = this.byHash.get(hash)
-    if (candidates === undefined) return null
-    for (const id of candidates) {
-      if (this.bytesEqual(id, bytes, 0, bytes.length)) return id
+    if (candidates !== undefined) {
+      for (const id of candidates) {
+        if (this.bytesEqual(id, bytes, 0, bytes.length)) return id
+      }
+    }
+    return this.lookupNormalized(text, encoding)
+  }
+
+  /**
+   * R203 — the canonical-equivalence fallback, consulted only after an exact
+   * byte lookup has missed.
+   *
+   * Stored names are the **document's own bytes** (invariant 7, R53), so a
+   * name written `café` decomposed is a different byte sequence from the same
+   * name composed, and the exact lookup cannot see past that. This builds a
+   * second index keyed by each name's NFC form and answers from it.
+   *
+   * **Bounded by name count, not document size.** A 2 M-row, 10-column CSV
+   * interns ten names (R145 acceptance 6); a large XML document interns
+   * hundreds. The index is tens to low thousands of entries, built once and
+   * reused until the table grows.
+   *
+   * **Skipped entirely for an ASCII query**, which is the free and the
+   * correct answer at once: `NFC` of an ASCII string is itself, and no
+   * non-ASCII string normalizes to pure ASCII under NFC (that is NFK*'s
+   * compatibility mappings, which D-082 rejected). So any name whose NFC form
+   * equals an ASCII query already *was* that query, and the exact lookup
+   * above would have found it. The fallback could only cost time.
+   *
+   * **First id wins** on a collision — two distinct stored names that share
+   * an NFC form. Document order, which is the only stable answer available
+   * and matches how the exact path behaves when a hash bucket has several
+   * candidates.
+   */
+  private lookupNormalized(text: string, encoding: string): number | null {
+    for (let i = 0; i < text.length; i++) {
+      if (text.charCodeAt(i) > 0x7f) {
+        const index = this.normalizedIndex(encoding)
+        return index?.get(text.normalize('NFC')) ?? null
+      }
     }
     return null
+  }
+
+  private normalizedIndex(encoding: string): Map<string, number> | null {
+    if (
+      this.nfcIndex !== null &&
+      this.nfcIndexCount === this.count &&
+      this.nfcIndexEncoding === encoding
+    ) {
+      return this.nfcIndex
+    }
+    let decoder: TextDecoder
+    try {
+      // `text(id)` always decodes UTF-8 — correct for display, and correct
+      // here too whenever the document is UTF-8. For any other encoding the
+      // names must be read back the way they were written, so this decodes
+      // them itself rather than reusing that cache.
+      decoder = encoding === 'utf-8' ? this.decoder : new TextDecoder(encoding)
+    } catch {
+      // An encoding label `TextDecoder` will not construct. The worker
+      // already falls back to utf-8 before parsing when that happens
+      // (`klados.encoding.unrecognized`), so this is unreachable in
+      // practice; no fallback is better than a wrong one.
+      return null
+    }
+    const index = new Map<string, number>()
+    for (let id = 0; id < this.count; id++) {
+      const name = decoder.decode(this.nameBytes.subarray(this.starts[id]!, this.ends[id]!))
+      const normalized = name.normalize('NFC')
+      if (!index.has(normalized)) index.set(normalized, id)
+    }
+    this.nfcIndex = index
+    this.nfcIndexCount = this.count
+    this.nfcIndexEncoding = encoding
+    return index
   }
 
   text(id: number): string {
