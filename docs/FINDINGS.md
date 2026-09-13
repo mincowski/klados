@@ -165,6 +165,16 @@ description.
 
 ## Recurring mistakes this project actually makes
 
+**Read a checker's exit code, never its output — and never through a pipe.** Two separate rounds
+have reported a red check as green. Once by grepping `npm run lint`'s `✖` summary line instead of its
+status (R54 ratchets at `--max-warnings 3`, so a non-zero exit prints a summary that reads like
+success). Once by running `npx vitest run … | tail -3`, where **the pipeline's exit status is
+`tail`'s**, so a `&&` chain continued happily and the "1 failed" line was cut off by the `tail`
+itself — three commits landed red while being reported clean. Run the checker, capture `$?`
+immediately, and quote it. `docsStatus` in particular fails on things no diff makes obvious: a
+`built-caveat` plan whose Owed entry stops naming it is broken by editing the *other* end of the
+reference.
+
 **The suite tests mechanisms; nobody was testing the application. One 20-minute manual pass against
 a real build found three user-visible defects that ~1,860 automated tests did not**, and the three
 are worth listing because they fail differently and none of them is an edge case. All three are

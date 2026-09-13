@@ -5,8 +5,9 @@
 **Open.** **Decided by the project lead after the alternatives were measured** (§ 3): namespace
 resolution is removed rather than repaired. `inv:price` and `s:price` become two names, as written.
 
-This plan replaced a different one. It was `R209-namespace-splice.md`, a merge of namespace state
-across the incremental splice; § 2 records why that was abandoned, because the reasoning is the
+**An earlier draft of this plan proposed the opposite** — merging namespace state across the
+incremental splice so resolution survived an edit. It was rewritten before reaching `main`, so there
+is no separate document to look for. § 2 records why it was abandoned, because the reasoning is the
 useful part and a plan that simply appeared as "delete it" would look arbitrary.
 
 ## 1. The defect that started it
