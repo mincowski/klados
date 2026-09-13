@@ -3406,3 +3406,120 @@ still will. That is a permissive result, and the harmful direction is missing on
 **Rejected: keeping the footnote.** D-082's UI note warned that plain and `.*` matched slightly
 different sets. R205 removed the divergence, so the note would warn about behaviour that no longer
 happens.
+
+### D-098 — the notification's *severity edge* carries the contrast, not its hairline (R206) · `settled`
+
+**The question.** `info` notifications clear 3:1 in neither theme — light 1.31:1, dark 1.67:1. R57
+introduced the 1px hairline precisely because light's `--surface-bg` and `--elev-2-bg` are the same
+`--gray-0`, so a notification is white-on-white and the hairline is its only boundary.
+
+**Decided: raise the 3px severity edge to `--notification-edge` (`--gray-500`) and leave the 1px
+hairline at `--surface-border`.** The project lead's call, made with both rendered against a real
+pane at 1:1 in both themes.
+
+The reason it is the better answer, rather than a compromise: the two edges were being treated as
+one problem because the Owed entry ran them together. They are not. **`info` is the one severity
+level R57 defines by having no colour** — and it drew its severity edge in `--surface-border`, so
+the level defined by having no colour was also the only level with no *visible* edge. That is the
+defect. The hairline being quiet is a property of the elevated tier, shared with eight other
+surfaces.
+
+`--gray-500` clears 3:1 against both neighbours in both themes: 4.27:1 light, 3.81:1 dark against
+the card and 4.20:1 against the pane behind it in dark. A warning and an error still differ from it
+only in the edge colour, so R57's design is intact.
+
+**Rejected: a `--diagnostic-info-*` token.** It would invent a severity hue for the level defined by
+not having one. `--notification-edge` is neutral — the same edge, made visible.
+
+**Rejected: raising `--surface-border`.** 42 consumers; it is the application's frame colour, so
+this would be a visibly heavier application rather than a notification change.
+
+**Rejected: a notification-private hairline.** It would split this surface off the elevated tier
+R60 deliberately unified and `test/elevationBorders.test.ts` asserts.
+
+**Accepted, and recorded as accepted rather than owed:** the hairline stays at 1.31:1 / 1.67:1.
+`test/notifications.test.tsx` pins those exact values rather than a bare `< 3`, so a token change
+that moves them is noticed rather than silently absorbed.
+
+---
+
+### D-099 — a rounded corner that would not render was a sibling painting over it, and the wrong diagnosis outlived two rounds (R207) · `settled`
+
+**What was recorded.** R33's addendum reported the Raw Scrubber thumb's top corners rendering flat
+at `top: 0`, concluded a Chromium rasterization artifact at a fractional device-pixel row, and
+warned in `docs/FINDINGS.md` that **any rounded corner near a pane boundary was at risk**. Two
+fixes were ruled out empirically — `translateZ(0)` and a 2px thumb inset — which made the report
+read as unusually well established.
+
+**It is wrong.** R207 swept every 1/16 CSS pixel at four device pixel ratios in two layout modes
+(an explicit fractional `top`, and a flex-derived fractional height, which is how R33's own number
+arose), in headless Chromium and in real Electron 39. An injected div rounded correctly every time,
+**including at 438.8125, R33's own reported value**. Blink pixel-snaps paint offsets, so a
+fractional layout Y does not become a fractional raster row.
+
+**The cause is `.scrubber-marker-selected`**: a 3px square-cornered bar at `--accent`, spanning the
+thumb's exact width, sitting one pixel above its top, drawn whenever the selection is at the
+document start. Hide the markers and all four corners round.
+
+**Decided: accept it as shipped.** The marker is doing its job — showing where the selection is —
+and merely coincides with the thumb. Four candidate fixes were rendered on the real strip with a
+realistic marker population; the two that actually restore the corner do it by insetting every
+marker from 13px to 9px or 11px in a 15px track, which is a permanent cost to diagnostic density
+for a cosmetic overlap at one scroll position.
+
+**Why this is a decision entry and not just a Results note.** The two ruled-out fixes were the
+evidence that made the wrong diagnosis credible, and both are explained by the real cause:
+`translateZ(0)` is irrelevant to an overlapping sibling, and insetting the *thumb* cannot move a
+marker positioned by document ratio. **A fix that should work and does not is evidence about the
+diagnosis, not a reason to try a second fix** — that is the transferable part, and it is what
+`docs/FINDINGS.md` now carries in place of the false warning.
+
+Also settled by measurement rather than inherited wording: `.scrollbar-thumb` renders correctly at
+`top: 0`, and sits at an integer Y because `Scrollbar.css` adds its own 1px inset. The Owed entry
+had called this "the scrollbar thumb" for two rounds; R33 measured `.scrubber-thumb`.
+
+---
+
+### D-100 — the title bar's optical alignment comes from `text-box-trim`, not from a measured constant (R208) · `settled`
+
+**The question.** `.title-bar-mark` carried `transform: translateY(1px)` to make the mark's ink
+centre coincide with the title's cap-height ink centre. The technique is right — a 12px mark and a
+9px cap-height cannot share top and bottom edges at once. The constant was calibrated against one
+font, and `--font-ui` resolves differently per platform.
+
+Measured in Electron 39 across nine font families: **the 1px constant is wrong for eight of them**,
+and the required nudge ranges from -0.5px to +1px, so it was wrong in both directions.
+
+**Decided: `text-box: trim-both cap alphabetic` on `.title-bar-title-head`/`-tail`, and no nudge.**
+With the box trimmed to its own cap-height ink, centring the boxes centres the ink for any font.
+Worst deviation across the nine: **0.008px**.
+
+**Rejected: computing the nudge at runtime** from canvas `TextMetrics`, which was also measured and
+is also exact. It moves the value out of the stylesheet to solve a problem CSS now solves — the
+difference between a fix and a better workaround.
+
+**Rejected: per-platform constants**, which enumerate a set that is not closed.
+
+**Rejected: widening the test's tolerance**, on the same reasoning the original skip was written
+with. Instead the skip is removed, because there is no constant left for a font to invalidate.
+
+**Three things that had to be measured rather than reasoned about**, each of which would have sent
+the round the wrong way:
+
+1. **`text-box-trim` computes to `trim-both` on `.title-bar-title` and changes nothing**, because
+   it applies to block containers and that element is `display: flex` (which R5's middle truncation
+   needs). A flex *item* is a block container, so the leaf spans work. "The feature computed but
+   did nothing" is a reason to check what it applies to, not a result.
+2. **`cap alphabetic` plus `overflow: hidden` eats descenders.** R5's ellipsis supplies the
+   overflow, and overflow clips to the padding box, so `pygmy-jaguar-query.xml` rendered as
+   `pvgmv-iaguar-querv.xml`. There is no `overflow-x: hidden` / `overflow-y: visible` escape — CSS
+   computes the visible one to `auto`. Fixed with `padding-block` for the ink and an equal negative
+   `margin-block` so the margin box is still the cap-height box flex centres on. **0.5em is
+   headroom, not a calibration** — it need only exceed the deepest descender, and being generous
+   costs nothing, which is precisely what distinguishes it from the constant this round removed.
+3. **`TextMetrics.actualBoundingBoxAscent` is quantized to whole pixels**, so it cannot adjudicate
+   a half-pixel question. Georgia's declared cap height is 9.000px and its "K" reports 10. Where a
+   font's declared metric is available it is exact and is what the layout used.
+
+**Chromium-only, and deliberately unguarded.** The application ships as Electron, so `CSS.supports`
+is not a question; a browser without the feature degrades to exactly the pre-R208 rendering.

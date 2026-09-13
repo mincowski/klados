@@ -16,6 +16,97 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R206–R208 — three disclosed cosmetic defects, and all three records were wrong · built
+
+**Plan:** `docs/plans/R206-disclosed-ui-defects.md`
+
+**The plan's own premise was that one of the three Owed entries had gone stale, and that this was
+worth re-measuring the other two for. It was: both of those turned out to be wrong too.** The round
+therefore delivered two fixes, one accept-and-close, and four corrected records — and the corrected
+records are arguably the larger half.
+
+**R206 got a better answer than either option the plan offered.** The plan framed the question
+around the 1px hairline, because the Owed entry did. Looking at the render, the project lead
+separated two things the entry had run together: keep the hairline, and make the **3px severity
+edge** visible instead. That is the sharper reading of R57 — `info` is the one level R57 defines by
+having *no* severity colour, and it drew that edge in `--surface-border`, so the level defined by
+having no colour was also the only level with no visible edge at all. `--notification-edge` at
+`--gray-500` clears 3:1 in both themes against both neighbours. The hairline stays sub-3:1 and is
+recorded as accepted, not owed: raising it means raising the application's frame colour (42
+consumers) or splitting this surface off the elevated tier R60 unified.
+
+**R207's probe succeeded and disproved the thing it was probing.** R33's addendum was the
+best-evidenced report in the repository — real-Electron screenshots, an unrelated injected div
+reproducing the artifact at the same fractional Y, two fixes ruled out empirically. Sweeping every
+1/16 CSS pixel at four device pixel ratios in two layout modes, in headless Chromium *and* real
+Electron 39, **the injected div never reproduced it**, including at 438.8125 tested explicitly.
+Blink pixel-snaps paint offsets. The real cause is `.scrubber-marker-selected` — a square-cornered
+3px bar painted across the thumb's rounded top whenever the selection sits at the document start.
+Hide the markers and all four corners round.
+
+**And the two failed fixes were the tell.** `translateZ(0)` is irrelevant to an overlapping
+sibling; insetting the *thumb* cannot move a marker positioned by document ratio. Both were
+recorded as evidence *for* the rasterization theory when they were evidence against it. The
+transferable lesson is in `FINDINGS.md` now: a fix that should work and does not is evidence about
+the diagnosis, not a reason to try a second fix.
+
+**Accepted as shipped**, after four candidates were rendered on the real strip with a realistic
+marker population — the marker is doing its job and merely coincides with the thumb, and the two
+candidates that restore the corner narrow every marker in the strip from 13px to 9px or 11px in a
+15px track. The deliverable is the record, and that was not cosmetic: `FINDINGS.md` had been
+telling every reader that `border-radius` was unreliable near any pane boundary, in the file
+`CLAUDE.md` says to read before implementing anything.
+
+**R208's probe returned a false negative on its first reading, which nearly cost the fix.**
+`text-box-trim` parses, computes to `trim-both`, and changes no box height on `.title-bar-title` —
+because it applies to block containers and that element is `display: flex`, which R5's middle
+truncation needs. On the leaf spans, which are flex items and therefore block containers, it trims
+to exactly the cap height. Had the probe stopped at the first result, a usable CSS feature would
+have been written up as inapplicable. *"The feature computed but did nothing"* is a reason to check
+what it applies to, not a result.
+
+Measured across nine font families in Electron 39: the shipped 1px constant is wrong for **eight of
+nine**, with the required nudge ranging from -0.5px to +1px, so it was wrong in both directions.
+`text-box-trim` lands at 0.008px worst case. A runtime-computed nudge is also exact and was not
+taken — it moves the value out of the stylesheet to solve a problem CSS now solves.
+
+**The review caught a regression the round would otherwise have shipped.** `cap alphabetic` puts
+the box's bottom edge on the baseline and R5's ellipsis puts `overflow: hidden` on the same box, so
+`pygmy-jaguar-query.xml` rendered as `pvgmv-iaguar-querv.xml` — every descender sheared off flat.
+There is no `overflow-x: hidden` with `overflow-y: visible` escape; CSS computes the visible one to
+`auto`. Fixed with `padding-block` cancelled by an equal negative `margin-block`, so the margin box
+is still the cap-height box the flex centering aligns on. **Every fixture in the file was "Klados"
+or "Klado"+"s.xml"** — not a descender between them — so every assertion was green while it was
+broken.
+
+**The skip is gone, which was the acceptance rather than a convenience**, since there is no
+constant left for a font to invalidate. Four font families assert the alignment, a negative control
+proves the assertion still fails when the trim is removed, and the descender clipping has its own
+test.
+
+**Four records corrected, three of them found rather than planned:**
+
+- `FINDINGS.md`'s `border-radius` warning, wrong and general, for two rounds.
+- `FINDINGS.md`'s "only one of seven `--elev-2-bg` surfaces has a border" — R60 gave it to the
+  whole tier four rounds ago and `test/elevationBorders.test.ts` asserts it. It also found an
+  eighth surface added since with no hairline, `.raw-wrapping-overlay`.
+- `TASKS.md`'s Owed row for `core/path/parse.ts`'s `NAME_CHAR`, which R201 replaced two rounds ago
+  — my own miss in that round. Removing it revealed it was **R53's only owed item**, so R53's
+  `built-caveat` becomes `built`, which R201 should also have done.
+- The three entries this round was about, all rewritten with what is now true.
+
+**Not done, and reported:** `scripts/electron-screenshot.mjs` waits a fixed 500 ms and its
+regenerated capture raced a loading overlay. Not caused here and not fixed here; the committed
+screenshot is still accurate, since Segoe UI is the one font the old constant was right for.
+
+**Raised and deferred:** the dark elevation shadow, from the project lead looking at R206's render.
+Real, specified rather than broken, and nine consumers — `docs/plans/R212-dark-elevation-shadow.md`.
+
+**Cost:** D-098, D-099, D-100; three `FINDINGS.md` entries corrected and two added; 2131 tests
+passing.
+
+---
+
 ## R201–R205 — Unicode all the way through: the tokenizer, then the comparison · built
 
 **Plans:** `docs/plans/R201-unicode-path-names.md`, `docs/plans/R202-unicode-comparison.md`

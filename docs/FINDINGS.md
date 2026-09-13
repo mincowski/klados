@@ -301,10 +301,15 @@ against an elevated dark surface is genuinely invisible, contrast exactly 1:1, n
 new elevated surface needs its own boundary treatment verified by actual contrast, not assumed from
 "it has a border declared" — and any check must be run in **both** themes, since which pair collides
 (`--surface-bg`/`--elev-2-bg` in light, `--surface-border`/`--elev-2-bg` in dark) differs by theme.
-**Only one of the seven `--elev-2-bg` surfaces has a border at all** — `.notification`, from R57;
-Find, the command palette, the statistics panel, the tab-strip overflow menu and both grid dropdowns
-have none. `docs/plans/R60-dark-elevation.md` is the round that moves the hairline to the tier and stops
-dark over-stepping the background to compensate.
+**Every `--elev-2-bg` surface now carries the hairline** — R57 gave it to `.notification` alone,
+and `docs/plans/R60-dark-elevation.md` moved it to the tier (Find, the command palette, the
+statistics panel, the shortcuts panel, the tab-strip overflow menu and both grid dropdowns) while
+stopping dark over-stepping the background to compensate. `test/elevationBorders.test.ts` asserts
+it against the source CSS. **This entry said "only one of seven" until R206 checked**, four rounds
+after R60 made it false — the same drift `docs/plans/R206-disclosed-ui-defects.md` §4 names in the
+Owed table, found again here. **One surface added since is still missing it**:
+`.raw-wrapping-overlay` (`Raw.css`, D12), an eighth consumer added after R60 swept the other seven —
+white-on-white in light for the one frame it shows, recorded in `docs/plans/R212-dark-elevation-shadow.md` § 5.
 
 **A fixture of look-alike characters cannot be authored by typing them.** U+212B ANGSTROM SIGN and
 U+2126 OHM SIGN are *canonical singletons*: any NFC-normalising step between writing and disk
@@ -564,14 +569,43 @@ union in `src/preload/api.ts` (R193) keeps the renderer's declared environment h
 - **TOML permits non-contiguous table extension**; this project's contiguous-span tree model does
   not. A later `[x]` opens a second, separate `Object` rather than corrupting spans. Believed
   unreachable in real-world TOML, disclosed rather than left to be rediscovered.
-- **`border-radius` silently fails to render on an element whose top edge sits at a fractional
-  device-pixel row** (found on the Raw Scrubber's thumb at `top: 0`, R33 addendum) — reproduced on
-  a completely unrelated, freshly-injected `position: fixed` div at the same fractional Y with no
-  relation to the real component, and *not* reproduced at an arbitrary Y away from any pane
-  boundary. `transform: translateZ(0)` (new compositing layer) and a few-pixel inset both failed to
-  fix it. This project's pane heights are not integers (flex layout composing `--row-height`,
-  banner presence, and a resizable split), so any rounded corner near a pane boundary is at risk.
-  Not understood, not fixed — flag it rather than re-debug it from scratch.
+- **A "rendering artifact" was an ordinary sibling painting over the thing that looked broken —
+  and the wrong diagnosis sat here for two rounds telling people `border-radius` was unreliable.**
+  R33's addendum reported the Raw Scrubber thumb's top corners rendering flat at `top: 0` and
+  concluded a Chromium rasterization bug at a fractional device-pixel row, warning that *any*
+  rounded corner near a pane boundary was at risk. **R207 disproved it.** Sweeping every 1/16 CSS
+  pixel at four device pixel ratios in two layout modes (an explicit fractional `top`, and a
+  flex-derived fractional height), in headless Chromium *and* in real Electron 39, an injected div
+  never once reproduced it — including at 438.8125, R33's own reported value. Blink pixel-snaps
+  paint offsets, so a fractional layout Y does not become a fractional raster row. The real cause
+  is `.scrubber-marker-selected`: a square-cornered 3px bar drawn across the thumb's rounded top
+  whenever the selection is at the document start. Hide the markers and all four corners round
+  correctly. **That also explains both of R33's failed fixes**, which is the tell that should have
+  prompted the re-check — `translateZ(0)` is irrelevant to an overlapping sibling, and insetting the
+  *thumb* cannot move a marker positioned by document ratio. **Accepted as shipped** (R207): the
+  marker is doing its job and merely coincides with the thumb. The lesson worth keeping is the
+  method, not the pixel: when a fix that should work does not, suspect the diagnosis before
+  reaching for a second fix — and check what else is painting there. `elementFromPoint` cannot
+  answer this, since hit testing follows the layout radius while the complaint is about raster;
+  screenshot the element and read the pixels.
+- **`text-box-trim` plus `overflow: hidden` on the same element eats descenders.** `text-box-edge:
+  cap alphabetic` puts the box's bottom edge on the alphabetic baseline, and `overflow` clips to
+  the padding box — so a box that is both trimmed and clipped shears off every descender:
+  `pygmy-jaguar-query.xml` rendered as `pvgmv-iaguar-querv.xml` in R208's first attempt at the
+  title bar, where the clip comes from R5's ellipsis. **There is no `overflow-x: hidden` with
+  `overflow-y: visible` escape** — CSS computes the visible one to `auto` when the other is
+  hidden. The fix is `padding-block` for the ink, cancelled by an equal negative `margin-block` so
+  the margin box is still the cap-height box that flex centering aligns on. **And the reason it
+  shipped green in review**: every fixture in `test/titleBarInkAlignment.test.tsx` was "Klados" or
+  "Klado"+"s.xml", which between them contain no descender at all — a text fixture that cannot
+  exercise ascenders and descenders is not a text fixture.
+- **`TextMetrics.actualBoundingBoxAscent` is quantized to whole pixels in Chromium, so it cannot
+  settle a sub-pixel question.** Measured in Electron 39: Georgia's declared cap height is 9.000px
+  and its "K" reports an ink ascent of 10; Arial's are 9.313 and 10. R208 lost an afternoon to a
+  test that put Georgia at exactly 0.5 against a 0.5px tolerance — the measurement's resolution
+  showing through, not a misalignment. Where a font's *declared* metric is available (a
+  `text-box-edge: cap` box's own height, for instance) it is exact and is what the layout actually
+  used; prefer it.
 - **`focusin` is an event, not a state — a registry that learns focus only by listening will be
   wrong whenever it registers *after* focus arrived.** Cost a dead F6 in `focus.ts`: `StrictMode`'s
   mount → cleanup → mount replay cleared `lastFocusedPane` while the DOM element kept focus (it
