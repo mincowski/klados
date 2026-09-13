@@ -103,7 +103,7 @@ function markerNodes(): Element[] {
 describe('Scrubber diagnostic markers (R200 acceptance 4)', () => {
   it('renders at most bucket-count markers for 50,000 diagnostics', async () => {
     const doc = raggedCsvDocument(50_000)
-    expect(doc.store.diagnosticIndex.total).toBe(50_000)
+    expect(doc.store.diagnosticIndex.total).toBe(50_001) // rows, plus R199's summary
 
     await paint(<ScrubberContent document={doc} selectedNode={-1} />)
 

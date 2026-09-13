@@ -342,10 +342,15 @@ caller of it. `CONCEPT.md` §4.3 and `docs/DECISIONS.md` amended in the same com
 
 **Owed** (both listed in `docs/TASKS.md`):
 
-1. A row with **two or more** unheadered extra fields collapses them to one shared empty-name
-   column, keeping only the first (§9's "extra fields" handling, `parseRow` in
-   `src/formats/csv/index.ts`) — the single-extra-field case (the overwhelmingly common one, and
-   already a Warning-flagged malformed row) is unaffected.
+1. The **grid** can show only the first of a row's unheadered extra fields (§9's "extra fields"
+   handling, `parseRow` in `src/formats/csv/index.ts`). **Reworded by R199**, which found this
+   entry described the symptom accurately and the cause wrongly: the parser emits an attribute for
+   every extra field with a correct value span, so nothing is lost from the document — Save is
+   byte-identical and the Raw view shows the row as written. What collapses is the *projection*,
+   because nothing in the file names column six of a five-column header and the empty name spans
+   all intern to one id. R199 discloses it in the `csv.long-row` message and in the one
+   `csv.ragged-rows` summary; closing it needs a `src/core/types.ts` contract change, reported
+   rather than proposed (`docs/plans/R199-csv-ragged-rows.md` §3).
 2. A `columns × rows`-derived pre-open memory projection for CSV specifically (§8) was not built;
    the existing generic file-size-based `confirmSize` gate covers it today, measured close to (and
    at low column counts, a little more optimistic than) the real multiplier.

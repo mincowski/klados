@@ -54,8 +54,9 @@ describe('R200 — the retained list is bounded', () => {
   it('caps a CSV with 500,000 long rows, and records every one of them', () => {
     const { store } = parse(csvFormatModule, raggedCsv(500_000))
 
-    expect(store.diagnosticIndex.total).toBe(500_000)
-    expect(store.diagnosticCount).toBeLessThanOrEqual(DIAGNOSTIC_CAP_PER_CODE + 2)
+    // 500,000 per-row warnings plus R199's one summary for the file.
+    expect(store.diagnosticIndex.total).toBe(500_001)
+    expect(store.diagnosticCount).toBeLessThanOrEqual(DIAGNOSTIC_CAP_PER_CODE + 3)
     expect(store.diagnostics.filter((d) => d.code === 'csv.long-row')).toHaveLength(
       DIAGNOSTIC_CAP_PER_CODE
     )
@@ -95,7 +96,7 @@ describe('R200 — the retained list is bounded', () => {
 
   it('synthesizes no summary when nothing was suppressed', () => {
     const { store } = parse(csvFormatModule, raggedCsv(3))
-    expect(store.diagnosticCount).toBe(3)
+    expect(store.diagnosticCount).toBe(4) // three rows, one summary
     expect(store.diagnostics.some((d) => d.code === 'klados.diagnostics-capped')).toBe(false)
   })
 
@@ -135,7 +136,7 @@ describe('R200 — the position index is not', () => {
     // instead would report 100 warnings for a file with half a million.
     const { store } = parse(csvFormatModule, raggedCsv(500_000))
 
-    expect(store.diagnosticIndex.countOf(Severity.Warning)).toBe(500_000)
+    expect(store.diagnosticIndex.countOf(Severity.Warning)).toBe(500_001)
     expect(store.diagnosticIndex.countOf(Severity.Error)).toBe(0)
     expect(store.diagnosticIndex.countOf(Severity.Fatal)).toBe(0)
   })

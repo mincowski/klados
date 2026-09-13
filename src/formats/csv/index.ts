@@ -77,6 +77,11 @@ export interface FieldSpan {
 class ParserState {
   pos: number
   diagnosticCount = 0
+  /** Counted so the file gets one summary saying what its shape is, rather
+   * than only N entries saying where each offence was (R199 § 4b). Both
+   * questions are worth answering and they are different questions. */
+  longRowCount = 0
+  shortRowCount = 0
   private lastProgressAt = 0
 
   constructor(
@@ -203,28 +208,40 @@ function scanRow(state: ParserState): FieldSpan[] {
  * missing facet as `Absent`); a long row's extra fields beyond `header.length` all share
  * one empty name span, so they collapse into a single catch-all "extra fields" column
  * rather than being dropped — accepted for what is already a Warning-flagged, malformed
- * row (a *second* extra field on the *same* row still collides with the first and is
- * lost, disclosed in `docs/plans/R145-csv.md`'s Owed entry rather than fixed here).
+ * row.
+ *
+ * **Every extra field still reaches the store**, with a correct value span; a *second*
+ * extra on the *same* row collides with the first only in the grid, which is a display
+ * projection and not data loss — Save stays byte-identical (invariant 6) and the Raw view
+ * shows the row as written. R199 investigated fixing it and could not: `NodeSink.attribute`
+ * names a facet by a byte range **in the document**, and nothing in the file names column
+ * six of a five-column header. So the round discloses it instead — here, in the per-row
+ * message, and in the one summary `parse` emits (`docs/plans/R199-csv-ragged-rows.md`).
  */
 function parseRow(state: ParserState, header: readonly FieldSpan[]): void {
   const rowStart = state.pos
   const fields = scanRow(state)
 
   if (fields.length < header.length) {
+    state.shortRowCount++
     state.emit(
       Severity.Warning,
       'csv.short-row',
       rowStart,
       state.pos - rowStart,
-      `Row has ${fields.length} field(s), fewer than the ${header.length}-column header`
+      `Row has ${fields.length} field(s), fewer than the ${header.length}-column header. ` +
+        'The missing trailing fields are shown as absent rather than empty.'
     )
   } else if (fields.length > header.length) {
+    state.longRowCount++
     state.emit(
       Severity.Warning,
       'csv.long-row',
       rowStart,
       state.pos - rowStart,
-      `Row has ${fields.length} field(s), more than the ${header.length}-column header`
+      `Row has ${fields.length} field(s), more than the ${header.length}-column header. ` +
+        'Every value is kept in the file and readable in the Raw view; the grid can show ' +
+        'only the first unheadered extra, because nothing in the file names the others.'
     )
   }
 
@@ -264,6 +281,7 @@ function parse(source: Uint8Array, sink: NodeSink, options: ParseOptions): Parse
   // rules it out without a `core/types.ts` change. When the has-header heuristic finds
   // no support for that assumption, it is disclosed rather than left unremarked.
   const header = scanRow(state)
+  const headerEnd = state.pos
   if (!detectHeader(source, dialect, header, state.pos)) {
     state.emit(
       Severity.Warning,
@@ -285,10 +303,50 @@ function parse(source: Uint8Array, sink: NodeSink, options: ParseOptions): Parse
     }
     parseRow(state, header)
   }
+  emitRaggedSummary(state, header.length, bomLength, headerEnd)
   sink.closeNode(arr, state.pos)
   sink.closeNode(doc, source.length)
 
   return { complete: true, bytesConsumed: state.pos, diagnosticCount: state.diagnosticCount }
+}
+
+/**
+ * One entry for the file, naming its shape — R199 § 4b. The per-row warnings answer
+ * *where*; this answers *what*, which is the question a 1,240-row flood never got round
+ * to. Emitted only from `parse`, never from `parseRange`: a single-row reparse has no
+ * standing to make a statement about the whole document.
+ *
+ * Anchored on the **header row**, because the header's width is the thing being reported
+ * and is what a reader would want to look at first. The per-row entries keep the offsets
+ * of the offending rows, and R200's position index keeps them all whether or not their
+ * records survived the cap.
+ */
+function emitRaggedSummary(
+  state: ParserState,
+  headerWidth: number,
+  bomLength: number,
+  headerEnd: Offset
+): void {
+  const { longRowCount, shortRowCount } = state
+  if (longRowCount === 0 && shortRowCount === 0) return
+
+  const parts: string[] = []
+  if (longRowCount > 0) parts.push(`${longRowCount.toLocaleString()} row(s) have more fields`)
+  if (shortRowCount > 0) parts.push(`${shortRowCount.toLocaleString()} row(s) have fewer`)
+  const extras =
+    longRowCount > 0
+      ? ' Rows with extra fields keep every value in the file — the Raw view shows them; ' +
+        'the grid shows only the first extra on a row.'
+      : ''
+
+  state.emit(
+    Severity.Warning,
+    'csv.ragged-rows',
+    bomLength,
+    headerEnd - bomLength,
+    `Header has ${headerWidth} column(s) and ${parts.join(', ')}. RFC 4180 requires every row ` +
+      `to have the same number of fields as the header.${extras}`
+  )
 }
 
 /**
