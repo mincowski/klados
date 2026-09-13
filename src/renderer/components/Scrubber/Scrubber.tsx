@@ -75,7 +75,7 @@ function ratioFromPointer(strip: HTMLElement, clientY: number): number {
  * (`test/documentPropsRenderCost.test.tsx`) — same reasoning `Tree.tsx`'s
  * own `TreeContent` export gives. */
 export function ScrubberContent({ document, selectedNode }: ScrubberContentProps): JSX.Element {
-  const { rowIndex, diagnostics, store } = document
+  const { rowIndex, store } = document
   const stripRef = useRef<HTMLDivElement>(null)
   // The scrubber's own reported position — distinct from the selection
   // marker below. Dragging never moves the selection (§4.5: "navigating is
@@ -89,9 +89,14 @@ export function ScrubberContent({ document, selectedNode }: ScrubberContentProps
     selectedNode !== NO_SELECTION ? offsetToRatio(rowIndex, store.spanOf(selectedNode).start) : 0
   )
 
+  // From the store's uncapped position index, not from `diagnostics` —
+  // which R200 capped per code, and whose retained entries are very nearly
+  // the document's first N by offset. `positions()` caches, so the identity
+  // is stable across renders for an unchanged store.
+  const diagPositions = store.diagnosticIndex.positions()
   const diagMarkers = useMemo(
-    () => diagnosticMarkers(rowIndex, diagnostics),
-    [rowIndex, diagnostics]
+    () => diagnosticMarkers(rowIndex, diagPositions),
+    [rowIndex, diagPositions]
   )
   const selectedMarker: ScrubberMarker | null =
     selectedNode !== NO_SELECTION

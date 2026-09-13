@@ -39,6 +39,7 @@
  * boundary (`subtreeSplice.ts`, one file) doesn't cover. F10's measurement
  * is what would motivate actually building that.
  */
+import { DiagnosticIndex } from '../../core/diagnosticIndex'
 import { Interner } from '../../core/interner'
 import { NodeStore, type NodeStoreBuffers } from '../../core/nodeStore'
 import {
@@ -354,6 +355,28 @@ function graft(
   }
 }
 
+/**
+ * The position index's half of `mergeDiagnostics` below, deliberately sitting
+ * next to it: the two apply the same drop-and-shift rule to the two halves of
+ * one diagnostic set, and an edit to either that forgets the other
+ * reintroduces exactly the split R200 §5 exists to keep consistent — the shape
+ * R209 removed namespace resolution over.
+ */
+function mergeDiagnosticIndex(
+  oldIndex: DiagnosticIndex,
+  oldSpan: { readonly start: Offset; readonly end: Offset },
+  delta: number,
+  freshIndex: DiagnosticIndex
+): DiagnosticIndex {
+  const merged = new DiagnosticIndex()
+  oldIndex.forEach((severity, offset) => {
+    if (offset < oldSpan.start) merged.add(severity, offset)
+    else if (offset >= oldSpan.end) merged.add(severity, offset + delta)
+  })
+  freshIndex.forEach((severity, offset) => merged.add(severity, offset))
+  return merged
+}
+
 /** Diagnostics inside the old subtree are dropped (replaced by whatever
  * the fresh parse found there instead); everything before is untouched;
  * everything after shifts by `delta`, same as every other post-edit span. */
@@ -423,6 +446,7 @@ interface DecidedSplice {
   readonly oldSpan: { readonly start: Offset; readonly end: Offset }
   readonly freshBuffers: NodeStoreBuffers
   readonly freshDiagnostics: readonly Diagnostic[]
+  readonly freshDiagnosticIndex: DiagnosticIndex
 }
 
 type DecideOutcome = { readonly ok: true; readonly decided: DecidedSplice } | SpliceFailure
@@ -489,7 +513,8 @@ function decideSplice(request: SpliceRequest): DecideOutcome {
       ancestors,
       oldSpan,
       freshBuffers,
-      freshDiagnostics: freshStore.diagnostics
+      freshDiagnostics: freshStore.diagnostics,
+      freshDiagnosticIndex: freshStore.diagnosticIndex
     }
   }
 }
@@ -508,18 +533,20 @@ function isSingleRootedFresh(freshBuffers: NodeStoreBuffers): boolean {
 export function spliceSubtree(request: SpliceRequest): SpliceOutcome {
   const decision = decideSplice(request)
   if (!decision.ok) return decision
-  const { spliceNode, ancestors, oldSpan, freshBuffers, freshDiagnostics } = decision.decided
+  const { spliceNode, ancestors, oldSpan, freshBuffers, freshDiagnostics, freshDiagnosticIndex } =
+    decision.decided
 
   const finalBuffers = graft(request.oldStore, spliceNode, ancestors, freshBuffers, request.delta)
   const finalStore = NodeStore.fromBuffers(request.newBytes, request.interner, finalBuffers)
-  for (const d of mergeDiagnostics(
-    request.oldStore.diagnostics,
-    oldSpan,
-    request.delta,
-    freshDiagnostics
-  )) {
-    finalStore.diagnostic(d)
-  }
+  finalStore.adoptDiagnostics(
+    mergeDiagnostics(request.oldStore.diagnostics, oldSpan, request.delta, freshDiagnostics),
+    mergeDiagnosticIndex(
+      request.oldStore.diagnosticIndex,
+      oldSpan,
+      request.delta,
+      freshDiagnosticIndex
+    )
+  )
 
   return { ok: true, store: finalStore }
 }
@@ -731,14 +758,20 @@ function graftChunked(request: SpliceRequest, decided: DecidedSplice): SearchJob
       attrCount: totalAttrCount
     }
     const finalStore = NodeStore.fromBuffers(request.newBytes, request.interner, finalBuffers)
-    for (const d of mergeDiagnostics(
-      request.oldStore.diagnostics,
-      decided.oldSpan,
-      delta,
-      decided.freshDiagnostics
-    )) {
-      finalStore.diagnostic(d)
-    }
+    finalStore.adoptDiagnostics(
+      mergeDiagnostics(
+        request.oldStore.diagnostics,
+        decided.oldSpan,
+        delta,
+        decided.freshDiagnostics
+      ),
+      mergeDiagnosticIndex(
+        request.oldStore.diagnosticIndex,
+        decided.oldSpan,
+        delta,
+        decided.freshDiagnosticIndex
+      )
+    )
     return finalStore
   })
 

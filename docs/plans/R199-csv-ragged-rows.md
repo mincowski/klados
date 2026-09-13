@@ -1,10 +1,12 @@
 # R199 — a ragged CSV row discloses less than it should, and warns more than it should
 
-<!-- status: open -->
+<!-- status: built-caveat -->
 
-**Open.** Raised from a question about `docs/plans/R145-csv.md`'s first Owed entry. Investigating it
+**Built, with the grid limitation disclosed rather than closed** — which is what the round set out
+to do, and § 3 says why closing it needs a `src/core/types.ts` change that is reported instead of
+made. Raised from a question about `docs/plans/R145-csv.md`'s first Owed entry. Investigating it
 found that the entry describes the symptom accurately and the cause wrongly, so § 2 corrects the
-record before § 4 proposes anything.
+record before § 4 proposes anything. Results in § 8.
 
 ## 1. What happens now
 
@@ -103,5 +105,51 @@ how the scrubber marks them. The problem is the volume, not the existence.
 
 ## 7. Version
 
-**Ask on landing.** Candidate: no bump — diagnostic wording and volume, no behaviour change to
-parsing or saving.
+Asked on landing, per `CLAUDE.md`. Candidate was no bump, and **the project lead chose no bump**
+for the round as a whole.
+
+## 8. Results
+
+**Built.** All six acceptance criteria met. Landed on the same branch as R200 and after it, per
+§ 4's *"R200 lands first, or they land together."*
+
+### 8a. What landed
+
+**(a) The per-row message tells the truth about what is not shown.** `csv.long-row` now reads
+*"Every value is kept in the file and readable in the Raw view; the grid can show only the first
+unheadered extra, because nothing in the file names the others."* `csv.short-row` gained the
+matching half — that the missing trailing fields render as absent rather than empty (D-068), which
+was equally undisclosed.
+
+**(b) One summary for the file.** `emitRaggedSummary` emits a single `csv.ragged-rows` Warning at
+end of parse naming the header width and the counts: *"Header has 3 column(s); 300 have more and
+100 have fewer (RFC 4180 requires every row to have the same number of fields)."* Anchored on the
+**header row**, since the header's width is what it reports.
+
+**Emitted only from `parse`, never from `parseRange`.** A single-row incremental reparse has no
+standing to make a statement about the whole document, and it does not see the other rows.
+
+**The volume fix came from R200 as planned**, with no CSV-local counter: the per-row flood is
+bounded by the general per-code cap, and R199's summary is its own code, so it is never the entry
+that gets suppressed.
+
+### 8b. What did not change, and is asserted not to have
+
+`test/csvParse.test.ts` gained *"every extra field reaches the store, however many there are"*,
+asserting five attributes with five correct values on a two-column header — **on the store, not on
+the grid**. That is acceptance 4, and it exists so that a later round reading the Owed entry cannot
+make the grid honest by making the parser lossy. § 5 rejects that, and now a test does too.
+
+### 8c. The record, corrected
+
+`docs/TASKS.md`'s Owed entry and `docs/plans/R145-csv.md`'s own both said the parser *"collapses
+them … keeping only the first"*. Both now say what is true: the store holds every field, and the
+collapse is in the grid. The entry stays open — the grid limitation is real — but it no longer
+describes data loss that does not happen.
+
+### 8d. Review
+
+Reviewed against `git diff` before the commit. It found the `parseRow` doc comment still pointing
+at R145's Owed entry as the place the limitation was "disclosed rather than fixed here", which is
+now this plan; and three existing tests asserting `diagnosticCount` as a bare number, which the
+summary changes — updated with the reason stated at each, rather than renumbered silently.

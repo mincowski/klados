@@ -1,4 +1,9 @@
-import type { Diagnostic, NodeRef, NodeSink, Offset } from './types'
+import {
+  DIAGNOSTICS_CAPPED_CODE,
+  DIAGNOSTIC_CAP_PER_CODE,
+  DiagnosticIndex
+} from './diagnosticIndex'
+import { Severity, type Diagnostic, type NodeRef, type NodeSink, type Offset } from './types'
 import { NodeKind } from './types'
 import type { Interner } from './interner'
 
@@ -121,7 +126,20 @@ export class NodeStore implements NodeSink {
   private attrCount = 0
 
   private readonly stack: OpenFrame[] = []
+
+  /** The *retained* diagnostic records — bounded at `DIAGNOSTIC_CAP_PER_CODE`
+   * per code (R200 §5). The positions of the ones that were not retained are
+   * still recorded, in `diagnosticIndex_`. */
   private readonly diagnosticList: Diagnostic[] = []
+  /** How many of each code have been retained so far. The cap is per code so
+   * that a flood of one kind cannot push out the handful of another. */
+  private readonly retainedByCode = new Map<string, number>()
+  /** Every diagnostic's position and severity, uncapped. */
+  private diagnosticIndex_ = new DiagnosticIndex()
+  /** `diagnostics`' cached return value. Consumers memoize on its identity
+   * (`Scrubber.tsx`), so it must not be a fresh array per read; invalidated
+   * by `diagnostic()` and `adoptDiagnostics()`. */
+  private diagnosticsView: readonly Diagnostic[] | null = null
   private lastProgress = 0
 
   // ---------------------------------------------------------------------
@@ -446,8 +464,56 @@ export class NodeStore implements NodeSink {
     this.nsResolvedIdArr = grown
   }
 
+  /**
+   * Records the position always, the record itself only while this code is
+   * under its budget (R200 §5). Never rejects a diagnostic outright: a
+   * suppressed one still reaches the scrubber and still counts towards the
+   * status bar's totals, because both read `diagnosticIndex_` rather than
+   * the list.
+   *
+   * The message string is already built by the time this is called —
+   * `ParserState.emit` takes an interpolated template — and that is
+   * deliberate rather than overlooked: those strings are immediately
+   * unreachable garbage, whereas the *retained* objects are what exhaust
+   * memory. R200 §6 is explicit that bounded retention is the requirement and
+   * that contorting twenty call sites into message thunks is not.
+   */
   diagnostic(d: Diagnostic): void {
+    this.diagnosticIndex_.add(d.severity, d.offset)
+    this.retainRecord(d)
+    this.diagnosticsView = null
+  }
+
+  private retainRecord(d: Diagnostic): void {
+    const retained = this.retainedByCode.get(d.code) ?? 0
+    if (retained >= DIAGNOSTIC_CAP_PER_CODE) return
+    this.retainedByCode.set(d.code, retained + 1)
     this.diagnosticList.push(d)
+  }
+
+  /**
+   * Replaces this store's whole diagnostic state at once — both halves
+   * together, which is the point of the signature. The two callers each
+   * rebuild a store rather than parse into one: `parseClient.ts` rehydrating
+   * a worker's response, and `subtreeSplice.ts` grafting a reparsed subtree.
+   *
+   * R209 is why this takes both rather than offering a setter per half: the
+   * namespace state it removed was derived state every store-rebuilding path
+   * had to hand-carry, and *both* such paths got it wrong. One required
+   * parameter pair is the smallest thing that makes forgetting a half a type
+   * error.
+   */
+  adoptDiagnostics(list: readonly Diagnostic[], index: DiagnosticIndex): void {
+    this.diagnosticList.length = 0
+    this.retainedByCode.clear()
+    this.diagnosticIndex_ = index
+    for (const d of list) {
+      // Regenerated from `index` on read, so carrying the old one would
+      // double-count it and pin a stale number.
+      if (d.code === DIAGNOSTICS_CAPPED_CODE) continue
+      this.retainRecord(d)
+    }
+    this.diagnosticsView = null
   }
 
   progress(bytesConsumed: Offset): void {
@@ -473,12 +539,54 @@ export class NodeStore implements NodeSink {
     return this.interner_
   }
 
+  /** The length of what `diagnostics` returns — the retained records plus the
+   * summary entry, not the true number the document produced.
+   * `diagnosticIndex.total` is that. */
   get diagnosticCount(): number {
-    return this.diagnosticList.length
+    return this.diagnostics.length
   }
 
+  /**
+   * The navigable records: everything retained, plus one synthesized entry
+   * naming how many were not, whenever anything was suppressed.
+   *
+   * The summary sits at offset 0 with length 0 on purpose. R200 §3's argument
+   * is that a `Diagnostic` carries an offset because it is a statement about
+   * a *position* — so an entry that is a statement about the *file* has none
+   * to claim, and pointing it at the first suppressed site would invite a
+   * reader to treat that site as special when it is only the first one past a
+   * budget. It is a Warning regardless of what was suppressed, for the same
+   * reason: it is not itself a problem in the document, and the true
+   * per-severity totals sit on the status bar beside it, read from
+   * `diagnosticIndex`.
+   */
   get diagnostics(): readonly Diagnostic[] {
-    return this.diagnosticList
+    if (this.diagnosticsView === null) {
+      const suppressed = this.diagnosticIndex_.total - this.diagnosticList.length
+      this.diagnosticsView =
+        suppressed <= 0
+          ? this.diagnosticList
+          : [
+              ...this.diagnosticList,
+              {
+                severity: Severity.Warning,
+                code: DIAGNOSTICS_CAPPED_CODE,
+                offset: 0,
+                length: 0,
+                message:
+                  `${suppressed.toLocaleString()} further diagnostic(s) are not listed — at most ` +
+                  `${DIAGNOSTIC_CAP_PER_CODE} are kept per problem kind. Every one of them is ` +
+                  `still counted, and still marked on the scrubber.`
+              }
+            ]
+    }
+    return this.diagnosticsView
+  }
+
+  /** Every diagnostic's position and severity, uncapped — what the scrubber
+   * buckets and what the status bar counts. */
+  get diagnosticIndex(): DiagnosticIndex {
+    return this.diagnosticIndex_
   }
 
   get bytesProcessed(): number {

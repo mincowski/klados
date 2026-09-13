@@ -113,6 +113,7 @@ Search for the id to jump to one.
 | **D-091** | Klados installs per-user and one-click, and that is now a decision rather than a default |  |
 | **D-092** | A save holds its own watcher open; the write-window race is accepted and recorded |  |
 | **D-093** | Enter copies the line's own ending; a document majority was measured and rejected |  |
+| **D-096** | Diagnostic *records* are capped per code; diagnostic *positions* never are |  |
 
 ---
 
@@ -3278,3 +3279,51 @@ release build, "each costing a deleted draft release and a moved tag".
 name and reuses it if it is a draft, so a later tag run uploads into the same one. At an unchanged
 version the filenames collide and are overwritten, but an asset the tagged build did not produce
 can otherwise survive into a published release.
+
+---
+
+### D-096 — diagnostic *records* are capped per code; diagnostic *positions* never are (R200) · `settled`
+
+`NodeStore.diagnostic` was an unbounded `push`, and `CONCEPT.md` §11.1's *"parse to the point of
+failure"* was the reason nobody thought it needed a bound. **No parser implements that.** Every
+format emits a recoverable diagnostic from inside its per-item loop and continues, and a Fatal only
+sets a flag the main loop never breaks on — so a defect that repeats per row or per element produces
+a diagnostic per row or per element, in every format. At 2 M of them that is ~300 MB of objects and
+message strings, and the scrubber rendered one `<div>` each into a strip a few hundred pixels tall.
+
+**Decided: split the two things a diagnostic is.**
+
+| | Bound | Cost per diagnostic |
+|---|---|---|
+| The navigable **records** — panel, counters, next/previous | **capped at 100 per `code`**, plus one synthesized summary entry | ~150 B (object + message) |
+| The **position index** — one `Int32Array` of offsets per severity | **none** | 4 B, no allocation |
+
+**Rejected: capping the list alone.** This was the first design, and it fails in the worst
+available way. Parsers walk forward, so the first N diagnostics are very nearly the first N *by
+offset*; a strip drawn from a capped list marks the top of the document and reports everything below
+it as clean. A scrubber that misreports *where* the problems are is worse than one that is merely
+unreadable.
+
+**Rejected: collapsing a repeated fault to one diagnostic.** A `Diagnostic` carries an `offset` —
+it is a statement about a position, which is why the strip can mark it and why next/previous can
+reach it. One export glitch across 1,240 rows is one cause in 1,240 places, and a reader wants both
+facts. The summary answers *what*; the retained records and the index answer *where*.
+
+**Rejected: bounding the index too, "for symmetry".** It is what makes the above true, and it is
+4 bytes in a typed array — invariant 2's shape applied to diagnostics.
+
+**Rejected: a global cap rather than a per-code one.** A 500,000-row CSV's `csv.long-row` flood
+would push out the three `xml.mismatched-end-tag` errors that are the interesting part. The set of
+codes is closed — every one is a string literal in a parser — so a per-code bound is still a bound.
+
+**Where the cap lives is forced by the contract, not chosen.** `NodeSink` (`src/core/types.ts`) has
+one diagnostic method and takes a built `Diagnostic`; a parser that dropped one before calling it
+would deny the sink the position it must record. So both halves live in `NodeStore.diagnostic`, and
+no parser changed. R200's plan expected the budget to sit in the four `ParserState.emit` bodies —
+this is *more* "one shared place", not less.
+
+**The summary entry sits at offset 0, length 0, severity Warning**, and none of those are
+placeholders. It is a statement about the file rather than a position, so it claims none; pointing
+it at the first suppressed site would mark that site as special when it is only the first past a
+budget. It is a Warning because it is not itself a problem in the document — the true per-severity
+totals sit beside it on the status bar, read from the index rather than by filtering the list.

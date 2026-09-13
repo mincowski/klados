@@ -16,6 +16,64 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R199–R200 — diagnostics were unbounded in every format, and a ragged CSV row said the wrong thing about itself · built
+
+**Plans:** `docs/plans/R200-diagnostic-volume.md`, `docs/plans/R199-csv-ragged-rows.md`
+
+**The round began as a CSV question and turned out not to be about CSV.** `NodeStore.diagnostic`
+was an unbounded `push`, and the reason nobody had bounded it was written down in
+`CONCEPT.md` §11.1: *"parse to the point of failure"* — one failure, one position. **No parser has
+ever implemented that.** Every format emits recoverable errors from inside its per-item loop and
+keeps going, and a Fatal only sets `ParserState.fatal`, a flag the main loop never breaks on. So a
+defect repeating per item produced a diagnostic per item in XML, JSON and TOML as much as in CSV,
+and `Scrubber.tsx` drew one `<div>` for each of them into a strip a few hundred pixels tall. The
+planning round recorded the finding; this one acted on it and corrected §11.1's wording.
+
+**The design point is that a naive cap would have been worse than the unbounded list.** Parsers
+walk forward, so the first N diagnostics are very nearly the first N *by offset*: a strip drawn
+from a capped list marks the top of the document and reports the rest as clean. So the round split
+the two things a diagnostic is — the **record** (capped at 100 per code, plus a summary naming how
+many were not listed) and the **position** (never capped, one trimmed `Int32Array` per severity,
+4 bytes each, bucketed through the path `matchMarkers` has used for search hits since M5b). The
+status bar counts from the index rather than by filtering the list, so its totals stay true.
+
+**Two departures from the plan, both forced by the code rather than chosen.** The budget could not
+live in the four `ParserState.emit` bodies as §6 asked: `NodeSink` takes a built `Diagnostic` and
+has one diagnostic method, so a parser that dropped one would deny the sink the position it has to
+record. It lives in `NodeStore.diagnostic` instead — one place rather than four, which is what §6
+was after, and **no parser changed**. And the index became three offset arrays by severity rather
+than offsets plus a parallel severity byte: independently sortable, per-severity totals free, the
+exact marker kind per bucket, 4 bytes instead of 5.
+
+**Found while implementing: a splice had been discarding every diagnostic since the worker
+existed.** `NodeStore.fromBuffers` does not carry diagnostics, so a store rehydrated from a worker
+response had an empty list — and `spliceSubtree` merges from `oldStore.diagnostics`. Every
+diagnostic from the original parse vanished at the first incremental reparse, silently, with
+nothing asserting otherwise. `adoptDiagnostics` takes both halves together and fixes it as a
+consequence.
+
+**§7's visual question was rendered rather than left owed.** The plan reserved density-versus-solid
+for the project lead and recorded no preference. Both were drawn against a 60,000-row CSV with
+deliberately uneven raggedness. **Density makes a thinly scattered region read as clean** — 1 ragged
+row in 37 against a densest bucket of 235 is under 3% opacity — which is the same defect the naive
+cap produces, reached through the display instead of the data. A search marker may fade; a warning
+may not. Shipped solid, unchanged from before.
+
+**R199 then did what it planned: disclose, not invent.** `csv.long-row` now says the extra values
+are in the file and readable in Raw and that the grid shows only the first, and one
+`csv.ragged-rows` summary per file names the header width and the counts. The volume half came from
+R200's general cap with no CSV-local counter, exactly as the plan said it would.
+
+**And it corrected the record it came from.** R145's Owed entry said the parser *"collapses them …
+keeping only the first"*. That is true of the grid and false of the document: every extra field
+reaches the store with a correct value span, Save is byte-identical and Raw shows the row as
+written. Both the board entry and R145's own now say so, and a test asserts it **on the store** so
+that a later round cannot make the grid honest by making the parser lossy.
+
+**Cost:** D-096, one new core module, 2050 tests passing.
+
+---
+
 ## R198 — the release published update metadata for an updater that does not exist · built
 
 **Plan:** `docs/plans/R198-drop-updater-artifacts.md`

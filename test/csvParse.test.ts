@@ -113,7 +113,10 @@ describe('csvFormatModule — quoting and escapes (acceptance 3)', () => {
 describe('csvFormatModule — ragged rows (acceptance 8)', () => {
   it('a short row keeps the row and leaves missing fields absent, not empty', () => {
     const { store, result, source } = parseCsv('a,b,c\n1,2\n')
-    expect(result.diagnosticCount).toBe(1)
+    // The row's own warning, plus R199's one summary for the file. Both:
+    // the first answers *where*, the second answers *what*.
+    expect(result.diagnosticCount).toBe(2)
+    expect(store.diagnostics.map((d) => d.code)).toContain('csv.ragged-rows')
     const arr = store.firstChildOf(0)
     const row1 = store.firstChildOf(arr)
     const attrs = [...store.attributesOf(row1)]
@@ -124,14 +127,59 @@ describe('csvFormatModule — ragged rows (acceptance 8)', () => {
 
   it('a long row keeps the extra field(s) and warns', () => {
     const { store, result } = parseCsv('a,b\n1,2,3\n')
-    expect(result.diagnosticCount).toBe(1)
+    expect(result.diagnosticCount).toBe(2)
     const arr = store.firstChildOf(0)
     const row1 = store.firstChildOf(arr)
     expect([...store.attributesOf(row1)].length).toBe(3)
   })
 
+  it('the per-row message points at the Raw view, where the extras are readable', () => {
+    // R199 acceptance 3. The grid cannot show a second unheadered extra —
+    // nothing in the file names it — so the message must not leave a reader
+    // believing the value was dropped. It was not: it is in the store, in
+    // the bytes, and byte-identical on save.
+    const { store } = parseCsv('a,b\n1,2,3,4\n')
+    const longRow = store.diagnostics.find((d) => d.code === 'csv.long-row')!
+    expect(longRow.message).toContain('Raw view')
+  })
+
+  it('summarizes the file once, naming the header width and the counts', () => {
+    // R199 acceptance 2. The per-row entries are the flood; this is the
+    // finding. R200 caps the former, which is what makes the latter legible.
+    const rows = ['a,b,c']
+    for (let i = 0; i < 400; i++) rows.push(i % 4 === 0 ? '1,2' : '1,2,3,4')
+    const { store } = parseCsv(rows.join('\n') + '\n')
+
+    const summary = store.diagnostics.filter((d) => d.code === 'csv.ragged-rows')
+    expect(summary).toHaveLength(1)
+    expect(summary[0]!.message).toContain('3 column(s)')
+    expect(summary[0]!.message).toContain('300 row(s) have more fields')
+    expect(summary[0]!.message).toContain('100 row(s) have fewer')
+    // Anchored on the header row, whose width it reports.
+    expect(summary[0]!.offset).toBe(0)
+    expect(summary[0]!.length).toBe('a,b,c\n'.length)
+  })
+
+  it('every extra field reaches the store, however many there are', () => {
+    // R199 acceptance 4, asserted **on the store** rather than on the grid.
+    // This pins the claim that the collapse is a display projection, and
+    // stops a later round "fixing" it by dropping fields at parse time.
+    const { store, source } = parseCsv('a,b\n1,2,3,4,5\n')
+    const row1 = store.firstChildOf(store.firstChildOf(0))
+    const attrs = [...store.attributesOf(row1)]
+    expect(attrs.length).toBe(5)
+    expect(attrs.map((_, i) => fieldValue(store, source, row1, i))).toEqual([
+      '1',
+      '2',
+      '3',
+      '4',
+      '5'
+    ])
+  })
+
   it('a one-column file with no delimiter parses with no diagnostic (acceptance 2)', () => {
     const { store, result } = parseCsv('name\nAlice\nBob\n')
+    // No ragged row, so no summary either — the file is well formed.
     expect(result.diagnosticCount).toBe(0)
     const arr = store.firstChildOf(0)
     const row1 = store.firstChildOf(arr)

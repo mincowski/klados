@@ -23,6 +23,7 @@ import {
   DEFAULT_MAX_ROW_BYTES,
   type LineIndex
 } from '../core/rowIndex'
+import type { DiagnosticIndexBuffers } from '../core/diagnosticIndex'
 import type { Diagnostic, FormatOptions, ParseOptions } from '../core/types'
 import { Severity } from '../core/types'
 import { getFormatModule, selectFormat, supportedExtensionsList } from '../formats/registry'
@@ -104,6 +105,11 @@ export interface ParseDoneMessage {
    * be in their final, post-parse state. */
   readonly nameIndex: NameIndex
   readonly diagnostics: readonly Diagnostic[]
+  /** The uncapped positions behind `diagnostics`, which is capped per code
+   * (R200). Required, not optional: without it the rehydrated main-thread
+   * store would report the capped list as the whole truth, and the scrubber
+   * would mark only the document's first N problem sites. */
+  readonly diagnosticIndex: DiagnosticIndexBuffers
   readonly complete: boolean
   readonly bytesConsumed: number
   readonly formatId: string
@@ -247,6 +253,7 @@ export function runParseJob(
       lineIndex: { checkpoints: new Int32Array(1), stride: 1, lineCount: 1 },
       nameIndex: buildNameIndex(store, interner.size),
       diagnostics: store.diagnostics,
+      diagnosticIndex: store.diagnosticIndex.exportBuffers(),
       complete: false,
       bytesConsumed: 0,
       formatId: format.capabilities.id,
@@ -279,6 +286,7 @@ export function runParseJob(
     lineIndex,
     nameIndex: buildNameIndex(store, interner.size),
     diagnostics: store.diagnostics,
+    diagnosticIndex: store.diagnosticIndex.exportBuffers(),
     complete: result.complete,
     bytesConsumed: result.bytesConsumed,
     formatId: format.capabilities.id,
@@ -448,7 +456,14 @@ export function transferablesFor(response: ParseDoneMessage): Transferable[] {
     response.rowIndex.buffer,
     response.lineIndex.checkpoints.buffer,
     response.nameIndex.starts.buffer,
-    response.nameIndex.nodes.buffer
+    response.nameIndex.nodes.buffer,
+    // R200's position index. Also `.slice()` products (`DiagnosticIndex.positions`
+    // trims each severity's list), and the worker drops its store immediately
+    // after posting — 8 MB at 2 M diagnostics, which is exactly the size this
+    // list exists to stop structured clone copying.
+    response.diagnosticIndex.warning.buffer,
+    response.diagnosticIndex.error.buffer,
+    response.diagnosticIndex.fatal.buffer
   ]
   for (const value of Object.values(response.storeBuffers)) {
     if (ArrayBuffer.isView(value)) transferables.push(value.buffer)

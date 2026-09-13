@@ -1,10 +1,11 @@
 # R200 — diagnostics are unbounded in every format, and the scrubber renders one DOM node per diagnostic
 
-<!-- status: open -->
+<!-- status: built -->
 
-**Open.** Found while answering a question about R199's per-row warnings, then widened by a second
+**Built.** Found while answering a question about R199's per-row warnings, then widened by a second
 question — *does this affect the other formats too?* It does, and checking that reversed this plan's
-original framing (§ 2).
+original framing (§ 2). Results in § 11, including the two places the implementation departed from
+the plan and why. § 7's visual question was rendered rather than left owed.
 
 ## 1. What is there
 
@@ -237,4 +238,81 @@ implements — a documentation fix, not a parser change.
 
 ## 10. Version
 
-**Ask on landing.** Candidate: patch — a defect fix with no new capability.
+Asked on landing, per `CLAUDE.md`. Candidate was patch. **The project lead chose no bump**:
+`package.json` stays at 1.0.0 and the next round carries it.
+
+## 11. Results
+
+**Built.** All eleven acceptance criteria met; `npm test` 2047 passing, typecheck and lint clean
+(exit codes captured directly, per `FINDINGS.md`).
+
+### 11a. What landed
+
+| | |
+|---|---|
+| `src/core/diagnosticIndex.ts` | new — `DiagnosticIndex`, `DIAGNOSTIC_CAP_PER_CODE = 100`, `DIAGNOSTICS_CAPPED_CODE` |
+| `core/nodeStore.ts` | `diagnostic()` records the position always and the record while under budget; `diagnostics` appends the summary; `adoptDiagnostics`, `diagnosticIndex` |
+| `Scrubber/scrubberModel.ts` | `diagnosticMarkers` takes the index and buckets it; `bucketCounts` extracted and shared with `matchMarkers` |
+| `StatusBar.tsx`, `StatisticsPanel.tsx` | counts read the index, not a filter over the list |
+| `navigation/diagnosticNav.ts` | the sorted copy is memoized per list identity |
+| `worker/parse.worker.ts`, `core/parseClient.ts` | the index crosses the worker boundary; the far side adopts both halves |
+| `session/subtreeSplice.ts` | `mergeDiagnosticIndex`, next to `mergeDiagnostics` |
+| `docs/CONCEPT.md` §11.1 | corrected, and the correction explained rather than silently applied |
+| `docs/DECISIONS.md` | D-096 |
+
+### 11b. Two departures from the plan
+
+**The budget is in the sink, not in the four `ParserState.emit` bodies — and the contract forces
+it.** § 6 asked for one shared module the four `emit`s consult. That cannot work: a parser that
+dropped a diagnostic before calling `sink.diagnostic` would deny the sink the *position* it has to
+record, and `NodeSink` (`src/core/types.ts`) has exactly one diagnostic method taking a built
+`Diagnostic`. Adding a second would be a contract change, which `CLAUDE.md` says to report rather
+than make. So both halves live in `NodeStore.diagnostic` — **one place rather than four**, which is
+what § 6 was actually asking for, and **no parser changed at all**. Acceptance 7's real test (an XML
+fixture bounded identically, no CSV-specific branch) passes for a stronger reason than planned.
+
+**The index is three offset arrays by severity, not offsets plus a parallel severity byte.** § 5
+specified `Int32Array` + `Uint8Array`. Splitting at write time instead makes each list
+independently sortable (no permutation sort to keep a parallel array paired), makes the
+per-severity totals the counters need free rather than a scan, gives the strip the exact marker
+*kind* per bucket, and costs 4 bytes per entry instead of 5. 500,000 warnings are 2 MB.
+
+### 11c. What the work found
+
+**A rehydrated store had no diagnostics at all, and a splice therefore dropped every one.**
+`NodeStore.fromBuffers` does not carry them, so the main-thread store rebuilt from a worker
+response had an empty list — and `spliceSubtree` merges from `request.oldStore.diagnostics`. Every
+diagnostic from the original parse was discarded at the first incremental reparse, silently, and
+nothing asserted otherwise. Pre-existing, not introduced here. It is fixed as a consequence rather
+than as a decision: `adoptDiagnostics` takes both halves because the index needed carrying, and the
+records come with it. **Reported to the project lead rather than folded in quietly.**
+
+**The bucket a diagnostic lands in is off by up to two bucket widths on a document with fewer rows
+than buckets.** `ratioToOffset` round-trips through the row index, so with 100 rows and 256 buckets
+some bucket ranges are empty by construction and a diagnostic at offset 0 draws at ratio 1/256
+rather than 0. That is 0.4% of the strip — under a pixel on any real one — and the tests assert the
+bound rather than pretending it is zero.
+
+### 11d. § 7's visual question: rendered, not deferred
+
+§ 7 reserved the density-versus-solid choice for the project lead and recorded no preference. Both
+were rendered against a real 60,000-row ragged CSV with deliberately uneven raggedness — a clean
+head, a dense burst a third down, a thin scatter through the middle, an unbroken tail — in both
+themes.
+
+**Density makes the scatter region disappear.** At 1 ragged row in 37 against a densest bucket of
+235, the opacity is under 3% and the middle of the document reads as clean. That is the same defect
+§ 5 rejects the naive cap for, arrived at through the display instead of through the data. A search
+marker may fade — a miss costs a user nothing. A warning may not.
+
+**Shipped solid**, which is also what shipped before this round, so nothing about the strip's
+appearance changes except how many elements draw it. **Confirmed by the project lead** against the
+rendered comparison, which is what § 7 asked for — so this is settled rather than owed, and a later
+round proposing density has the picture to argue against.
+
+### 11e. Review
+
+Reviewed against `git diff` before the commit, per `CLAUDE.md`. It found the rehydration gap in
+§ 11c, the unused `diagnostics` destructure left in `Scrubber.tsx`, and a `statusBar` fixture that
+set `OpenDocument.diagnostics` without pushing them through the store — a document that cannot
+exist now that the counters and the list read from one place. All three fixed before committing.

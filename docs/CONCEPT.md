@@ -1286,10 +1286,24 @@ verify the icon set's attribution requirements separately from the code's.
 §3.4 covers documents that become invalid *during* editing — the last known-good tree is
 retained. A file that is already invalid when opened has no such fallback.
 
-Behaviour: parse to the point of failure, present the partial tree with the error node
-marked, and open the Raw View at the error position with a diagnostic banner. A partial
-tree is more useful than an error screen, since diagnosing the breakage is usually why
-the file was opened.
+Behaviour: parse the **whole file**, present the tree with the error node marked, and
+open the Raw View at the first error position with a diagnostic banner. A partial tree is
+more useful than an error screen, since diagnosing the breakage is usually why the file
+was opened.
+
+This paragraph used to say *"parse to the point of failure"*, and **no parser has ever
+implemented that** (R200): every format emits a recoverable diagnostic from inside its
+per-item loop and keeps going, and even a Fatal only sets `ParserState.fatal`, a flag the
+main loop never breaks on and which is read once at the end to set `complete: false`.
+The wording was corrected rather than the parsers, because invariant 5 wants report-and-
+continue and the fuller tree is the more useful one.
+
+The consequence is that **a defect repeating per item yields a diagnostic per item** — an
+export with a stray delimiter on every data row, an encoder that never escapes `&`. What
+follows from that is §11.1's own quantity problem rather than a parser question: the
+navigable records are bounded per diagnostic code, while every diagnostic's *position* is
+recorded in full so the scrubber marks the whole document rather than its first slice
+(`docs/plans/R200-diagnostic-volume.md`).
 
 ### 11.2 Read-only and oversized files
 

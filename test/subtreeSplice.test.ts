@@ -123,6 +123,15 @@ function spliceAndCompare(
     const freshFlat = flatten(freshStore, newBytes, 0)
     expect(splicedFlat).toEqual(freshFlat)
     expect(outcome.store.diagnostics).toEqual(freshStore.diagnostics)
+    // R200: the uncapped position index is the diagnostics' other half, and
+    // the splice merges it with its own drop-and-shift pass. Comparing it
+    // against a fresh parse here is what stops that pass drifting from
+    // `mergeDiagnostics` — the failure mode R209 removed namespace
+    // resolution over, where derived state survived one store-rebuilding
+    // path and not the other.
+    expect(outcome.store.diagnosticIndex.positions()).toEqual(
+      freshStore.diagnosticIndex.positions()
+    )
   }
   return outcome
 }
