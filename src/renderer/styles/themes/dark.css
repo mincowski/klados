@@ -23,7 +23,27 @@
   --elev-1-bg: var(--gray-800);
   --elev-1-shadow: none;
   --elev-2-bg: var(--gray-850);
-  --elev-2-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+
+  /* R212 (`docs/plans/R212-dark-elevation-shadow.md`). Raised from
+   * `0 2px 8px rgba(0, 0, 0, 0.3)`, which measured a peak change of 4–9 of
+   * 255 against the pane behind it — 1.03:1 to 1.06:1, i.e. nothing. This
+   * value measures 8–17 and 1.05:1 to 1.10:1, sampled from the real
+   * application across all nine elevated surfaces.
+   *
+   * **A black shadow on `--surface-bg` cannot exceed 1.171:1 at any
+   * opacity**, because that ratio is `--gray-900` against pure black — the
+   * whole luminance budget a dark shadow has to spend. So this is not a
+   * value that can be tuned up much further: 0.75 alpha buys 1.12:1, and
+   * only inverting the shadow to white escapes the ceiling, which R212
+   * rejected because the two themes would then describe different physics.
+   * Elevation in dark is still carried by the border (1.836:1) and the
+   * background step (1.101:1) — see §9.3 and R60. This is the third
+   * mechanism doing what it can, not the one holding the tier up.
+   *
+   * Single-layer, unlike light’s key+ambient pair: chosen from rendered
+   * candidates that included a two-layer one (§9.3 records that light’s
+   * structure is light’s). */
+  --elev-2-shadow: 0 6px 16px rgba(0, 0, 0, 0.55);
 
   --row-hover-bg: var(--gray-800);
   --row-selected-bg: var(--blue-900);

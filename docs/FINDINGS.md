@@ -292,8 +292,8 @@ the actual production path (`resumeContextFor` + `parseRange`), which caught two
 generated corpus had missed.
 
 **In the light theme, `--surface-bg` and `--elev-2-bg` are the same colour** (`--gray-0`, `#ffffff`);
-in dark they are a real step apart (`--gray-900` vs `--gray-700`). An elevated surface therefore has *no boundary of its own* in
-light mode — only `--elev-2-shadow` separates it from the pane behind it. This has now bitten three
+in dark they are a real step apart (`--gray-900` vs `--gray-850`, 1.101:1). An elevated surface therefore has
+*no boundary of its own* in light mode — only `--elev-2-shadow` separates it from the pane behind it. This has now bitten three
 times: R33/D-051 §1b (the scrollbar thumb, near-invisible), R57's own plan (the notification, where
 a severity fill had been hiding it), and R57's own build (**`--surface-border` and dark's
 `--elev-2-bg` are *also* the same token, `--gray-700`** — a hairline drawn in `--surface-border`
@@ -305,11 +305,29 @@ new elevated surface needs its own boundary treatment verified by actual contras
 and `docs/plans/R60-dark-elevation.md` moved it to the tier (Find, the command palette, the
 statistics panel, the shortcuts panel, the tab-strip overflow menu and both grid dropdowns) while
 stopping dark over-stepping the background to compensate. `test/elevationBorders.test.ts` asserts
-it against the source CSS. **This entry said "only one of seven" until R206 checked**, four rounds
-after R60 made it false — the same drift `docs/plans/R206-disclosed-ui-defects.md` §4 names in the
-Owed table, found again here. **One surface added since is still missing it**:
-`.raw-wrapping-overlay` (`Raw.css`, D12), an eighth consumer added after R60 swept the other seven —
-white-on-white in light for the one frame it shows, recorded in `docs/plans/R212-dark-elevation-shadow.md` § 5.
+it against the source CSS. **This entry has now been wrong twice, in the same paragraph**: it said
+"only one of seven" until R206 checked, four rounds after R60 made it false, and it said dark's
+`--elev-2-bg` was `--gray-700` until R212 checked, R60 having moved it to `--gray-850` in the very
+change that sentence describes — the same drift
+`docs/plans/R206-disclosed-ui-defects.md` §4 names in the Owed table, found again here. **The eighth surface, `.raw-wrapping-overlay` (`Raw.css`, D12), got
+it in R212** — it had been added after R60 swept the other seven, and was white-on-white in light
+for the one frame it shows. **The test no longer trusts its own list**: it walks `src/renderer` for
+every stylesheet declaring `background: var(--elev-2-bg)` and fails if one is unlisted, because the
+real defect was a hand-maintained enumeration going four rounds out of date while its test passed.
+
+**A black shadow on a near-black surface has a hard contrast ceiling, and it is low.** Dark's
+`--surface-bg` is `--gray-900` (`#14171e`, relative luminance 0.0086), so painting it *pure
+black* — an infinitely strong shadow — is **1.171:1**. That is the entire budget any black
+`box-shadow` has in this theme, at any opacity and any blur; R212 measured the shipped
+`rgba(0,0,0,.3)` at 1.03:1–1.06:1 and `rgba(0,0,0,.75)` at 1.07:1–1.12:1, against a background
+step of 1.101:1 and a hairline border of 1.836:1. **So "the shadow doesn't show in dark" is never
+fixed by tuning the shadow** — the mechanisms with room to move are the border and the background
+step. The same arithmetic says an *inverted*, light shadow is the only one with real headroom
+(1.14:1–1.41:1 measured), because a near-black pane has luminance room upward and none downward;
+R212 rejected it anyway, on the two themes not describing different physics, which is a taste
+decision rather than a measurement one. **Generalizes past shadows**: on a near-black surface every
+darkening effect — a scrim, a pressed state, an inset — is working inside the same 1.171:1, and
+should be checked against that before being specified.
 
 **A fixture of look-alike characters cannot be authored by typing them.** U+212B ANGSTROM SIGN and
 U+2126 OHM SIGN are *canonical singletons*: any NFC-normalising step between writing and disk

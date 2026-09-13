@@ -121,6 +121,7 @@ Search for the id to jump to one.
 | **D-099** | A rounded corner that would not render was a sibling painting over it |  |
 | **D-100** | The title bar's optical alignment comes from `text-box-trim`, not a measured constant |  |
 | **D-101** | XML namespace resolution is removed; a prefixed name is the name as written |  |
+| **D-102** | Dark keeps a shadow, tuned to the ceiling a black shadow has on a near-black pane |  |
 
 ---
 
@@ -3624,3 +3625,63 @@ the prefix as written, which is now the intended behaviour rather than a gap.
 whose composite children fall into two groups shows one as a table and the rest as a list,
 **with or without namespaces**. Dropping resolution makes that reachable more often; it did
 not create it. That is `docs/plans/R210-grid-grouping.md`.
+
+---
+
+### D-102 — Dark keeps a shadow, tuned against the ceiling a black shadow has on a near-black pane (R212) · `settled`
+
+**Amends §9.3's "shadow drops to near-zero" and R60's reading of it.** Raised by the project lead
+looking at R206's rendered comparison: *"in light mode the shadow shows nicely, but in dark mode it
+doesn't. Should the shadow become lighter than the background?"* Correct on the observation. The
+answer to the question is no, and the reason is worth keeping.
+
+**The measurement.** Nine elevated surfaces driven in the running application over a populated
+layout, each screenshotted under seven candidate values with identical geometry, and the ring of
+pixels within 32px outside each surface differenced against the same frame with the shadow removed
+— grouped by the *unshadowed* colour at each pixel, so a glyph behind a surface cannot be mistaken
+for the pane:
+
+| `--elev-2-shadow` | peak Δ of 255 | contrast against the pane |
+|---|---|---|
+| `0 2px 8px rgba(0,0,0,.3)` — was shipped | 4–9 | 1.03:1 – 1.06:1 |
+| `0 6px 16px rgba(0,0,0,.55)` — **chosen** | 8–17 | 1.05:1 – 1.10:1 |
+| `0 8px 24px rgba(0,0,0,.75)` | 11–21 | 1.07:1 – 1.12:1 |
+| `0 8px 24px/.65 + 0 2px 6px/.5` (key+ambient) | 14–20 | 1.08:1 – 1.14:1 |
+| `0 0 0 1px rgba(255,255,255,.08) + …` | 17–30 | 1.20:1 – 1.41:1 |
+| `0 4px 16px rgba(255,255,255,.10)` — inverted | 12–28 | 1.14:1 – 1.41:1 |
+
+**The number that settles the shape of the answer is not in that table.** `--surface-bg` is
+`--gray-900` (`#14171e`, relative luminance 0.0086), so the pane painted *pure black* is
+**1.171:1** — that is the entire budget a black shadow has, at any opacity, over any blur. The
+background step alone is 1.101:1 and the hairline border is 1.836:1. So a dark shadow cannot be
+made load-bearing, and this decision is not "make the shadow carry elevation in dark"; it is
+"spend most of the little there is, and keep saying that the border carries it".
+
+**Why not `none`**, which the plan's §4 argued for and which would have made §9.3 literally true:
+rendered against the grid's alternating row bands, the chosen value is *visible* — it reads as a
+card sitting above the table rather than pasted onto it — and it costs nothing. The trap §4 worried
+about (a token whose value is invisible, that someone will tune and see no change from) is answered
+by writing the ceiling down in `dark.css`, `CONCEPT.md` §9.3 and here, rather than by deleting the
+token.
+
+**Why not the inversion**, which is the only candidate with real headroom and measured best of the
+six: a near-black pane has luminance room upward and none downward, so a white shadow is not a
+weaker option than a black one — it is the only *strong* one. It was rejected anyway, and on
+consistency rather than strength. Light's shadow says "this is above the page"; a glow says "this
+is emitting light". §9.1 makes the themes peers, which does not extend to different physics.
+`test/elevationShadow.test.ts` pins that: dark's shadow colour must stay near-black.
+
+**Why not the light rim** (`0 0 0 1px rgba(255,255,255,.08)` plus a black shadow), which the plan
+rejected by eye and the measurement now rejects by arithmetic: all of its 1.20:1–1.41:1 comes from
+the rim, which sits 1px outside the border box. Every elevated surface already carries a 1px
+`--surface-border`, so that candidate is a second border wearing a shadow's syntax.
+
+**Single-layer, against §9.3's own key+ambient rule.** Light combines a sharp key shadow with a
+soft ambient one; dark now does not. The two-layer candidate was rendered alongside the
+single-layer one and measured 0.02–0.04 higher, which is inside the width of the whole available
+range — with 1.171:1 to spend, the second layer separates nothing. §9.3 now says the key+ambient
+structure is light's.
+
+**Light is untouched**, which the plan called out in advance as the tempting generalization
+("make the two themes consistent") and a regression if taken: light's shadow is the one mechanism
+that works unaided there, where `--surface-bg` and `--elev-2-bg` are the same colour.

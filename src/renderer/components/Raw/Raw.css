@@ -64,9 +64,19 @@
   top: var(--space-2);
   right: var(--space-2);
   padding: var(--space-1) var(--space-2);
-  border-radius: var(--radius-sm);
   background: var(--elev-2-bg);
   box-shadow: var(--elev-2-shadow);
+  /* R212 §5. The eighth `--elev-2-bg` surface, added by D12 after R60 §5
+   * gave the hairline to every elevated surface then existing — so it was
+   * the one that did not get it, and in light it is white-on-white for the
+   * one frame it shows (`--elev-2-bg` and `--surface-bg` are both
+   * `--gray-0` there). `test/elevationBorders.test.ts` now derives the list
+   * of elevated surfaces from the stylesheets instead of holding one by
+   * hand, which is what stops the next one slipping through the same way —
+   * being added to a hand-written list is what this surface needed and did
+   * not get. */
+  border: var(--border-width) solid var(--surface-border);
+  border-radius: var(--radius-sm);
   color: var(--surface-fg-secondary);
   font-family: var(--font-ui);
   font-size: var(--font-size-ui);

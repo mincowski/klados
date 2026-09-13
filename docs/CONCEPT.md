@@ -1177,8 +1177,9 @@ surfaces. Each elevation level is therefore a **pair**:
 ```
 
 - **Light theme** — background stays near-white; the shadow carries the elevation
-- **Dark theme** — shadow drops to near-zero; **a border plus a small background step**
-  carries the elevation (amended by R60, `docs/plans/R60-dark-elevation.md`; see below)
+- **Dark theme** — **a border plus a small background step** carries the elevation; the shadow
+  contributes what little a dark shadow can (amended by R60, `docs/plans/R60-dark-elevation.md`,
+  and measured by R212, `docs/plans/R212-dark-elevation-shadow.md`; see below)
 
 A border reads equally well on both themes, which shadow and a background step alone do
 not — this was found in practice (R57 added a hairline to fix a white-on-white defect in
@@ -1190,9 +1191,30 @@ of the elevation tier**, not of any one component — every `--elev-2-bg` surfac
 `border: var(--border-width) solid var(--surface-border)`, not just the surface that
 happened to need it first.
 
+**"Drops to near-zero" was near enough to invisible, and R212 measured how near.** Sampling the
+ring of pixels just outside each of the nine elevated surfaces in the running application, dark's
+`0 2px 8px rgba(0, 0, 0, 0.3)` moved the pane behind it by 4–9 of 255 — **1.03:1 to 1.06:1**.
+It now draws `0 6px 16px rgba(0, 0, 0, 0.55)`, measuring 8–17 and **1.05:1 to 1.10:1**.
+
+**That is close to the most a dark shadow can ever do, and the ceiling is arithmetic rather than
+taste.** `--surface-bg` is `--gray-900` (`#14171e`, relative luminance 0.0086), so painting it
+*pure black* — an infinitely strong shadow — is a contrast of **1.171:1**. Every black shadow value
+lives under that number: 0.75 alpha buys 1.12:1, and the difference between a good dark shadow and
+no shadow at all is smaller than the difference between the background step (1.101:1) and nothing.
+The border, by contrast, is **1.836:1**. So the ordering in the bullet above is the real one — the
+shadow is the third mechanism, not a co-equal, and a round that finds dark elevation reading weakly
+should reach for the border or the step, never for the shadow.
+
+**Inverting the shadow to a light glow is the only way past the ceiling** — a near-black pane has
+headroom upward and none downward, and a white shadow measures 1.14:1 to 1.41:1. R212 rendered it
+and rejected it: light's shadow says "this is above the page" and a glow says "this is emitting
+light". The two themes are peers (§9.1); they should not describe different physics.
+
 Components declare an elevation level and never set a shadow directly. Following
-Fluent, each shadow combines a sharp directional *key* shadow defining the element's
-edges with a soft diffused *ambient* shadow implying distance.
+Fluent, **light's** shadows combine a sharp directional *key* shadow defining the element's
+edges with a soft diffused *ambient* shadow implying distance. Dark's is a single layer: with
+1.171:1 to spend, a second layer separates nothing, and R212 rendered the two-layer candidate
+alongside the single-layer one before the project lead chose.
 
 This is the specific requirement that makes a built-in style system necessary: a theme
 layer that only swaps colors produces a dark mode in which every elevated surface
