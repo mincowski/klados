@@ -117,7 +117,10 @@ describe('R209 — a prefixed name is the name the document contains', () => {
     // property is not `NodeKind.Element`, and filtering for one silently
     // yields an empty list rather than failing, which is how the first
     // draft of this test "passed" against garbage.
-    expect(jsonFormatModule.capabilities.hasNamespaces).toBe(false)
+    //
+    // The capability that used to gate this is gone too: R209 removed
+    // `FormatCapabilities.hasNamespaces` once nothing read it, so there is no
+    // flag left to assert and no format for which a colon means anything.
     const store = parseJson('{"a:b": 1, "c:b": 2}')
     const rootObject = [...store.childrenOf(0)][0]!
     const [first, second] = [...store.childrenOf(rootObject)]

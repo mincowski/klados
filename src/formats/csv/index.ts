@@ -49,7 +49,6 @@ export const csvCapabilities: FormatCapabilities = {
   extensions: ['.csv', '.tsv', '.tab'],
   hasAttributes: true,
   hasComments: false,
-  hasNamespaces: false,
   // No pretty-printed form (invariant 6): normalising quoting or padding columns
   // would rewrite bytes the user did not ask to change.
   canFormat: false,

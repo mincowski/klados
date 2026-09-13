@@ -53,7 +53,6 @@ export const xmlCapabilities: FormatCapabilities = {
   extensions: ['.xml'],
   hasAttributes: true,
   hasComments: true,
-  hasNamespaces: true,
   canFormat: true, // R11 (M5e-PLAN.md, reopens D-045) — see `format` below
   canIncrementalReparse: true,
   rowBreakBytes: ['>'.charCodeAt(0), ' '.charCodeAt(0)]
@@ -62,8 +61,6 @@ export const xmlCapabilities: FormatCapabilities = {
 /** XML's format-specific resume state: the xml:space scope at the resume point. */
 export interface XmlResumeContext extends ResumeContext {
   readonly preserveWhitespace: boolean
-  /** prefix -> URI, accumulated from ancestor xmlns/xmlns:* attributes. */
-  readonly namespaces: ReadonlyMap<string, string>
 }
 
 const XML_SPACE_BYTES = utf8Bytes('xml:space')
@@ -669,23 +666,25 @@ function parseRange(
   }
 }
 
+/**
+ * R209 removed the `prefix -> URI` map this also built. It was accumulated
+ * from ancestor `xmlns`/`xmlns:*` attributes on every resume and **read by
+ * nothing** — `R134-xml-namespaces.md` noted that when it planned to build on
+ * it, and R209 removed the feature that would have. `xml:space` is what this
+ * actually resumes.
+ */
 function resumeContextFor(ancestors: AncestorView): ResumeContext {
   let preserve = false
-  const namespaces = new Map<string, string>()
 
   for (let i = 0; i < ancestors.length; i++) {
     for (const attr of ancestors.attributesAt(i)) {
       if (attr.name === 'xml:space') {
         preserve = attr.value === 'preserve'
-      } else if (attr.name === 'xmlns') {
-        namespaces.set('', attr.value)
-      } else if (attr.name.startsWith('xmlns:')) {
-        namespaces.set(attr.name.slice('xmlns:'.length), attr.value)
       }
     }
   }
 
-  const ctx: XmlResumeContext = { formatId: 'xml', preserveWhitespace: preserve, namespaces }
+  const ctx: XmlResumeContext = { formatId: 'xml', preserveWhitespace: preserve }
   return ctx
 }
 

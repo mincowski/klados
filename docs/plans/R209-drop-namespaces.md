@@ -166,13 +166,26 @@ mostly about what was found rather than what was decided.
   this, and it is dead the moment the interner's flag goes: it existed solely to tell
   `Interner.fromBuffers` whether to recompute the prefix/local split.
 
-### `FormatCapabilities.hasNamespaces` — reported, not removed
+### `FormatCapabilities.hasNamespaces` — reported, then removed
 
-It is now read by nothing. The four format modules still declare it, and `src/core/types.ts` still
-carries the field. **§ 4 said to stop and report rather than edit the contract, and `CLAUDE.md`
-says the same, so it is reported here** rather than removed. Removing it is a one-line contract
-change with four one-line follow-ups and no behavioural consequence; leaving it is the safe
-interim § 4 named.
+§ 4 said to stop and report rather than edit the contract, and `CLAUDE.md` says the same, so it
+was reported unread and left in place. **The project lead decided to remove it** — *"if that is
+not used anymore, we should not drag it around. If we re-introduce namespaces, we can always add
+this back."* Gone from `src/core/types.ts` and all four format modules.
+
+Two comments in the contract went with it, because they had become **false** rather than merely
+unused: the `NodeSink` header calling namespace resolution the sink's responsibility, and the
+"deliberately NOT in this contract" list entry claiming the sink recognizes `xmlns` attributes
+and maintains scope. A contract file that describes a removed mechanism as a live obligation is
+the same defect class this round spent three commits removing.
+
+**A last piece of namespace machinery came out with it, in the parser rather than the contract.**
+`XmlResumeContext.namespaces` — a `prefix -> URI` map `resumeContextFor` accumulated from every
+ancestor's attributes on every resume — was **built and read by nothing**.
+`R134-xml-namespaces.md` noticed exactly that when it planned to build on it, and R209 removed
+the feature that would have. `xml:space` is what that function actually resumes, and it is the
+only thing it does now. Not asked for specifically; done on the same stated principle and
+recorded separately so it is easy to object to.
 
 ### Both fromBuffers parameters were optional, and that is the finding
 

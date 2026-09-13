@@ -106,7 +106,6 @@ export const tomlCapabilities: FormatCapabilities = {
   extensions: ['.toml'],
   hasAttributes: false,
   hasComments: true,
-  hasNamespaces: false,
   canFormat: true,
   canIncrementalReparse: true, // R15
   rowBreakBytes: [NEWLINE]

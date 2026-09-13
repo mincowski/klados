@@ -3602,8 +3602,19 @@ and `s:price` as the two names the file actually contains is defensible on its o
 `subtreeEndRefOf` (whose only caller was the rebinding fallback), the worker threading, the
 interner's prefix/local split, and the grid's two call sites plus the tooltip.
 
-**`FormatCapabilities.hasNamespaces` stays and is now read by nothing.** It lives on
-`src/core/types.ts`, which `CLAUDE.md` says to report on rather than edit. Reported.
+**`FormatCapabilities.hasNamespaces` is removed too**, from the contract and from all four
+format modules. It lives on `src/core/types.ts`, which `CLAUDE.md` says to report on rather than
+edit — so R209 reported it unread and left it, and **the project lead decided to remove it**:
+*"if that is not used anymore, we should not drag it around. If we re-introduce namespaces, we
+can always add this back."* Two comments in that file went with it, because they had become
+false rather than merely unused: the `NodeSink` header calling namespace resolution the sink's
+responsibility, and the "deliberately NOT in this contract" list entry claiming the sink
+maintains `xmlns` scope.
+
+**And one more thing that was built and read by nothing**: `XmlResumeContext.namespaces`, a
+`prefix -> URI` map `resumeContextFor` accumulated from ancestor attributes on every resume.
+`R134-xml-namespaces.md` noticed it was never consulted and planned to build on it; R209
+removed the feature that would have. `xml:space` is what that function actually resumes.
 
 **Closes R137** — path queries resolving a prefix against document declarations — as
 not-applicable rather than outstanding: with no resolved identity, a prefixed query matches

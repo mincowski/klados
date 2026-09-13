@@ -54,8 +54,17 @@ name: `subtreeEndRefOf`, whose only caller was the rebinding fallback and whose 
 about namespaces; `COLON`, read only by `findColon`; and `ParseDoneMessage.hasNamespaces`, which
 existed solely to tell `Interner.fromBuffers` whether to recompute the split.
 
-**`FormatCapabilities.hasNamespaces` stays and is read by nothing.** It is on `src/core/types.ts`,
-which `CLAUDE.md` says to report rather than edit. Reported.
+**`FormatCapabilities.hasNamespaces` was reported unread, then removed on the project lead's
+call** — *"if that is not used anymore, we should not drag it around."* `CLAUDE.md` says to report
+rather than edit `src/core/types.ts`, which is what the report was for. Two comments in that file went
+with the field, because they had become **false** rather than merely unused: the `NodeSink` header
+calling namespace resolution the sink's responsibility, and the "deliberately NOT in this contract"
+entry claiming the sink maintains `xmlns` scope.
+
+**And the last piece, in the parser**: `XmlResumeContext.namespaces` was accumulated from every
+ancestor's attributes on every resume and **read by nothing** — R134 noticed that when it planned to
+build on it, and R209 removed the feature that would have. `xml:space` is all `resumeContextFor`
+actually resumes.
 
 **Every test was inverted in place rather than deleted** — `namespaceResolution`, `gridDetection`'s
 R136 block, `interner`'s R134 block — because they are where the next person to propose namespace
