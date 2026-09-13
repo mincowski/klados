@@ -111,12 +111,6 @@ export interface ParseDoneMessage {
   readonly formatId: string
   readonly encoding: string
   readonly bomLength: number
-  /** `format.capabilities.hasNamespaces` — threaded through rather than
-   * re-derived from `formatId` on the main thread (invariant 8: namespace
-   * resolution is driven by the capability, never by testing a format id).
-   * `Interner.fromBuffers` needs it to know whether to recompute the
-   * prefix/local split (R134) after reconstruction. */
-  readonly hasNamespaces: boolean
 }
 
 export interface ParseErrorMessage {
@@ -180,7 +174,7 @@ export function runParseJob(
   const controller = new AbortController()
   abortControllers.set(request.requestId, controller)
 
-  const interner = new Interner(undefined, format.capabilities.hasNamespaces)
+  const interner = new Interner()
   // The store receives the parser's calls directly (C4) — the old
   // wrap-every-method-in-an-arrow-function sink cost 21% of parse time on
   // the hottest call site in the program. `progress` is now a constructor
@@ -246,8 +240,7 @@ export function runParseJob(
       bytesConsumed: 0,
       formatId: format.capabilities.id,
       encoding,
-      bomLength,
-      hasNamespaces: format.capabilities.hasNamespaces
+      bomLength
     }
   }
 
@@ -278,8 +271,7 @@ export function runParseJob(
     bytesConsumed: result.bytesConsumed,
     formatId: format.capabilities.id,
     encoding,
-    bomLength,
-    hasNamespaces: format.capabilities.hasNamespaces
+    bomLength
   }
 }
 

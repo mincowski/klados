@@ -25,7 +25,7 @@ function parseXml(text: string): { store: NodeStore } {
  * behaviour unchanged. */
 function parseXmlNamespaced(text: string): { store: NodeStore } {
   const source = new TextEncoder().encode(text)
-  const store = new NodeStore(source, new Interner(undefined, true))
+  const store = new NodeStore(source, new Interner())
   xmlFormatModule.parse(source, store, xmlOptions)
   return { store }
 }

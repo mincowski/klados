@@ -68,8 +68,7 @@ export function rehydrateParseResult(response: ParseDoneMessage): ParseClientRes
   const interner = Interner.fromBuffers(
     response.internerBuffers.nameBytes,
     response.internerBuffers.starts,
-    response.internerBuffers.ends,
-    response.hasNamespaces
+    response.internerBuffers.ends
   )
   const bytes = new Uint8Array(response.bytes)
   const store = NodeStore.fromBuffers(bytes, interner, response.storeBuffers)

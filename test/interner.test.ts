@@ -154,63 +154,66 @@ describe('Interner', () => {
     expect(ids.size).toBe(5000)
   })
 
-  describe('R134 — prefix/local split, capability-gated', () => {
-    it('splits a prefixed name when namespaces are enabled', () => {
-      const interner = new Interner(undefined, true)
-      const bytes = utf8('inv:price')
-      const id = interner.intern(bytes, 0, bytes.length)
-      expect(interner.prefixOf(id)).toBe('inv')
-      expect(interner.localNameOf(id)).toBe('price')
-    })
-
-    it('an unprefixed name has no prefix, and localNameOf is the whole name', () => {
-      const interner = new Interner(undefined, true)
-      const bytes = utf8('price')
-      const id = interner.intern(bytes, 0, bytes.length)
-      expect(interner.prefixOf(id)).toBeNull()
-      expect(interner.localNameOf(id)).toBe('price')
-    })
-
-    it('a colon in a position that is not a prefix separator (leading colon) is not a prefix', () => {
-      const interner = new Interner(undefined, true)
-      const bytes = utf8(':oops')
-      const id = interner.intern(bytes, 0, bytes.length)
-      expect(interner.prefixOf(id)).toBeNull()
-      expect(interner.localNameOf(id)).toBe(':oops')
-    })
-
-    it('splitsNamespaces reports the constructor flag', () => {
-      expect(new Interner().splitsNamespaces).toBe(false)
-      expect(new Interner(undefined, true).splitsNamespaces).toBe(true)
-    })
-
-    it('a JSON-shaped key with a colon is not split when namespaces are disabled (the default)', () => {
+  describe('R209 — no prefix/local split; an interned name is the name as written', () => {
+    /**
+     * **R134's block, inverted rather than deleted.** It asserted that an
+     * `Interner` constructed with namespaces enabled split `inv:price` into a
+     * prefix and a local name, and that a JSON key like `"12:30"` was spared
+     * that only by a capability gate. R209 removed the split entirely
+     * (D-101), so the gate has nothing to gate and every format gets the
+     * behaviour JSON and TOML already had.
+     */
+    it('a prefixed name interns whole, colon included', () => {
       const interner = new Interner()
-      const bytes = utf8('12:30')
-      const id = interner.intern(bytes, 0, bytes.length)
-      expect(interner.prefixOf(id)).toBeNull()
-      expect(interner.localNameOf(id)).toBe('12:30')
-    })
-
-    it('fromBuffers recomputes the split when told the original interner had namespaces enabled', () => {
-      const original = new Interner(undefined, true)
       const bytes = utf8('inv:price')
-      const id = original.intern(bytes, 0, bytes.length)
-      const buffers = original.exportBuffers()
-
-      const rehydrated = Interner.fromBuffers(buffers.nameBytes, buffers.starts, buffers.ends, true)
-      expect(rehydrated.prefixOf(id)).toBe('inv')
-      expect(rehydrated.localNameOf(id)).toBe('price')
+      const id = interner.intern(bytes, 0, bytes.length)
+      expect(interner.text(id)).toBe('inv:price')
     })
 
-    it('fromBuffers defaults to no split when the flag is omitted', () => {
-      const original = new Interner(undefined, true)
+    it('two prefixes for one local name are two ids, not one', () => {
+      // The property the whole round turns on, at the layer it starts from.
+      const interner = new Interner()
+      const a = utf8('inv:price')
+      const b = utf8('s:price')
+      const idA = interner.intern(a, 0, a.length)
+      const idB = interner.intern(b, 0, b.length)
+      expect(idA).not.toBe(idB)
+      expect(interner.size).toBe(2)
+    })
+
+    it('the split surface is gone, not merely unused', () => {
+      const interner = new Interner()
+      for (const member of ['prefixOf', 'localNameOf', 'splitsNamespaces']) {
+        expect(member in interner).toBe(false)
+      }
+    })
+
+    it('fromBuffers takes no namespace flag', () => {
+      // Both flags were **optional**, which is what let a caller forget one
+      // and get silently different behaviour — the same shape as
+      // `NodeStore.fromBuffers`'s fourth parameter. Asserted on arity so a
+      // future optional flag of that kind fails here.
+      //
+      // Only `fromBuffers`: the constructor's own remaining parameter has a
+      // default, and `Function.length` counts only parameters before the
+      // first defaulted one — so it reads 0 whether there are one or three,
+      // and cannot say anything about this. A second constructor argument is
+      // a compile error instead, which is the stronger guarantee anyway.
+      expect(Interner.fromBuffers.length).toBe(3)
+    })
+
+    it('a round trip through fromBuffers needs nothing recomputed', () => {
+      // R134 re-scanned every name here to rebuild `colonAt`, and the caller
+      // had to pass a flag matching the original interner or the rehydrated
+      // one behaved differently. There is no derived state left to get wrong.
+      const original = new Interner()
       const bytes = utf8('inv:price')
       const id = original.intern(bytes, 0, bytes.length)
       const buffers = original.exportBuffers()
 
       const rehydrated = Interner.fromBuffers(buffers.nameBytes, buffers.starts, buffers.ends)
-      expect(rehydrated.prefixOf(id)).toBeNull()
+      expect(rehydrated.text(id)).toBe('inv:price')
+      expect(rehydrated.size).toBe(original.size)
     })
   })
 })

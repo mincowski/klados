@@ -34,10 +34,7 @@ const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text)
 
 function parseXml(text: string): NodeStore {
   const bytes = utf8(text)
-  const store = new NodeStore(
-    bytes,
-    new Interner(undefined, xmlFormatModule.capabilities.hasNamespaces)
-  )
+  const store = new NodeStore(bytes, new Interner())
   const result = xmlFormatModule.parse(bytes, store, OPTIONS)
   if (!result.complete) throw new Error('test fixture must parse completely')
   return store
@@ -45,10 +42,7 @@ function parseXml(text: string): NodeStore {
 
 function parseJson(text: string): NodeStore {
   const bytes = utf8(text)
-  const store = new NodeStore(
-    bytes,
-    new Interner(undefined, jsonFormatModule.capabilities.hasNamespaces)
-  )
+  const store = new NodeStore(bytes, new Interner())
   const result = jsonFormatModule.parse(bytes, store, OPTIONS)
   if (!result.complete) throw new Error('test fixture must parse completely')
   return store
