@@ -71,22 +71,28 @@
 }
 
 /* User feedback: the mark and the title text both sit in boxes centered on
- * the same 18px line, but their *ink* doesn't optically match — measured
- * (real Chromium, `mark.getBBox()` for the artwork vs canvas
- * `TextMetrics.actualBoundingBox{Ascent,Descent}` for the "K" glyph): the
- * mark's ink is 12px tall and already centered in its own box (top 12,
- * bottom 24), while "Klados"'s cap-height ink is only 9px and sits with
- * its baseline low in its line box (top 14.5, bottom 23.5 — a capital
- * letter has no descender, but the font still reserves descender space
- * below the baseline, which is what pulls its visual center down). The
- * two ink centers are 1px apart (18 vs 19) before this nudge; matching
- * them is what actually reads as "aligned" — a taller icon and a shorter
- * cap-height next to each other can't share top *and* bottom edges at
- * once, so centering their ink (not their boxes) is the balanced result. */
+ * the same 18px line, but their *ink* doesn't optically match — the mark's
+ * ink is 12px tall and already centered in its own box, while a capital
+ * letter's cap-height ink is only ~9px and sits low in its line box, since
+ * the font reserves descender space below the baseline even for a glyph
+ * with no descender. Centering the ink rather than the boxes is what reads
+ * as aligned; a 12px mark and a 9px cap-height cannot share top *and*
+ * bottom edges at once.
+ *
+ * R208 removed the `transform: translateY(1px)` that used to do it here.
+ * The technique was right and the constant was not: it was measured against
+ * one font, and `--font-ui` resolves to a different one per platform.
+ * Measured across nine families in Electron 39, the 1px nudge was wrong for
+ * **eight of them** (the required nudge ranges from -0.5px to +1px), which
+ * is why `test/titleBarInkAlignment.test.tsx` had to skip wherever the
+ * calibrated font was absent.
+ *
+ * The fix is on `.title-bar-title-head`/`-tail` below: trim the text box
+ * to its own cap height, and centering the boxes centers the ink for any
+ * font, with no constant to be wrong. */
 .title-bar-mark {
   flex: none;
   color: var(--mark-fg);
-  transform: translateY(1px);
 }
 
 .title-bar-title {
@@ -113,6 +119,43 @@
 .title-bar-title-tail {
   flex: none;
   white-space: nowrap;
+}
+
+/* R208: trim each run of title text to its own cap-height ink box, so the
+ * flex centering above lands the *ink* rather than the line box — no
+ * per-font constant, and correct on a font nobody measured.
+ *
+ * On the leaf spans, not on `.title-bar-title`: `text-box-trim` applies to
+ * block containers, and a flex item is one while `.title-bar-title` itself
+ * (`display: flex`, which R5's middle truncation needs) is not. Measured in
+ * Electron 39 across nine font families — worst deviation 0.008px, against
+ * a 0.5px tolerance.
+ *
+ * **The padding/negative-margin pair is not cosmetic — without it this rule
+ * eats descenders.** `cap alphabetic` puts the box edges at the cap height
+ * and the baseline, and R5's ellipsis needs `overflow: hidden` on the head,
+ * which clips to the padding box: `pygmy-jaguar-query.xml` rendered as
+ * `pvgmv-iaguar-querv.xml`, with every descender cut off flat. `overflow-x:
+ * hidden` with `overflow-y: visible` is not available — CSS computes the
+ * visible one to `auto` when the other is hidden — so the room has to come
+ * from padding.
+ *
+ * The negative margin then takes that padding back out of *layout* while
+ * leaving it in the *painted* box, so the margin box is still exactly the
+ * cap-height box the flex centering above aligns on. 0.5em is headroom, not
+ * a calibration: it need only exceed the deepest descender and the tallest
+ * ascender overshoot (3px and ~1px at this size), and being too generous
+ * costs nothing, which is the difference between this constant and the 1px
+ * nudge R208 removed.
+ *
+ * Chromium-only, and that is fine here: this application ships as Electron,
+ * so `CSS.supports` is not a question, and a browser without it degrades to
+ * exactly the pre-R208 rendering — an untrimmed box, off by about a pixel. */
+.title-bar-title-head,
+.title-bar-title-tail {
+  text-box: trim-both cap alphabetic;
+  padding-block: 0.5em;
+  margin-block: -0.5em;
 }
 
 .title-bar-dirty-dot {
