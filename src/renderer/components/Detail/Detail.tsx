@@ -4,7 +4,7 @@
  * children section — list mode only, per M1's own scope (grid mode is M2).
  */
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties, type JSX } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type JSX } from 'react'
 import type { NodeStore } from '../../../core/nodeStore'
 import type { SourceBuffer } from '../../../core/buffer'
 import type { NodeRef } from '../../../core/types'
@@ -33,39 +33,15 @@ import {
   valueTextOf,
   type PathSegment
 } from './detailModel'
-import { detectGrid, GRID_TABLE_CAP, type GridGroup } from './gridDetection'
-import { focusGrid } from './gridController'
+import { detectGrid } from './gridDetection'
+import { focusGrid, registerGridGroupPicker } from './gridController'
 import { Grid } from './Grid'
+import { GridGroupPicker, groupLabelOf, rememberGroup, selectedGroupIndex } from './GridGroupPicker'
 import { resolveWrapperTarget, skippedComments } from '../../wrapperDescent'
 import { useRovingTabIndex } from '../../rovingTabIndex'
 import './Detail.css'
 
 const ROW_HEIGHT = 23
-
-/**
- * R211 — a stacked table is sized to its own rows rather than sharing the
- * pane equally with its neighbours: a two-row group and a thousand-row group
- * next to each other should not be the same height. `.grid-wrapper` is
- * `height: 100%`, so the height has to come from here.
- *
- * The chrome constant is everything in a grid that is not a row, measured
- * in the running application rather than estimated: `.grid-toolbar` 44px,
- * `.grid-header-row` 23px, and 1px of border on each side, which counts
- * because `base.css` makes every box a border box. **The first version of
- * this was estimated at 41 + 24 and clipped 2px off every stacked table's
- * last row** — the review caught it, but only because the comment claimed a
- * measurement that had not been taken.
- *
- * The bound is what a stack can show before the pane becomes a scroll of
- * scrollers; at this chrome it is about eleven rows. A single table does not
- * use any of this — it keeps R43's `flex: 1` and its 230px floor.
- */
-const GRID_CHROME_PX = 44 + 23 + 2
-const STACKED_TABLE_MAX_PX = 320
-
-function stackedTableHeightPx(rowCount: number): number {
-  return Math.min(STACKED_TABLE_MAX_PX, GRID_CHROME_PX + rowCount * ROW_HEIGHT)
-}
 
 export function Detail(): JSX.Element {
   const state = useDocumentSession()
@@ -130,27 +106,57 @@ export function DetailContent({ document, selectedNode }: DetailContentProps): J
   // is gone — detection is the only source of grid mode, so there's nothing
   // left to reconcile against an override.
   const detection = useMemo(() => detectGrid(store, node), [store, node])
-  // R210 (`docs/plans/R210-grid-grouping.md`): the first qualifying group in
-  // **document order**, where this used to take the *largest* one. R211
-  // renders all of them; until it does, taking the first is already the new
-  // model's ordering rather than the old largest-wins promotion, so adding
-  // members to a later group no longer steals the table from an earlier one.
+  // R210–R211 (`docs/plans/R210-grid-grouping.md`, D-103/D-104): every group
+  // of two or more is a table, in document order, and **one is shown at a
+  // time** — a tab per group when there are several, none when there is one.
+  // `detection` carries each group's members, so there is no second pass to
+  // collect them (see `gridDetection.ts`'s header for what that pass cost).
   //
-  // `detection` carries the members, so there is no second pass to collect
-  // them — see `gridDetection.ts`'s header for what that pass cost.
-  // R211: every qualifying group renders as its own table, up to the cap;
-  // whatever is left over lists beneath them, which is where a group of one
-  // has always gone.
-  const shownTables = useMemo(() => detection.tables.slice(0, GRID_TABLE_CAP), [detection])
-  const useGrid = shownTables.length > 0
-  const stacked = shownTables.length > 1
+  // Which tab is selected is remembered by group name per document
+  // (`GridGroupPicker.tsx`), so stepping between sibling nodes of the same
+  // shape keeps the same group open. `pickCount` only forces the re-render.
+  const tables = detection.tables
+  const useGrid = tables.length > 0
+  const [, setPickCount] = useState(0)
+  const selectedIndex = selectedGroupIndex(store, tables)
+  const selectedTable = tables[selectedIndex]
+  const gridPanelId = useId()
+
+  function pickGroup(index: number): void {
+    const table = tables[index]
+    if (table === undefined) return
+    rememberGroup(store, table.nameId)
+    setPickCount((n) => n + 1)
+  }
+
+  // Invariant 10: the tabs are a click surface, so the palette gets the same
+  // move (`klados.grid.nextGroup`/`previousGroup`). Wraps at both ends.
+  useEffect(
+    () =>
+      registerGridGroupPicker({
+        step: (delta) => {
+          if (tables.length < 2) return
+          // Read the selection now, not the one captured at render: two
+          // commands before a re-render (a held key repeating) would otherwise
+          // both step from the same stale index and move once instead of twice.
+          const current = selectedGroupIndex(store, tables)
+          pickGroup((current + delta + tables.length) % tables.length)
+        }
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `pickGroup` closes over exactly these
+    [store, tables]
+  )
+
+  // Every table member is excluded from the list beneath, not only the shown
+  // table's: the other groups are one tab away, and listing their rows again
+  // would put the same children in two places.
   // Built by iteration rather than `flatMap`: the intermediate array would be
   // a second copy of every row ref, and D9's normal case is two million.
   const gridMemberSet = useMemo(() => {
     const members = new Set<NodeRef>()
-    for (const table of shownTables) for (const member of table.members) members.add(member)
+    for (const table of tables) for (const member of table.members) members.add(member)
     return members
-  }, [shownTables])
+  }, [tables])
 
   const paneRef = useRef<HTMLDivElement>(null)
 
@@ -275,42 +281,37 @@ export function DetailContent({ document, selectedNode }: DetailContentProps): J
         >
           <div className="detail-children-heading">
             <h3>Children</h3>
-            {detection.tables.length > shownTables.length && (
-              <p className="detail-grid-overflow-note">
-                Showing {shownTables.length} of {detection.tables.length} tables — the rest are
-                listed below.
-              </p>
-            )}
           </div>
-          {useGrid ? (
+          {useGrid && selectedTable !== undefined ? (
             <>
-              {shownTables.map((table) => (
-                <Fragment key={table.nameId}>
-                  {stacked && (
-                    <h4 className="detail-grid-title">
-                      <span className="detail-grid-title-name">{tableLabelOf(store, table)}</span>
-                      <span className="detail-grid-title-count">
-                        {table.members.length.toLocaleString()}{' '}
-                        {table.members.length === 1 ? 'row' : 'rows'}
-                      </span>
-                    </h4>
-                  )}
-                  <div
-                    className={`detail-grid-container${stacked ? ' detail-grid-container-stacked' : ''}`}
-                    style={
-                      stacked ? { height: stackedTableHeightPx(table.members.length) } : undefined
-                    }
-                  >
-                    <Grid
-                      store={store}
-                      sourceBuffer={sourceBuffer}
-                      members={table.members}
-                      deltas={pendingSpanDeltas}
-                      label={tableLabelOf(store, table)}
-                    />
-                  </div>
-                </Fragment>
-              ))}
+              {tables.length > 1 && (
+                <GridGroupPicker
+                  store={store}
+                  groups={tables}
+                  selected={selectedIndex}
+                  onSelect={pickGroup}
+                  panelId={gridPanelId}
+                />
+              )}
+              <div
+                className="detail-grid-container"
+                id={gridPanelId}
+                role={tables.length > 1 ? 'tabpanel' : undefined}
+                aria-label={tables.length > 1 ? groupLabelOf(store, selectedTable) : undefined}
+              >
+                <Grid
+                  // A fresh grid per group: sort, filters, pinned and extra
+                  // columns are all keyed by the column name ids of one group,
+                  // and carrying them into another group's table would apply
+                  // them to columns that do not exist there.
+                  key={selectedTable.nameId}
+                  store={store}
+                  sourceBuffer={sourceBuffer}
+                  members={selectedTable.members}
+                  deltas={pendingSpanDeltas}
+                  label={groupLabelOf(store, selectedTable)}
+                />
+              </div>
               {childCount > gridMemberSet.size && (
                 <ChildrenList
                   store={store}
@@ -336,22 +337,6 @@ export function DetailContent({ document, selectedNode }: DetailContentProps): J
       <Scrollbar target={paneRef} axis="vertical" />
     </div>
   )
-}
-
-/** A stacked table's heading. Named groups show the name the document
- * writes; the unnamed group a JSON or CSV array forms (`nameId === -1`)
- * shows its members' kind, which is what the Tree calls them too.
- *
- * **The unnamed branch is defensive rather than reachable today**, and that
- * is worth saying plainly instead of pretending it is covered: unnamed
- * children only occur under an Array, where *every* child is unnamed, so
- * they always form a single group and a single table — which renders no
- * heading at all. It costs one line, and a heading with no text would be a
- * worse failure than an unnecessary branch. */
-function tableLabelOf(store: NodeStore, table: GridGroup): string {
-  if (table.nameId !== -1) return store.textOf(table.nameId)
-  const first = table.members[0]
-  return first === undefined ? 'Rows' : kindLabelOf(store.kindOf(first))
 }
 
 function Breadcrumb({

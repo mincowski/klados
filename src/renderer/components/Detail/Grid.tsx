@@ -49,7 +49,7 @@ import {
   type GridExportFormat
 } from './gridExport'
 import { EMPTY_GRID_FILTERS, filterIndices, type GridFilters } from './gridFilter'
-import { noteGridFocused, registerGridController } from './gridController'
+import { registerGridController } from './gridController'
 import { isColumnSortable, sortByColumn, type SortDirection } from './gridSort'
 import { defaultColumnWidthPx, sampleColumnStats, type ColumnStats } from './gridColumnWidth'
 import { Scrollbar } from '../Scrollbar/Scrollbar'
@@ -70,11 +70,10 @@ export interface GridProps {
    * every cell this view decodes. Defaults to nothing pending so a test
    * that doesn't care about the mid-edit window doesn't have to pass it. */
   readonly deltas?: DeltaList
-  /** R211 — the group's name, for the accessible name of this table. With
-   * one table per group there can be five on screen, and five grids all
-   * announcing "Data grid" is the screen-reader form of exactly the
-   * ambiguity R210 removed from the display. Optional: a test mounting a
-   * bare `Grid` has no group to name it after. */
+  /** R211 — the group's name, used in this table's accessible name. When a node
+   * has several groups the visible tab says which one is showing; without this
+   * a screen reader hears "Data grid" whichever it is. Optional: a test
+   * mounting a bare `Grid` has no group to name it after. */
   readonly label?: string
 }
 
@@ -444,17 +443,10 @@ export function Grid({
    *
    * R21-notifications.md §1: the confirmation is a pushed choice
    * notification rather than component-local JSX — `pendingExport` still
-   * holds which format is waiting, but the prompt itself lives in the
-   * notification stack, resolved through
+   * holds which format is waiting (nothing elevates it to session state;
+   * there's exactly one `Grid` instance at a time), but the prompt itself
+   * lives in the notification stack, resolved through
    * `klados.grid.confirmExport`/`cancelExport` (§3g) via `gridController.ts`.
-   *
-   * **R211 made "there is exactly one `Grid` instance at a time" false**, and
-   * this still works because of how the two mechanisms line up rather than
-   * by accident: `pendingExport` is per grid, the resolving commands route to
-   * the *focused* grid, and the click that started the export was on that
-   * grid's own toolbar button — which put focus inside it. The notification
-   * itself carries a single `dedupeKey`, so two tables cannot have competing
-   * prompts on screen either.
    */
   function copyAs(format: GridExportFormat): void {
     if (displayIndices.length > GRID_EXPORT_CONFIRM_ROWS) {
@@ -497,24 +489,12 @@ export function Grid({
     parentRef.current?.focus()
   }
 
-  // R211: a stable identity for this grid instance, separate from the
-  // controller object below — the controller is replaced on every snapshot
-  // change, and `gridController.ts` needs something that outlives that to
-  // track which of several mounted grids has the keyboard.
-  const gridIdRef = useRef({})
-
   // Invariant 10: the palette's own "Copy Grid as CSV/TSV/Markdown"
   // commands (E8) need a live handle on *this* grid's current
   // sort/filter/selection, which only the mounted component has.
   useEffect(
     () =>
-      registerGridController(gridIdRef.current, {
-        copyAs,
-        focusQuickFilter,
-        confirmExport,
-        cancelExport,
-        focusGrid
-      }),
+      registerGridController({ copyAs, focusQuickFilter, confirmExport, cancelExport, focusGrid }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-registers whenever the exported snapshot would change; the closures here are recreated every render and aren't meaningful dependencies on their own
     [store, sourceBuffer, members, displayIndices, orderedColumns, pendingExport]
   )
@@ -626,7 +606,7 @@ export function Grid({
       : `Filter grid rows (${formatChord(quickFilterChord)})`
 
   return (
-    <div className="grid-wrapper" onFocusCapture={() => noteGridFocused(gridIdRef.current)}>
+    <div className="grid-wrapper">
       <div className="grid-toolbar">
         <input
           ref={quickFilterRef}
