@@ -1,4 +1,5 @@
 import { SourceBuffer } from './buffer'
+import { DiagnosticIndex } from './diagnosticIndex'
 import { Interner } from './interner'
 import type { NameIndex } from './nameIndex'
 import { NodeStore } from './nodeStore'
@@ -77,6 +78,14 @@ export function rehydrateParseResult(response: ParseDoneMessage): ParseClientRes
     response.storeBuffers,
     response.namespaceState
   )
+  // Both halves together, before anything reads the store: `store.diagnostics`
+  // is what `subtreeSplice.ts` merges from on the next edit, and a store
+  // rehydrated without them would drop the document's diagnostics at the
+  // first splice (and, with the index missing, unmark the scrubber).
+  store.adoptDiagnostics(
+    response.diagnostics,
+    DiagnosticIndex.fromBuffers(response.diagnosticIndex)
+  )
   const sourceBuffer = new SourceBuffer(bytes, response.encoding, response.bomLength)
   return {
     store,
@@ -86,7 +95,11 @@ export function rehydrateParseResult(response: ParseDoneMessage): ParseClientRes
     rowIndex: response.rowIndex,
     lineIndex: response.lineIndex,
     nameIndex: response.nameIndex,
-    diagnostics: response.diagnostics,
+    // The store's, not `response`'s: identical records, plus the summary
+    // entry the store synthesizes when the cap suppressed anything. Reading
+    // it from the one place also keeps `OpenDocument.diagnostics` and the
+    // counters (which read `store.diagnosticIndex`) describing one set.
+    diagnostics: store.diagnostics,
     complete: response.complete,
     bytesConsumed: response.bytesConsumed,
     formatId: response.formatId

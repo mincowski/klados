@@ -124,7 +124,7 @@ so a reader of an old commit message can still find out what `R41` was.
 | **R196–R197** | built | `docs/plans/R196-readme-landing-page.md` |
 | **R198** | built | `docs/plans/R198-drop-updater-artifacts.md` |
 | **R199** | **OPEN** | `docs/plans/R199-csv-ragged-rows.md` |
-| **R200** | **OPEN** | `docs/plans/R200-diagnostic-volume.md` |
+| **R200** | built | `docs/plans/R200-diagnostic-volume.md` |
 | **R201** | **OPEN** | `docs/plans/R201-unicode-path-names.md` |
 | **R202–R205** | **OPEN** | `docs/plans/R202-unicode-comparison.md` |
 | **R206–R208** | **OPEN** | `docs/plans/R206-disclosed-ui-defects.md` |

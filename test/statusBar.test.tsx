@@ -79,6 +79,11 @@ function openDocumentFor(
   )
   const lineIndex = buildLineIndex(source, rowIndex)
   const nameIndex = buildNameIndex(store, interner.size)
+  // Pushed through the store rather than set on the document alone: since
+  // R200 the counters read `store.diagnosticIndex` (uncapped) while the
+  // panel reads the record list, and a fixture that sets only one of them
+  // describes a document that cannot exist.
+  for (const d of overrides.diagnostics ?? []) store.diagnostic(d)
   return {
     filePath: 'C:/docs/data.json',
     fileName: 'data.json',
@@ -87,7 +92,7 @@ function openDocumentFor(
     rowIndex,
     lineIndex,
     nameIndex,
-    diagnostics: overrides.diagnostics ?? [],
+    diagnostics: store.diagnostics,
     complete: true,
     formatId: 'json',
     encoding: 'utf-8',

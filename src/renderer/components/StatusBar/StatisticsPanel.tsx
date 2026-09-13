@@ -81,10 +81,12 @@ export function StatisticsPanel({
     () => getCrossTabMemoryBytes()
   )
   const displayName = getFormatCapabilities(doc.formatId)?.displayName ?? doc.formatId
-  const errorCount = doc.diagnostics.filter(
-    (d) => d.severity === Severity.Error || d.severity === Severity.Fatal
-  ).length
-  const warningCount = doc.diagnostics.filter((d) => d.severity === Severity.Warning).length
+  // Uncapped totals — see `StatusBar.tsx`'s own note on why these do not
+  // filter `diagnostics`.
+  const diagnosticIndex = doc.store.diagnosticIndex
+  const errorCount =
+    diagnosticIndex.countOf(Severity.Error) + diagnosticIndex.countOf(Severity.Fatal)
+  const warningCount = diagnosticIndex.countOf(Severity.Warning)
 
   return (
     <div

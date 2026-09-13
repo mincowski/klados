@@ -72,3 +72,7 @@ desktop.ini
 .env
 .env.*
 !.env.example
+
+# Vitest browser-mode failure screenshots and attachments — written on a
+# failing run, never read by anything, and only present after one.
+.vitest/

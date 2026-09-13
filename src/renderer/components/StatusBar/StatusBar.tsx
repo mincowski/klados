@@ -77,10 +77,13 @@ export function ReadyStatus({
     isStatisticsPanelOpen
   )
 
-  const errorCount = document.diagnostics.filter(
-    (d) => d.severity === Severity.Error || d.severity === Severity.Fatal
-  ).length
-  const warningCount = document.diagnostics.filter((d) => d.severity === Severity.Warning).length
+  // Counted from the store's uncapped position index rather than by
+  // filtering `diagnostics`, which R200 capped per code: filtering the list
+  // would show "100 warnings" for a file with two million of them, which is a
+  // worse defect than the unbounded list this replaced.
+  const index = document.store.diagnosticIndex
+  const errorCount = index.countOf(Severity.Error) + index.countOf(Severity.Fatal)
+  const warningCount = index.countOf(Severity.Warning)
 
   // `klados.navigate.nextDiagnostic` has no `enabledWhen` of its own (its
   // `when: 'hasDiagnostics'` was written for the palette, which hides

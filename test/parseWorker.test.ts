@@ -161,7 +161,12 @@ describe('runParseJob', () => {
       response.rowIndex.buffer,
       response.lineIndex.checkpoints.buffer,
       response.nameIndex.starts.buffer,
-      response.nameIndex.nodes.buffer
+      response.nameIndex.nodes.buffer,
+      // R200: one trimmed `Int32Array` per severity. Distinct buffers even
+      // when all three are empty, so the identity check below still holds.
+      response.diagnosticIndex.warning.buffer,
+      response.diagnosticIndex.error.buffer,
+      response.diagnosticIndex.fatal.buffer
     ])
     for (const value of Object.values(response.storeBuffers)) {
       if (ArrayBuffer.isView(value)) expectedBuffers.add(value.buffer)

@@ -1,12 +1,24 @@
 import { describe, expect, it } from 'vitest'
 import { buildRowIndex } from '../src/core/rowIndex'
-import { Severity, type Diagnostic } from '../src/core/types'
+import { DiagnosticIndex } from '../src/core/diagnosticIndex'
+import { Severity } from '../src/core/types'
 import {
+  DEFAULT_MATCH_BUCKET_COUNT,
   diagnosticMarkers,
   matchMarkers,
   offsetToRatio,
-  ratioToOffset
+  ratioToOffset,
+  type ScrubberMarker
 } from '../src/renderer/components/Scrubber/scrubberModel'
+
+/** The index the strip actually reads (R200) — built here the way
+ * `NodeStore.diagnostic` builds it, so these tests exercise the sort and the
+ * trim rather than a hand-made pair of arrays that is already ascending. */
+function index(entries: readonly (readonly [Severity, number])[]): DiagnosticIndex {
+  const built = new DiagnosticIndex()
+  for (const [severity, offset] of entries) built.add(severity, offset)
+  return built
+}
 
 function rows(text: string, maxRowBytes = 8): Int32Array {
   return buildRowIndex(new TextEncoder().encode(text), maxRowBytes, [0x20])
@@ -54,31 +66,83 @@ describe('offsetToRatio / ratioToOffset (D13)', () => {
   })
 })
 
-describe('diagnosticMarkers (D13)', () => {
-  it('produces one marker per diagnostic, positioned by offset', () => {
+describe('diagnosticMarkers (D13, bucketed by R200)', () => {
+  it('places a marker in the bucket each diagnostic falls into', () => {
     const rowIndex = rows('a\nb\nc\nd\ne\n'.repeat(20))
-    const diagnostics: Diagnostic[] = [
-      { severity: Severity.Warning, code: 'w', offset: 0, length: 1, message: 'warn' },
-      { severity: Severity.Error, code: 'e', offset: rowIndex[5]!, length: 1, message: 'err' },
-      {
-        severity: Severity.Fatal,
-        code: 'f',
-        offset: rowIndex[rowIndex.length - 1]!,
-        length: 1,
-        message: 'fatal'
-      }
-    ]
-    const markers = diagnosticMarkers(rowIndex, diagnostics)
-    expect(markers).toEqual([
-      { ratio: 0, kind: 'warning' },
-      { ratio: offsetToRatio(rowIndex, rowIndex[5]!), kind: 'error' },
-      { ratio: 1, kind: 'fatal' }
-    ])
+    const midOffset = rowIndex[5]!
+    const lastOffset = rowIndex[rowIndex.length - 1]!
+    const markers = diagnosticMarkers(
+      rowIndex,
+      index([
+        [Severity.Warning, 0],
+        [Severity.Error, midOffset],
+        [Severity.Fatal, lastOffset]
+      ]).positions()
+    )
+
+    expect(markers.map((m) => m.kind)).toEqual(['warning', 'error', 'fatal'])
+    // Bucketed, so a marker's ratio is its bucket's, not the diagnostic's.
+    // The gap is bounded by two bucket widths: one for the bucket itself, one
+    // because the bucket's own edges are row-quantized through `rowIndex`. A
+    // document with fewer rows than buckets — this one — leaves some bucket
+    // ranges empty, which is why even offset 0 does not land at ratio 0.
+    const within = (marker: ScrubberMarker, offset: number): boolean =>
+      Math.abs(marker.ratio - offsetToRatio(rowIndex, offset)) <= 2 / DEFAULT_MATCH_BUCKET_COUNT
+    expect(within(markers[0]!, 0)).toBe(true)
+    expect(within(markers[1]!, midOffset)).toBe(true)
+    expect(within(markers[2]!, lastOffset)).toBe(true)
   })
 
   it('is empty for no diagnostics', () => {
     const rowIndex = rows('a\nb\n')
-    expect(diagnosticMarkers(rowIndex, [])).toEqual([])
+    expect(diagnosticMarkers(rowIndex, new DiagnosticIndex().positions())).toEqual([])
+  })
+
+  it('draws a bucket at its most severe, so a fatal is never hidden by a warning', () => {
+    const rowIndex = rows('a\nb\nc\nd\ne\n'.repeat(20))
+    // Both in bucket 0 — a single marker, and it is the fatal.
+    const markers = diagnosticMarkers(
+      rowIndex,
+      index([
+        [Severity.Warning, 0],
+        [Severity.Fatal, 1]
+      ]).positions(),
+      4
+    )
+    expect(markers).toEqual([{ ratio: 0, kind: 'fatal' }])
+  })
+
+  it('bounds the marker count and still spreads them over the whole strip', () => {
+    // R200 §5's claim, and the one a naive cap breaks silently: capping the
+    // *records* and drawing from those would cluster every mark at the top,
+    // because parsers walk forward.
+    const text = 'row\n'.repeat(50_000)
+    const rowIndex = rows(text, 64)
+    const entries: [Severity, number][] = []
+    for (let i = 0; i < 50_000; i++) entries.push([Severity.Warning, i * 4])
+    const markers = diagnosticMarkers(rowIndex, index(entries).positions())
+
+    expect(markers.length).toBeLessThanOrEqual(DEFAULT_MATCH_BUCKET_COUNT)
+    expect(markers[0]!.ratio).toBeLessThanOrEqual(1 / DEFAULT_MATCH_BUCKET_COUNT)
+    expect(markers[markers.length - 1]!.ratio).toBeGreaterThan(0.9)
+  })
+
+  it('sorts positions the parser emitted out of order', () => {
+    // XML's unwind loop emits `xml.unclosed-element` backwards from EOF, so
+    // the index cannot assume ascending input — `countMatchesInRange` binary
+    // searches and would miscount if it did.
+    const rowIndex = rows('a\nb\nc\nd\ne\n'.repeat(20))
+    const last = rowIndex[rowIndex.length - 1]!
+    const descending = diagnosticMarkers(
+      rowIndex,
+      index([
+        [Severity.Error, last],
+        [Severity.Error, 0]
+      ]).positions()
+    )
+    expect(descending).toHaveLength(2)
+    expect(descending[0]!.ratio).toBeLessThanOrEqual(1 / DEFAULT_MATCH_BUCKET_COUNT)
+    expect(descending[1]!.ratio).toBeGreaterThan(0.9)
   })
 })
 
