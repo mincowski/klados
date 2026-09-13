@@ -101,7 +101,7 @@ Search for the id to jump to one.
 | **D-079** | R65's shortcuts panel reads `getAllCommands()` filtered by surface, not a second list |  |
 | **D-080** | R70's Find bar anchors to `.layout`, not the viewport shell the plan named |  |
 | **D-081** | `copyPathFor` always emits this app's own query grammar, not XPath or JSON Pointer |  |
-| **D-082** | Find's byte/decoded case-fold divergence is accepted as-is; only the footnote changes |  |
+| **D-082** | Find's byte/decoded case-fold divergence is accepted as-is; only the footnote changes | superseded by D-097 |
 | **D-083** | The current-match highlight is a ring, not a fill |  |
 | **D-084** | A marker glyph's font is chosen per glyph string, not per surface or per format |  |
 | **D-085** | `gridSort.ts` keeps JS `Number()`; the path query engine uses XPath's `number()` |  |
@@ -114,6 +114,7 @@ Search for the id to jump to one.
 | **D-092** | A save holds its own watcher open; the write-window race is accepted and recorded |  |
 | **D-093** | Enter copies the line's own ending; a document majority was measured and rejected |  |
 | **D-096** | Diagnostic *records* are capped per code; diagnostic *positions* never are |  |
+| **D-097** | One folding algorithm on the decoded path; canonical equivalence, not compatibility |  |
 
 ---
 
@@ -2698,7 +2699,16 @@ against a first option that costs nothing beyond the one function and closes the
 Worth building if a real JSON Pointer consumer shows up; not speculatively.
 
 ### D-082 — Find's byte/decoded case-fold divergence is accepted as-is; only the footnote's
-condition and wording change (R72 §6, R76) · `settled`
+condition and wording change (R72 §6, R76) · `superseded` **by D-097 (R205)**
+
+**Reversed by D-097.** The measurements below all stand — they are why the reversal was affordable to
+argue — but the conclusion does not: R205 deleted `indexOfCaseInsensitive` and made plain
+case-insensitive search a literal regex, so the divergence this entry accepted no longer exists and
+the footnote it reworded is gone. **Read D-097 for what is true now**; this entry is kept because its
+numbers are the evidence base and because "we looked at this and accepted it" is exactly the kind of
+history that stops a question being reopened by accident. What actually changed was the premise, not
+the arithmetic: this entry rests on *"input this project's own documents are unlikely to be
+searching"*, and the project lead's "Unicode all the way through" position revised that.
 
 From R72 §6 (which folds R76 into the same decision — see below). Plan: `docs/plans/R72-path-query.md` §6.
 
@@ -3327,3 +3337,72 @@ placeholders. It is a statement about the file rather than a position, so it cla
 it at the first suppressed site would mark that site as special when it is only the first past a
 budget. It is a Warning because it is not itself a problem in the document — the true per-severity
 totals sit beside it on the status bar, read from the index rather than by filtering the list.
+
+---
+
+### D-097 — one folding algorithm on the decoded path, and canonical equivalence rather than compatibility (R202–R205) · `settled`
+
+Reverses **D-082**, whose measurements stand and whose premise did not. That entry accepted a
+154-pair fold divergence between plain and `.*` search on the judgement that *"this project's own
+documents are unlikely to be searching"* non-ASCII text. The project lead's "Unicode all the way
+through" position revises exactly that judgement, which is what made D-082 reopenable rather than
+wrong.
+
+**Decided, in two parts that had to land in this order.**
+
+**R204 — normalize the comparison, never the document.** Invariants 1, 6 and 7 mean the bytes are
+never decoded wholesale, never rewritten and always saved as written, so NFC can only ever apply to
+a *comparison*. The decoded window is rewritten to NFC and a piecewise index records where each run
+came from; a match found in the normalized text maps back through it before becoming a byte offset.
+
+**R205 — delete the second fold.** `indexOfCaseInsensitive` sliced and lowercased the text at every
+position. Plain case-insensitive search is now `new RegExp(escape(needle), 'gi')` — the same engine
+`.*` mode already used — so the two modes agree **by construction** rather than by two
+implementations happening to coincide. Measured 366.2 ms → 35.5 ms over 200 passes on a 64 KB
+window, for an identical 2427 matches.
+
+**The order is load-bearing and was not a preference.** R205 alone regresses three of the five
+documented pairs: angstrom and ohm are *canonical singletons*, which only normalization resolves, so
+R204 has to be underneath it. Measured against `test/fixtures/confusables.xml`:
+
+| Pair | before | after R205 alone | after R204 + R205 |
+|---|---|---|---|
+| `µ` U+00B5 / `μ` U+03BC | plain miss, regex find | both find | **both find** |
+| `Å` U+00C5 / `Å` U+212B | plain find, regex miss | **both miss** | **both find** |
+| `Ω` U+03A9 / `Ω` U+2126 | plain find, regex miss | **both miss** | **both find** |
+| `ß` U+00DF / `ẞ` U+1E9E | plain find, regex miss | both miss | **both miss** |
+
+**The `ß`/`ẞ` loss is accepted, deliberately and on the record.** The engine folds *upward* and
+`'ß'.toUpperCase()` is `'SS'` — a length change no normalization form repairs. Plain search used to
+find it; now neither mode does. Before: 3 of 5 in plain, 2 of 5 in regex, and which you got depended
+on a toggle most users will not connect to the result. After: **4 of 5, the same answer in both
+modes.** Better on balance and worse for German capital sharp s, and recorded here because the loss
+is silent on screen.
+
+**An ASCII needle pays for none of it, and that is a correctness rule before it is a performance
+one.** Normalization is gated on the needle in all three places it was added — Find, the grid quick
+filter, `Interner.lookup`. NFC *composes*, so normalizing the haystack for an ASCII needle can only
+**remove** matches: `cafe` matches a decomposed `cafe` + U+0301 character for character today and
+would stop once the text is composed, and nothing in NFC produces an ASCII character that was not
+already there. For a regex it is worse than neutral — `.` counts one character against a composed
+`é` and two against a decomposed one — so an existing ASCII pattern would silently change meaning.
+
+**Rejected: NFKC.** Unchanged from D-082, and it is what would "fix" the two remaining rows. It
+equates `²` with `2` and fullwidth `Ａ` with `A` — 2112 disagreeing pairs in the same measured range
+— which is a content change in a tool whose premise is byte-faithful inspection. µ/μ and ß/ẞ are
+compatibility relationships, not canonical ones, and they stay unresolved on purpose.
+
+**Rejected: `Intl.Segmenter` for the normalization boundaries.** The obvious implementation, measured
+at 13.957 ms a window against 0.05 ms (all-ASCII) to 4.4 ms (fully decomposed) for the rule that
+shipped — `p{M}` plus the Hangul V/T jamo ranges, memoized by code point.
+`spike/r204-normalization.ts` keeps the measurement runnable, so a later round proposing Segmenter
+has to beat it rather than re-derive it.
+
+**Rejected: extending normalization to the byte path.** It never decodes, so it cannot normalize;
+making it try means routing every ASCII needle through the decoded path and losing Boyer–Moore. The
+consequence is stated rather than hidden: an ASCII needle `cafe` matches decomposed `café` today and
+still will. That is a permissive result, and the harmful direction is missing one.
+
+**Rejected: keeping the footnote.** D-082's UI note warned that plain and `.*` matched slightly
+different sets. R205 removed the divergence, so the note would warn about behaviour that no longer
+happens.

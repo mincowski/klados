@@ -28,32 +28,33 @@
  * 1. The decoded path cannot find a match longer than one window minus one
  *    row (~63 KB).
  * 2. Regex `^`/`$` anchor to the decoded window, not to document lines.
- * 3. `indexOfCaseInsensitive` (below) cannot match a case mapping that
- *    changes length — R76, `R72-path-query.md` §6b. It compares
- *    `text.slice(i, i + needle.length).toLowerCase()` against a needle of
- *    fixed length, so the slice width can never track a mapping like
- *    `'İ'.toLowerCase()` (`'i̇'`, 1 code unit → 2). Measured: 91 single
- *    characters in U+0020–U+2FFF change length under `toLowerCase`. Not a
- *    disagreement between the two paths (limit 4, below) — a case neither
- *    path can express, invisible today because nothing exercises it.
- *    Accepted as a documented limit rather than rewritten: see D-082 for
- *    why a length-tolerant comparison isn't a small change once the actual
- *    fold-divergence problem (limit 4) is considered alongside it.
+ * 3. A case mapping that changes length still does not match — R76,
+ *    `R72-path-query.md` §6b. The cause moved with R205: it used to be
+ *    `indexOfCaseInsensitive` comparing a slice of fixed width, and it is now
+ *    the regex engine, which folds `i` upward to `I` rather than folding
+ *    `İ` (U+0130) down to the two code units `'İ'.toLowerCase()` produces.
+ *    `/İ/i` misses `i̇` for the same reason, so this was never a property
+ *    of the old implementation. Measured: 91 single characters in
+ *    U+0020–U+2FFF change length under `toLowerCase`.
  *
- * **A fourth, cross-path difference, not a limit of either path alone:
- * case-insensitivity is not the same algorithm on both paths.** The byte
- * path ASCII-folds (`A-Z` <-> `a-z` only) in the comparison. The decoded
- * path lowercases with `String.prototype.toLowerCase()` — the platform's
- * own Unicode casing rules, which occasionally disagree with ASCII folding.
- * Measured (not a Turkish-locale claim — `toLowerCase` is locale-independent,
- * so that rule never actually applies here): a plain search for `µ`
- * (micro sign, U+00B5) misses `μ` (Greek mu, U+03BC) that a regex search
- * for the same needle finds, and — in the opposite direction — a plain
- * search for `Å` (U+00C5) finds the look-alike angstrom sign (U+212B) that
- * a regex search misses. This is a real behavioral difference between the
- * two paths, not a bug in either, and it is accepted as-is (D-082) —
- * surfaced in the UI as a footnote (G5/R72 §6), not left to be discovered
- * as a surprise.
+ * **Case-insensitivity is one algorithm on the decoded path and another on
+ * the byte path, and that no longer produces disagreements users can reach.**
+ * R205 deleted `indexOfCaseInsensitive` and made plain case-insensitive
+ * search a literal regex, so plain and `.*` modes now fold identically **by
+ * construction** rather than by two implementations agreeing. The byte path
+ * still ASCII-folds — but it only ever runs for an all-ASCII needle, where
+ * ASCII folding and the engine's folding were measured to agree on every
+ * case (D-082: zero disagreeing pairs for an ASCII needle).
+ *
+ * What survives is not a path difference but a Unicode one. R204 made both
+ * modes see canonical equivalence, so `Å` U+00C5 and the angstrom sign
+ * U+212B now match each other everywhere. `µ`/`μ` and `ß`/`ẞ` still do not,
+ * because those are **compatibility** relationships rather than canonical
+ * ones, and D-082 rejected NFKC for equating characters that are not the
+ * same character. `ß`/`ẞ` is the one case R205 made worse — the engine folds
+ * upward and `'ß'.toUpperCase()` is `'SS'`, a length change no normalization
+ * form repairs — and `docs/plans/R202-unicode-comparison.md` § 7 records that
+ * loss as accepted rather than overlooked.
  */
 
 export interface MatchSet {
@@ -554,19 +555,17 @@ function byteOffsetOf(
   return rowIndex[window.startRow + row]! + utf8Encoder.encode(prefix).length
 }
 
-/** R76 (`R72-path-query.md` §6b, module comment's limit 3): the slice
- * compared against `needleLower` is always exactly `needle.length` code
- * units wide, so a character whose lowercase mapping changes length (`İ`
- * U+0130 → `i̇`, 1 → 2 code units) can never match, regardless of needle —
- * not a disagreement with the regex path, a case neither path expresses. */
-function indexOfCaseInsensitive(text: string, needle: string, from: number): number {
-  const needleLower = needle.toLowerCase()
-  const needleLen = needle.length
-  const limit = text.length - needleLen
-  for (let i = from; i <= limit; i++) {
-    if (text.slice(i, i + needleLen).toLowerCase() === needleLower) return i
-  }
-  return -1
+/**
+ * R205 — every character the regex grammar gives a meaning to, escaped so a
+ * plain needle is matched literally.
+ *
+ * Plain case-insensitive search **is** a regex now (see `decodedTextMatches`),
+ * so the two modes cannot disagree: there is one folding algorithm, the
+ * engine's, rather than two implementations that happen to differ at 154
+ * measured code points (D-082).
+ */
+function escapeForRegex(needle: string): string {
+  return needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 /** `{ index, length }` matches within `text`, in ascending order, string
@@ -594,14 +593,45 @@ function decodedTextMatches(
   }
 
   if (needle.length === 0) return []
-  let from = 0
-  while (from <= text.length - needle.length) {
-    const idx = options.caseSensitive
-      ? text.indexOf(needle, from)
-      : indexOfCaseInsensitive(text, needle, from)
-    if (idx === -1) break
-    matches.push({ index: idx, length: needle.length })
-    from = idx + 1 // overlapping matches allowed, same as the byte path
+
+  // Case-sensitive stays `indexOf`: it is exact, it is faster than any
+  // regex, and it cannot disagree with a case-sensitive regex about what a
+  // literal means.
+  if (options.caseSensitive) {
+    let from = 0
+    while (from <= text.length - needle.length) {
+      const idx = text.indexOf(needle, from)
+      if (idx === -1) break
+      matches.push({ index: idx, length: needle.length })
+      from = idx + 1 // overlapping matches allowed, same as the byte path
+    }
+    return matches
+  }
+
+  // R205: case-insensitive plain search is the engine's own fold, applied to
+  // an escaped literal. This replaces `indexOfCaseInsensitive`, which sliced
+  // and lowercased the text **at every position** — measured at 366.2 ms
+  // against 35.5 ms for this, over 200 passes on a 64 KB window, for an
+  // identical 2427 matches.
+  //
+  // A match's length comes from the match itself, not from `needle.length`:
+  // the engine can fold a character to one of a different width, and
+  // `MatchSet` already documents that a decoded-path match's byte length
+  // varies.
+  let literal: RegExp
+  try {
+    literal = new RegExp(escapeForRegex(needle), 'gi')
+  } catch {
+    return []
+  }
+  let literalMatch: RegExpExecArray | null
+  while ((literalMatch = literal.exec(text)) !== null) {
+    matches.push({ index: literalMatch.index, length: literalMatch[0].length })
+    // **Advance by one, not by the match length.** The regex branch above
+    // advances by the match and this one must not: the plain path has always
+    // allowed overlapping matches ("same as the byte path"), and advancing by
+    // the match would silently drop `aa` in `aaa` from two matches to one.
+    literal.lastIndex = literalMatch.index + 1
   }
   return matches
 }

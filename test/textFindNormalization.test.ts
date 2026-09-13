@@ -196,3 +196,62 @@ describe('R204 \u2014 Find reports the correct byte offset across spellings', ()
     expect(new TextDecoder().decode(bytes.subarray(starts[0]!, ends[0]!))).toBe(`caf${DECOMPOSED}`)
   })
 })
+
+describe('R205 — plain case-insensitive search is a literal regex', () => {
+  // These all use a non-ASCII needle on purpose: an ASCII needle takes the
+  // byte path, which R205 did not touch.
+  const E = 'é'
+
+  it('treats every regex metacharacter in the needle as a literal', () => {
+    // The whole risk of making plain search a regex. Each of these would be
+    // a pattern rather than a character if the escape were missing.
+    const BACKSLASH = String.fromCharCode(92)
+    for (const meta of [
+      '.',
+      '*',
+      '+',
+      '?',
+      '^',
+      '$',
+      '{',
+      '}',
+      '(',
+      ')',
+      '|',
+      '[',
+      ']',
+      BACKSLASH
+    ]) {
+      const needle = `a${meta}${E}`
+      expect(find(`x${needle}y`, needle).starts, meta).toHaveLength(1)
+      // And it must not match the same text with a different character where
+      // the metacharacter is.
+      expect(find(`xaZ${E}y`, needle).starts, meta).toHaveLength(0)
+    }
+  })
+
+  it('keeps overlapping matches, which advancing by the match length would drop', () => {
+    // `decodedTextMatches`' regex branch advances `lastIndex` by the match;
+    // this one must advance by one. The plain path has always allowed
+    // overlaps, "same as the byte path", and losing them would be a silent
+    // change in the count.
+    expect(find(`${E}aaa`, `${E}a`).starts).toHaveLength(1)
+    expect(find(`aaaa${E}`, `aa`).starts.length).toBeGreaterThan(1)
+    expect(find(`${E}${E}${E}`, `${E}${E}`).starts).toHaveLength(2)
+  })
+
+  it('folds case through the engine, the same way .* mode does', () => {
+    const plain = find(`CAFÉ caf${E}`, `caf${E}`).starts
+    const regex = find(`CAFÉ caf${E}`, `caf${E}`, { regex: true }).starts
+    expect(plain).toEqual(regex)
+    expect(plain).toHaveLength(2)
+  })
+
+  it('case-sensitive plain search still takes the indexOf path, and stays exact', () => {
+    expect(find(`CAFÉ caf${E}`, `caf${E}`, { caseSensitive: true }).starts).toHaveLength(1)
+  })
+
+  it('an empty needle finds nothing rather than everything', () => {
+    expect(find(`caf${E}`, '').starts).toHaveLength(0)
+  })
+})

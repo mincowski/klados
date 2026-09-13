@@ -14,7 +14,7 @@
  */
 import { useEffect, useRef, useState, type JSX } from 'react'
 import { useSyncExternalStore } from 'react'
-import { isAsciiOnly, type TextFindOptions } from '../../../core/textFind'
+import { type TextFindOptions } from '../../../core/textFind'
 import type { PathDiagnostic } from '../../../core/path/parse'
 import { nodeContainingOffset } from '../../nodeSpanLookup'
 import {
@@ -769,20 +769,15 @@ export function FindBar(): JSX.Element | null {
           </button>
         </div>
       )}
-      {/* R72 §6 — Tier 1 (`R72-path-query.md`): the old render
-       * condition (`!regex && !caseSensitive`, unconditional on the
-       * needle) showed this on essentially every search, including every
-       * ASCII one where the two case-fold paths measurably never diverge
-       * — the footnote read as boilerplate, not a warning. It's also
-       * hidden exactly when `regex` is on, one of the two modes it
-       * describes. Keyed on `!caseSensitive && !isAsciiOnly(text)`
-       * instead (`textFind.ts`'s own exported predicate, not a re-derived
-       * test, so the note and the behaviour can't drift) — the only
-       * region a divergence can actually occur, per the module's own
-       * measured table. Two symmetric messages rather than one: neither
-       * says "try the other mode," since in regex mode that would be
-       * actively bad advice (the pattern may depend on metacharacters
-       * `.*` would defeat by lying about the trade-off's actual shape). */}
+      {/* R72 §6's look-alike-character footnote used to render here, warning
+       * that plain and `.*` modes matched slightly different sets for a
+       * non-ASCII needle. **R205 removed the divergence, so the warning goes
+       * with it**: plain case-insensitive search is now a literal regex
+       * through the same engine `.*` mode uses, and the two cannot disagree.
+       * Leaving the note would warn about behaviour that no longer happens,
+       * which is worse than no note — `docs/plans/R202-unicode-comparison.md`
+       * § 6 says so explicitly. What survives is not a mode difference but a
+       * Unicode one (µ/μ, ß/ẞ), and it is the same in both modes. */}
       {/* R87 §3: the path grammar's own parse diagnostic, in the same
        * footnote row R72 §6 already renders the look-alike-character note
        * in — both are "why the count reads the way it does," and never
@@ -798,13 +793,6 @@ export function FindBar(): JSX.Element | null {
           </div>
           <div>{pathDiagnostic.message}</div>
         </div>
-      )}
-      {matchMode !== 'path' && !caseSensitive && !isAsciiOnly(text) && (
-        <span className="find-footnote">
-          {matchMode === 'regex'
-            ? 'Look-alike characters: plain mode matches a slightly different set.'
-            : 'Look-alike characters: .* mode matches a slightly different set.'}
-        </span>
       )}
       {/* R103 (`R102-find-single-line.md` §3): the one thing reverting the
        * find field to a single line genuinely loses — a plain

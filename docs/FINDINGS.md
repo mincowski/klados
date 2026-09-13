@@ -538,16 +538,6 @@ union in `src/preload/api.ts` (R193) keeps the renderer's declared environment h
   and anything counting or marking must read `store.diagnosticIndex` instead. The entry stays
   because the parser behaviour it describes is unchanged and still surprises people. Full account:
   `docs/plans/R200-diagnostic-volume.md` §2, D-096.
-- **Nothing in the codebase calls `String.prototype.normalize`, so NFC never matches NFD.** A needle
-  or name written `é` (U+00E9) does not match the same text stored as `e` + U+0301, in Find, in the
-  grid's quick filter, or in path-name resolution — which compares interned **bytes**, so the two
-  spellings are simply different names. Reachable with ordinary files: macOS filesystems and several
-  exporters emit NFD. **Not a small fix**, and the reason is worth knowing before starting:
-  invariant 1 forbids decoding the document and invariant 6 requires Save to write the original
-  bytes, so normalization can only apply to a *comparison* — and it changes lengths, so a match
-  offset found in a normalized window does not map back to a byte offset. That is the same obstacle
-  D-082 already declined for length-changing case mappings. Full account:
-  **Planned as R202–R205** (`docs/plans/R202-unicode-comparison.md`), which also separates the three comparison sites: the grid filter is one call, name resolution is bounded by name count, and only Find has the offset problem.
 - **`evaluate.ts`'s intermediate node sets are plain `number[]`**, not the reused-scratch
   `Int32Array` hard rule 2 specifies.
 - **An unscoped `//name` is not meaningfully faster than a full scan**, and a **predicate step
