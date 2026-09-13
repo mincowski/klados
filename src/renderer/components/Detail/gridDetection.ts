@@ -37,6 +37,22 @@ import { isGridEligible } from '../../nodeDisplay'
  */
 export const GRID_MIN_MEMBERS = 2
 
+/**
+ * How many tables render at once (R211). Applied by `Detail.tsx`, not here:
+ * detection reports what the document contains and this is a **rendering
+ * budget** — each table is a live virtualizer, and D9's stated normal case is
+ * a two-million-child parent. Groups past the cap are not hidden; they list
+ * beneath the tables in document order, which is the same place a group of
+ * one has always gone.
+ *
+ * **Chosen by rendering** (`PLANNING.md` §1): 2, 5, 10 and 20 were rendered
+ * against a document with 21 equal groups and put in front of the project
+ * lead. It is also a performance mechanism rather than only a readability
+ * one — collecting columns for every group costs ~46 ms at 100 groups where
+ * capping at five costs 2.1 ms (R210 §4, re-measured after R210 landed).
+ */
+export const GRID_TABLE_CAP = 5
+
 export interface GridGroup {
   /** The child's own interned name id — D-013's "name alone, no shape
    * signature". `-1` for the unnamed children of a JSON or CSV array, which

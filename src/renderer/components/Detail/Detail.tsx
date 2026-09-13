@@ -4,7 +4,7 @@
  * children section — list mode only, per M1's own scope (grid mode is M2).
  */
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties, type JSX } from 'react'
 import type { NodeStore } from '../../../core/nodeStore'
 import type { SourceBuffer } from '../../../core/buffer'
 import type { NodeRef } from '../../../core/types'
@@ -33,7 +33,7 @@ import {
   valueTextOf,
   type PathSegment
 } from './detailModel'
-import { detectGrid } from './gridDetection'
+import { detectGrid, GRID_TABLE_CAP, type GridGroup } from './gridDetection'
 import { focusGrid } from './gridController'
 import { Grid } from './Grid'
 import { resolveWrapperTarget, skippedComments } from '../../wrapperDescent'
@@ -42,9 +42,30 @@ import './Detail.css'
 
 const ROW_HEIGHT = 23
 
-/** A stable empty array, so `gridMembers` keeps one identity across renders
- * that have no table — a fresh `[]` would invalidate every memo below it. */
-const NO_MEMBERS: readonly NodeRef[] = []
+/**
+ * R211 — a stacked table is sized to its own rows rather than sharing the
+ * pane equally with its neighbours: a two-row group and a thousand-row group
+ * next to each other should not be the same height. `.grid-wrapper` is
+ * `height: 100%`, so the height has to come from here.
+ *
+ * The chrome constant is everything in a grid that is not a row, measured
+ * in the running application rather than estimated: `.grid-toolbar` 44px,
+ * `.grid-header-row` 23px, and 1px of border on each side, which counts
+ * because `base.css` makes every box a border box. **The first version of
+ * this was estimated at 41 + 24 and clipped 2px off every stacked table's
+ * last row** — the review caught it, but only because the comment claimed a
+ * measurement that had not been taken.
+ *
+ * The bound is what a stack can show before the pane becomes a scroll of
+ * scrollers; at this chrome it is about eleven rows. A single table does not
+ * use any of this — it keeps R43's `flex: 1` and its 230px floor.
+ */
+const GRID_CHROME_PX = 44 + 23 + 2
+const STACKED_TABLE_MAX_PX = 320
+
+function stackedTableHeightPx(rowCount: number): number {
+  return Math.min(STACKED_TABLE_MAX_PX, GRID_CHROME_PX + rowCount * ROW_HEIGHT)
+}
 
 export function Detail(): JSX.Element {
   const state = useDocumentSession()
@@ -117,10 +138,19 @@ export function DetailContent({ document, selectedNode }: DetailContentProps): J
   //
   // `detection` carries the members, so there is no second pass to collect
   // them — see `gridDetection.ts`'s header for what that pass cost.
-  const gridTable = detection.tables[0] ?? null
-  const useGrid = gridTable !== null
-  const gridMembers = gridTable?.members ?? NO_MEMBERS
-  const gridMemberSet = useMemo(() => new Set(gridMembers), [gridMembers])
+  // R211: every qualifying group renders as its own table, up to the cap;
+  // whatever is left over lists beneath them, which is where a group of one
+  // has always gone.
+  const shownTables = useMemo(() => detection.tables.slice(0, GRID_TABLE_CAP), [detection])
+  const useGrid = shownTables.length > 0
+  const stacked = shownTables.length > 1
+  // Built by iteration rather than `flatMap`: the intermediate array would be
+  // a second copy of every row ref, and D9's normal case is two million.
+  const gridMemberSet = useMemo(() => {
+    const members = new Set<NodeRef>()
+    for (const table of shownTables) for (const member of table.members) members.add(member)
+    return members
+  }, [shownTables])
 
   const paneRef = useRef<HTMLDivElement>(null)
 
@@ -245,17 +275,42 @@ export function DetailContent({ document, selectedNode }: DetailContentProps): J
         >
           <div className="detail-children-heading">
             <h3>Children</h3>
+            {detection.tables.length > shownTables.length && (
+              <p className="detail-grid-overflow-note">
+                Showing {shownTables.length} of {detection.tables.length} tables — the rest are
+                listed below.
+              </p>
+            )}
           </div>
           {useGrid ? (
             <>
-              <div className="detail-grid-container">
-                <Grid
-                  store={store}
-                  sourceBuffer={sourceBuffer}
-                  members={gridMembers}
-                  deltas={pendingSpanDeltas}
-                />
-              </div>
+              {shownTables.map((table) => (
+                <Fragment key={table.nameId}>
+                  {stacked && (
+                    <h4 className="detail-grid-title">
+                      <span className="detail-grid-title-name">{tableLabelOf(store, table)}</span>
+                      <span className="detail-grid-title-count">
+                        {table.members.length.toLocaleString()}{' '}
+                        {table.members.length === 1 ? 'row' : 'rows'}
+                      </span>
+                    </h4>
+                  )}
+                  <div
+                    className={`detail-grid-container${stacked ? ' detail-grid-container-stacked' : ''}`}
+                    style={
+                      stacked ? { height: stackedTableHeightPx(table.members.length) } : undefined
+                    }
+                  >
+                    <Grid
+                      store={store}
+                      sourceBuffer={sourceBuffer}
+                      members={table.members}
+                      deltas={pendingSpanDeltas}
+                      label={tableLabelOf(store, table)}
+                    />
+                  </div>
+                </Fragment>
+              ))}
               {childCount > gridMemberSet.size && (
                 <ChildrenList
                   store={store}
@@ -281,6 +336,22 @@ export function DetailContent({ document, selectedNode }: DetailContentProps): J
       <Scrollbar target={paneRef} axis="vertical" />
     </div>
   )
+}
+
+/** A stacked table's heading. Named groups show the name the document
+ * writes; the unnamed group a JSON or CSV array forms (`nameId === -1`)
+ * shows its members' kind, which is what the Tree calls them too.
+ *
+ * **The unnamed branch is defensive rather than reachable today**, and that
+ * is worth saying plainly instead of pretending it is covered: unnamed
+ * children only occur under an Array, where *every* child is unnamed, so
+ * they always form a single group and a single table — which renders no
+ * heading at all. It costs one line, and a heading with no text would be a
+ * worse failure than an unnecessary branch. */
+function tableLabelOf(store: NodeStore, table: GridGroup): string {
+  if (table.nameId !== -1) return store.textOf(table.nameId)
+  const first = table.members[0]
+  return first === undefined ? 'Rows' : kindLabelOf(store.kindOf(first))
 }
 
 function Breadcrumb({

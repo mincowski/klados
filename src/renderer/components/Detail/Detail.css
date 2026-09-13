@@ -262,6 +262,47 @@
   margin-bottom: var(--space-2);
 }
 
+/* R211 — a stack of tables, one per group. `.detail-grid-container` above
+   keeps R43/D-071's `flex: 1` for the single-table case, which is every
+   document with one repeating child name; a stack overrides it, because
+   `flex: 1` across several tables divides the pane equally and would give a
+   two-row group the same height as a thousand-row one. Each stacked table
+   is sized to its own rows instead (`Detail.tsx`'s `stackedTableHeightPx`),
+   and the pane scrolls past them. */
+.detail-grid-container-stacked {
+  flex: none;
+  min-height: 0;
+}
+
+/* Only rendered when there is more than one table: with a single table the
+   section heading ("Children") and the table are unambiguous together, and a
+   name repeated above it would cost a row of padding in the common case for
+   nothing — CONCEPT.md §9.4's elevation budget applied to vertical space. */
+.detail-grid-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex: none;
+  margin: var(--space-2) 0 var(--space-1);
+  font-size: var(--font-size-ui);
+  font-weight: 600;
+  color: var(--surface-fg);
+}
+
+.detail-grid-title-count {
+  font-weight: 400;
+  color: var(--surface-fg-secondary);
+}
+
+/* The groups past `GRID_TABLE_CAP` are listed rather than hidden, and this
+   is what says so — without it a document with eight groups shows five
+   tables and then an unexplained list. */
+.detail-grid-overflow-note {
+  margin: 0;
+  font-size: var(--font-size-ui);
+  color: var(--surface-fg-secondary);
+}
+
 /* M5c-PLAN.md J4 / D-051 — the positioning context `Scrollbar`'s overlay
  * track anchors to; see `.tree-viewport`'s own comment in Tree.css for why
  * this can't just be `.detail-children-list` itself. */
