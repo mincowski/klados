@@ -247,6 +247,254 @@ function rowForStringIndex(checkpoints: readonly number[], stringIndex: number):
   return lo
 }
 
+// ---------------------------------------------------------------------------
+// R204 — canonical equivalence on the decoded path.
+
+/**
+ * A decoded window rewritten into NFC, plus what is needed to map an index in
+ * it back to the original string (`docs/plans/R202-unicode-comparison.md`
+ * § 5).
+ *
+ * `segments` is `null` when the rewrite was the identity — the overwhelmingly
+ * common case, since a window that is already NFC (all-ASCII text, CJK,
+ * ordinary composed Latin) needs no mapping at all.
+ *
+ * **The map is piecewise, not per character.** § 5 specified "an `Int32Array`
+ * from normalized position back to original", and a dense array is both
+ * 245 KB a window and the single largest cost in building it — filling
+ * 65,536 entries one at a time. It is also almost entirely redundant:
+ * normalization changes a handful of places in a window and leaves long runs
+ * untouched, and within an untouched run the mapping is `original = base +
+ * delta`. So this records one entry per run instead, and `originalIndexOf`
+ * binary-searches it. Typically a few thousand entries at most, and a
+ * `12 KB` allocation rather than `245 KB`.
+ */
+export interface NormalizedWindow {
+  readonly text: string
+  readonly segments: NormalizationSegments | null
+}
+
+/**
+ * Contiguous runs, ascending in both coordinate spaces: run `k` starts at
+ * `outStarts[k]` in the normalized text and at `origStarts[k]` in the
+ * original, and ends where run `k + 1` begins.
+ */
+interface NormalizationSegments {
+  readonly outStarts: Int32Array
+  readonly origStarts: Int32Array
+  readonly originalLength: number
+}
+
+/**
+ * A code point that must never start a new normalization piece, because NFC
+ * may compose it onto whatever precedes it.
+ *
+ * Two families, and both are needed:
+ *
+ * - **Marks** (`\p{M}`) — every character with a non-zero canonical combining
+ *   class is a Mark, and those are exactly the characters NFC composes onto a
+ *   base. Unicode property escapes give the real table for free; this is what
+ *   `Intl.Segmenter` would have been used for, at 14 ms a window against the
+ *   0.05–1.5 ms this costs (§ 8's measurements, which rejected it).
+ * - **Hangul V and T jamo** — *not* Marks (they are Letters), but NFC composes
+ *   `L + V [+ T]` into a syllable, so a piece starting at a V would compose
+ *   differently on its own than in context. These are the only non-Mark code
+ *   points with `NFC_Quick_Check=Maybe`.
+ *
+ * Memoized by code point: a window has far fewer distinct code points than
+ * characters, so the regex runs a few hundred times rather than tens of
+ * thousands.
+ */
+const MARK = /\p{M}/u
+const composesLeftCache = new Map<number, boolean>()
+
+function composesLeft(codePoint: number): boolean {
+  const cached = composesLeftCache.get(codePoint)
+  if (cached !== undefined) return cached
+  const value =
+    // Hangul Jamo V/T, Extended-A (V), Extended-B (T).
+    (codePoint >= 0x1160 && codePoint <= 0x11ff) ||
+    (codePoint >= 0xa960 && codePoint <= 0xa97f) ||
+    (codePoint >= 0xd7b0 && codePoint <= 0xd7ff) ||
+    MARK.test(String.fromCodePoint(codePoint))
+  composesLeftCache.set(codePoint, value)
+  return value
+}
+
+/**
+ * What NFC does to a lone starter — `null` when it does nothing, which is
+ * true of every code point but the ~20 canonical singletons (U+212B ANGSTROM
+ * → U+00C5, U+2126 OHM → U+03A9) and a few that decompose to more than one
+ * character (U+0344, whose NFC is U+0308 U+0301).
+ *
+ * Memoized because it is the difference between one `normalize` call per
+ * *character* and one per distinct code point. Most of a window is lone
+ * starters, and measured on this machine the un-memoized version cost 9.3 ms
+ * a window where the whole build now costs ~1.5 ms.
+ */
+const singletonCache = new Map<number, string | null>()
+
+function normalizedStarter(codePoint: number): string | null {
+  const cached = singletonCache.get(codePoint)
+  if (cached !== undefined) return cached
+  const ch = String.fromCodePoint(codePoint)
+  const composed = ch.normalize('NFC')
+  const value = composed === ch ? null : composed
+  singletonCache.set(codePoint, value)
+  return value
+}
+
+/** The identity — no normalization was needed, or none was wanted. */
+export function identityWindow(text: string): NormalizedWindow {
+  return { text, segments: null }
+}
+
+/**
+ * Rewrites `text` to NFC and records what is needed to map back.
+ *
+ * **The gate comes first and carries the common case.** `text.normalize('NFC')`
+ * on a 64 KB window costs ~0.05 ms and answers "is there anything to do at
+ * all" — for every window already in NFC it returns the identity and nothing
+ * else is allocated. A hand-rolled scan for combining marks was measured at
+ * four times the cost, so this deliberately does not "optimize" the gate into
+ * a loop (§ 9).
+ *
+ * **When there is work, it is done piece by piece, and a piece is a starter
+ * plus whatever composes onto it.** Splitting anywhere else would be wrong;
+ * splitting only at ASCII boundaries — which is what § 5 proposed — would be
+ * correct but would leave a long non-ASCII run with no interior mapping, so a
+ * match inside a CJK or Greek passage would report the run's start. Adjacent
+ * pieces NFC leaves alone are coalesced into one run, so the segment list
+ * stays short and the mapping inside a run stays exact.
+ *
+ * The whole construction is asserted against `text.normalize('NFC')` over a
+ * corpus rather than against expected outputs, because a boundary rule that
+ * is subtly wrong produces text that looks right and matches at the wrong
+ * offset.
+ */
+export function normalizeWindowForSearch(text: string): NormalizedWindow {
+  const whole = text.normalize('NFC')
+  if (whole === text) return identityWindow(text)
+
+  const out: string[] = []
+  const outStarts: number[] = []
+  const origStarts: number[] = []
+  let outLength = 0
+  // The open identity run: original `[runStart, runEnd)` copied verbatim.
+  let runStart = 0
+  let runEnd = 0
+
+  const flushRun = (): void => {
+    if (runEnd === runStart) return
+    outStarts.push(outLength)
+    origStarts.push(runStart)
+    out.push(text.slice(runStart, runEnd))
+    outLength += runEnd - runStart
+    runStart = runEnd
+  }
+
+  let i = 0
+  while (i < text.length) {
+    const start = i
+    const starter = text.codePointAt(i)!
+    i += starter > 0xffff ? 2 : 1
+    const afterStarter = i
+    while (i < text.length) {
+      const cp = text.codePointAt(i)!
+      if (!composesLeft(cp)) break
+      i += cp > 0xffff ? 2 : 1
+    }
+
+    // A lone starter answers from the memo instead of normalizing a
+    // one-character string. This is the hot path.
+    const composed =
+      i === afterStarter ? normalizedStarter(starter) : normalizedPiece(text, start, i)
+    if (composed === null) {
+      runEnd = i // still inside the identity run
+      continue
+    }
+
+    flushRun()
+    outStarts.push(outLength)
+    origStarts.push(start)
+    out.push(composed)
+    outLength += composed.length
+    runStart = i
+    runEnd = i
+  }
+  flushRun()
+
+  const built = out.join('')
+  // Dev-only: the split rule is an optimization of whole-string
+  // normalization, so it must produce exactly that. A mismatch means a
+  // boundary rule is wrong, which would otherwise surface as a highlight in
+  // the wrong place rather than as a failure.
+  if (import.meta.env?.DEV && built !== whole) {
+    throw new Error('normalizeWindowForSearch: piecewise NFC disagreed with whole-string NFC')
+  }
+  return {
+    text: built,
+    segments: {
+      outStarts: Int32Array.from(outStarts),
+      origStarts: Int32Array.from(origStarts),
+      originalLength: text.length
+    }
+  }
+}
+
+/**
+ * A base plus its combining marks, memoized by the piece's own text.
+ *
+ * The distinct base-plus-mark combinations in any real document are bounded
+ * by its script — Latin with acutes and diaereses is a few dozen — while the
+ * *occurrences* are one per character. Measured on a fully decomposed 64 KB
+ * window: 20,169 pieces, of which a handful are distinct, and caching them
+ * took the build from 6.2 ms to well under half that.
+ *
+ * Bounded so a pathological document (every character carrying a different
+ * stack of marks) cannot grow it without limit; past the cap it simply stops
+ * memoizing rather than evicting, which keeps the hot entries that are
+ * already there.
+ */
+const PIECE_CACHE_LIMIT = 4096
+const pieceCache = new Map<string, string | null>()
+
+/** `null` when NFC leaves `text[start, end)` alone. */
+function normalizedPiece(text: string, start: number, end: number): string | null {
+  const piece = text.slice(start, end)
+  const cached = pieceCache.get(piece)
+  if (cached !== undefined) return cached
+  const composed = piece.normalize('NFC')
+  const value = composed === piece ? null : composed
+  if (pieceCache.size < PIECE_CACHE_LIMIT) pieceCache.set(piece, value)
+  return value
+}
+
+/**
+ * Where index `index` in the normalized text came from in the original.
+ *
+ * Exact inside an identity run, which is nearly all of a window. Inside a run
+ * NFC actually rewrote — one character's worth of text — an index past its
+ * first is clamped to the run's own end: a match boundary lands on a run
+ * boundary in every ordinary case, because the composed character is atomic
+ * in the normalized text, and clamping keeps the answer inside the character
+ * rather than drifting past it.
+ */
+export function originalIndexOf(window: NormalizedWindow, index: number): number {
+  const segments = window.segments
+  if (segments === null) return index
+  const { outStarts, origStarts, originalLength } = segments
+  let lo = 0
+  let hi = outStarts.length - 1
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >>> 1
+    if (outStarts[mid]! <= index) lo = mid
+    else hi = mid - 1
+  }
+  const origEnd = lo + 1 < origStarts.length ? origStarts[lo + 1]! : originalLength
+  return Math.min(origStarts[lo]! + (index - outStarts[lo]!), origEnd)
+}
+
 const utf8Encoder = new TextEncoder()
 
 /** Legacy single-byte code pages `TextDecoder` recognizes — one decoded
@@ -376,7 +624,27 @@ export function findDecodedInWindow(
   bytesLength: number
 ): MatchSet {
   const decoded = decodeWindow(bytes, rowIndex, encoding, window, bytesLength)
-  const matches = decodedTextMatches(decoded.text, needle, options)
+
+  // R204. Normalization is applied only for a needle that is not pure ASCII,
+  // and that is a correctness rule as much as a cost one — the same rule
+  // `chooseFindPath` already applies one level up, and the one `gridFilter`
+  // applies to the quick filter.
+  //
+  // NFC composes. Normalizing the *window* for an ASCII needle can only
+  // remove matches: `cafe` matches a decomposed `cafe` + U+0301 character for
+  // character today, and would stop once the window is composed. Nothing in
+  // NFC produces an ASCII character that was not already there. For a regex
+  // it would be worse than neutral — `.` counts one character against a
+  // composed `é` and two against a decomposed one, so normalizing would
+  // silently change what an existing ASCII pattern matches.
+  const normalize = !isAsciiOnly(needle)
+  const normalized: NormalizedWindow = normalize
+    ? normalizeWindowForSearch(decoded.text)
+    : identityWindow(decoded.text)
+  const searchNeedle = normalize ? needle.normalize('NFC') : needle
+  const toOriginal = (index: number): number => originalIndexOf(normalized, index)
+
+  const matches = decodedTextMatches(normalized.text, searchNeedle, options)
   if (matches.length === 0) return EMPTY_MATCH_SET
 
   const isLastWindow = window.endRow >= rowIndex.length
@@ -388,9 +656,15 @@ export function findDecodedInWindow(
   const starts: number[] = []
   const ends: number[] = []
   for (const match of matches) {
-    const start = byteOffsetOf(decoded, window, rowIndex, match.index, encoding)
+    const start = byteOffsetOf(decoded, window, rowIndex, toOriginal(match.index), encoding)
     if (start >= upperBoundExclusive) continue
-    const end = byteOffsetOf(decoded, window, rowIndex, match.index + match.length, encoding)
+    const end = byteOffsetOf(
+      decoded,
+      window,
+      rowIndex,
+      toOriginal(match.index + match.length),
+      encoding
+    )
     starts.push(start)
     ends.push(end)
   }

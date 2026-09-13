@@ -47,21 +47,33 @@ function matchCount(needle: string, caseSensitive: boolean, regex: boolean): num
 }
 
 // R72 §6's own measured table, reproduced against the real fixture and the
-// real findAll rather than assumed still true — every pair diverges, in
-// both directions, and the ASCII control is unaffected across all three
-// columns (the assertion that would fail if the fold were ever made
-// fuzzier "to fix" one of the other rows).
-describe('the measured divergence table (R72 §6)', () => {
+// real findAll rather than assumed still true, and **updated by R204**: the
+// angstrom and ohm rows no longer diverge, because NFC collapses a canonical
+// singleton and both modes now see U+212B as U+00C5 and U+2126 as U+03A9.
+// That is the improvement `docs/plans/R202-unicode-comparison.md` § 7
+// predicted, and the reason it insisted R204 land before R205.
+//
+// The two rows that still diverge do so for a reason NFC cannot touch: µ/μ
+// and ß/ẞ are *compatibility* relationships, not canonical ones, and D-082
+// rejected NFKC for equating characters that are not the same character.
+//
+// The ASCII control is unaffected across every column — the assertion that
+// would fail if the fold were ever made fuzzier "to fix" one of the other
+// rows, and the one that pins R204's needle gate.
+describe('the measured divergence table (R72 §6, R204)', () => {
   const cases: readonly {
     needle: string
     plain: number
     regexCount: number
     caseSensitive: number
   }[] = [
+    // Compatibility, not canonical — NFC leaves these alone, by design.
     { needle: 'µ', plain: 1, regexCount: 2, caseSensitive: 1 }, // µ vs μ
-    { needle: 'Å', plain: 2, regexCount: 1, caseSensitive: 1 }, // Å vs Å(U+212B)
-    { needle: 'Ω', plain: 2, regexCount: 1, caseSensitive: 1 }, // Ω vs Ω(U+2126)
     { needle: 'ß', plain: 2, regexCount: 1, caseSensitive: 1 }, // ß vs ẞ
+    // Canonical singletons — R204 resolved both, in every mode including
+    // case-sensitive, since canonical equivalence has nothing to do with case.
+    { needle: 'Å', plain: 2, regexCount: 2, caseSensitive: 2 }, // Å vs Å(U+212B)
+    { needle: 'Ω', plain: 2, regexCount: 2, caseSensitive: 2 }, // Ω vs Ω(U+2126)
     { needle: 'unit', plain: 7, regexCount: 7, caseSensitive: 7 } // ASCII control
   ]
 

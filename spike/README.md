@@ -17,6 +17,7 @@ gain — the same argument `CLAUDE.md` makes for never renaming an `R` id.
 | `m4-bench.ts` | M4 G10 — likewise. |
 | `m5-bench.ts` | M5 H10 — likewise. `docs/LOG.md` cites `m5-bench.ts h2c-worker` as reproducing a 2.84× figure exactly. |
 | `r210-grid-models.ts` | R210 — what the grid rendering models cost as the number of distinct child-name groups under one parent grows. Extends `m2-e10-measure.ts`, which measured one group. Generates its own documents, because group count is the variable under test and every fixture in `spike/fixtures/` is single-group. |
+| `r204-normalization.ts` | R204 — what NFC normalization costs the decoded find path, per ~64 KB window, across all-ASCII, mixed and fully decomposed content. Rejects `Intl.Segmenter` on the numbers (`docs/plans/R202-unicode-comparison.md` §9), so a later round proposing it has to beat them. Re-run it after any change to `normalizeWindowForSearch`'s boundary rule. |
 | `csv-bench.ts` | R150 — CSV store-to-file multipliers at several widths, and parse time at scale. |
 
 These are standalone: run them with `npx tsx spike/<file>.ts`. None is wired into
