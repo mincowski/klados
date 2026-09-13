@@ -523,19 +523,21 @@ union in `src/preload/api.ts` (R193) keeps the renderer's declared environment h
 
 ## Known-wrong, not yet fixed
 
-- **No parser stops at the first failure, and `CONCEPT.md` §11.1 says they do.** §11.1 describes
-  opening an invalid document as *"parse to the point of failure, present the partial tree"* — one
-  failure, one position. No parser implements that. `ParserState.fatal` is a **flag, not a halt**
+- **No parser stops at the first failure.** `ParserState.fatal` is a **flag, not a halt**
   (`src/formats/xml/index.ts:146`): the main loop breaks only on `maxDepth` and on an abort signal,
   and `fatal` is read once at the end to set `complete: !state.fatal` (`:624`), so a file that trips
   a Fatal is still walked to EOF. Every format also emits recoverable `Severity.Error` diagnostics
   from inside its per-item loop and keeps going — XML's `unmatched-end-tag` / `expected-attribute`,
   JSON's `expected-comma-or-close` / `expected-key`, TOML's `expected-equals`, CSV's `long-row`.
-  **A defect that repeats per node therefore produces a diagnostic per node**, and nothing caps the
-  list (`src/core/nodeStore.ts:449` is an unbounded `push`). Trust the parsers over §11.1 until
-  R200 corrects its wording; the cost of not doing so is already in the tree — `scrubberModel.ts:55`
-  cites §11.1 to justify one DOM node per diagnostic. Full account:
-  `docs/plans/R200-diagnostic-volume.md` §2.
+  **A defect that repeats per node therefore produces a diagnostic per node**, in every format.
+
+  `CONCEPT.md` §11.1 used to say the opposite — *"parse to the point of failure"* — and
+  `scrubberModel.ts` cited it to justify one DOM node per diagnostic. R200 corrected the wording
+  and bounded the consequence: diagnostic **records** are now capped per code while every
+  diagnostic's **position** is kept, so anything reading `store.diagnostics` sees a bounded list
+  and anything counting or marking must read `store.diagnosticIndex` instead. The entry stays
+  because the parser behaviour it describes is unchanged and still surprises people. Full account:
+  `docs/plans/R200-diagnostic-volume.md` §2, D-096.
 - **Nothing in the codebase calls `String.prototype.normalize`, so NFC never matches NFD.** A needle
   or name written `é` (U+00E9) does not match the same text stored as `e` + U+0301, in Find, in the
   grid's quick filter, or in path-name resolution — which compares interned **bytes**, so the two
@@ -546,12 +548,6 @@ union in `src/preload/api.ts` (R193) keeps the renderer's declared environment h
   offset found in a normalized window does not map back to a byte offset. That is the same obstacle
   D-082 already declined for length-changing case mappings. Full account:
   **Planned as R202–R205** (`docs/plans/R202-unicode-comparison.md`), which also separates the three comparison sites: the grid filter is one call, name resolution is bounded by name count, and only Find has the offset problem.
-- **The path query grammar (`core/path/parse.ts`'s `NAME_CHAR`) is ASCII-only** — `/[A-Za-z0-9_.:-]/`
-  — so a query like `//größe` fails to parse as a name at all, before name resolution is ever
-  reached. Found while verifying R53's `Interner.lookup` encoding fix: that fix is real and tested,
-  but this separate, one-layer-earlier gap means the Palette still can't reach it by typing a
-  non-ASCII query. **Planned as R201** (`docs/plans/R201-unicode-path-names.md`), which also records why widening the class alone is only half the fix: `Cursor.peek()` returns a UTF-16 code unit, so astral names fail regardless of the regex.
-  Full account: `docs/plans/R53-interner-encoding.md`.
 - **`evaluate.ts`'s intermediate node sets are plain `number[]`**, not the reused-scratch
   `Int32Array` hard rule 2 specifies.
 - **An unscoped `//name` is not meaningfully faster than a full scan**, and a **predicate step

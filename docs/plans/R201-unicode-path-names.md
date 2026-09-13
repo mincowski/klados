@@ -1,9 +1,10 @@
 # R201 — the path query grammar cannot name a non-ASCII node
 
-<!-- status: open -->
+<!-- status: built -->
 
-**Open.** The `FINDINGS.md` "known-wrong" entry, planned. § 4 records what an audit of the rest of
+**Built.** The `FINDINGS.md` "known-wrong" entry, closed. § 4 records what an audit of the rest of
 the codebase found, because the question that prompted this was *"is that the only place?"*
+Results in § 9.
 
 ## 1. The defect
 
@@ -128,4 +129,67 @@ answered. A half-answer here is worse than the current honest failure.
 
 ## 8. Version
 
-**Ask on landing.** Candidate: patch — a defect fix in the query grammar.
+Candidate was patch — a defect fix in the query grammar. **Deferred to the end of the branch**: R202–R205
+land with this one, and § 12 of `docs/plans/R202-unicode-comparison.md` proposes the bump for the
+round as a whole.
+
+## 9. Results
+
+**Built.** All six acceptance criteria met, with one deviation on 5 explained below.
+
+### 9a. What landed
+
+`NAME_CHAR` is gone. In its place, `RESERVED_NAME_CHARS` — `/ [ ] @ * ( ) = ! < > " '` — and an
+`isNameChar` that admits **any** code point the grammar does not reserve, excluding whitespace and
+C0/C1 controls. The inversion § 3 asked for: the set a name may contain is open, the set the grammar
+reserves is closed, so the next script Unicode adds needs no change here.
+
+`Cursor.nextCodePoint()` returns the full code point, and `Cursor.consumeName()` advances by it.
+The three grammar positions that read a name — a step, a predicate subject, an attribute name — all
+go through `consumeName` now, so they cannot drift apart; before, each ran its own copy of the same
+`while` loop.
+
+`matchesWord` (the `and`/`or` boundary check) still reads a **code unit**, deliberately, and says
+so. It only asks whether something name-like follows, and a high surrogate is not reserved, so an
+astral character after `and` correctly denies the word boundary.
+
+### 9b. What the tests pin
+
+`test/pathUnicodeNames.test.ts`, 21 assertions. `//größe` and an astral `//x𠀀y` both resolve
+**end to end** — parse, resolve through the document's own `Interner`, evaluate — rather than only
+tokenizing, since tokenizing was never the goal. Each of the thirteen reserved characters gets its
+own test that it terminates a name, per acceptance 3 rather than by sampling. And nine characters
+the grammar does *not* reserve (`+ # $ % ~ | , ; ?`) are asserted to belong to names now; every one
+of them was a tokenizer error before.
+
+Fixtures are authored from escapes with a codepoint guard, per `FINDINGS.md` — including
+`ASTRAL.length === 2`, which is the property the old cursor broke on.
+
+### 9c. Acceptance 5, and why it was not followed literally
+
+It asked that `FINDINGS.md`'s `NAME_CHAR` entry be removed and § 4's two surviving gaps be
+**recorded in its place**. The entry is removed. The two neighbours were *not* recorded as
+known-wrong, because **R202–R205 land on this same branch and fix both** — writing an entry here to
+delete three commits later would be churn, and the intent (do not lose them) is better served by
+their being fixed than by their being listed. R201 was planned as a standalone round; it is not
+landing as one.
+
+### 9d. A stale entry found and corrected
+
+`FINDINGS.md`'s first known-wrong entry still said `CONCEPT.md` §11.1 claims parsing stops at the
+first failure and that *"nothing caps the list (`src/core/nodeStore.ts:449` is an unbounded
+`push`)"*. **R200 made both false last round and did not update the entry.** Corrected here: the
+parser behaviour it describes is unchanged and still surprises people, so the entry stays, but it
+now points at the cap and at `store.diagnosticIndex` rather than describing a defect that was
+fixed. `FINDINGS.md`'s own rule is that an entry leaves when it stops being true; half of this one
+had.
+
+### 9e. Review
+
+Reviewed against `git diff` before the commit. It found one real defect: the whitespace guard had
+been written as `/s/u` rather than `/\s/u` — a regex matching the **letter s**, which would have
+excluded `s` from every name in every query. Caught by reading the diff, not by a test; every
+fixture in the new file happened to contain no `s` in a position that mattered. Fixed before
+committing, and the more general lesson is `FINDINGS.md`'s existing one about escapes surviving the
+tools that carry them.
+

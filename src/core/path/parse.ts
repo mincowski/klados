@@ -182,22 +182,96 @@ export type PathParseResult =
  * stand-in (which never needs to produce `'unrepresentable'`). */
 export type NameResolver = (name: string) => number | null | 'unrepresentable'
 
-const NAME_CHAR = /[A-Za-z0-9_.:-]/
+/**
+ * What the path grammar reserves — the *whole* basis for where a name ends
+ * (R201 § 3).
+ *
+ * This used to be a whitelist, `/[A-Za-z0-9_.:-]/`, and that is why `<größe>`
+ * parses as XML while `//größe` did not: the XML tokenizer excludes markup
+ * delimiters and says so (`src/formats/xml/index.ts:35`, *"Permissive on
+ * purpose … excludes markup delimiters and whitespace, nothing else"*), while
+ * this grammar whitelisted letters. The set of characters a name may contain
+ * is **open** — it is whatever four different formats interned — and the set
+ * this grammar needs to reserve is small and closed. Defining the closed one
+ * means the next script Unicode adds needs no change here.
+ *
+ * Every member is asserted to terminate a name, per character, in
+ * `test/pathUnicodeNames.test.ts`.
+ */
+const RESERVED_NAME_CHARS = new Set([
+  '/', // step separator
+  '[',
+  ']', // predicate
+  '@', // attribute axis
+  '*', // wildcard — never part of a name, so `a*b` is name `a` then a syntax error
+  '(',
+  ')', // grouping and `not(`
+  '=',
+  '!',
+  '<',
+  '>', // comparison operators
+  '"',
+  "'" // string literals
+])
+
+/**
+ * Permissive on purpose, the same way XML's tokenizer is: a character belongs
+ * to a name unless the grammar reserves it, it is whitespace, or it is a C0/C1
+ * control. Takes a **code point**, not a code unit — see `Cursor.nextCodePoint`.
+ */
+function isNameChar(ch: string | undefined): boolean {
+  if (ch === undefined || ch.length === 0) return false
+  if (RESERVED_NAME_CHARS.has(ch)) return false
+  if (/\s/u.test(ch)) return false
+  const code = ch.codePointAt(0)!
+  return !(code < 0x20 || (code >= 0x7f && code <= 0x9f))
+}
 
 function isNameStart(ch: string | undefined): boolean {
-  return ch !== undefined && (NAME_CHAR.test(ch) || ch === '*')
+  return ch !== undefined && (isNameChar(ch) || ch === '*')
 }
 
 class Cursor {
   pos = 0
   constructor(readonly source: string) {}
 
+  /** One UTF-16 **code unit**. Correct for every reserved character in the
+   * grammar — all of them are ASCII — and wrong for anything a name may
+   * contain, which is why name scanning uses `nextCodePoint` instead. */
   peek(): string | undefined {
     return this.source[this.pos]
   }
 
+  /**
+   * The full code point at the cursor, as a string of one or two code units,
+   * or `undefined` at end of input.
+   *
+   * R201 § 2: widening the character class alone is **half a fix**. A lone
+   * surrogate matches no Unicode letter property however the regex is
+   * written, so a
+   * name outside the BMP — CJK Extension B (U+20000+) is the realistic case
+   * in this project's own domain — would still fail to tokenize. The cursor
+   * has to advance by code point, which is this, not a regex.
+   */
+  nextCodePoint(): string | undefined {
+    if (this.pos >= this.source.length) return undefined
+    return String.fromCodePoint(this.source.codePointAt(this.pos)!)
+  }
+
   peekAt(offset: number): string | undefined {
     return this.source[this.pos + offset]
+  }
+
+  /** Advances past a run of name characters, by code point. The one place
+   * name scanning happens, so the three grammar positions that read a name
+   * cannot drift apart. Named apart from the free `consumeName(cursor)`
+   * below, which is the grammar rule; this is only the scan. */
+  advancePastName(): void {
+    for (;;) {
+      const ch = this.nextCodePoint()
+      if (!isNameChar(ch)) return
+      this.pos += ch!.length
+    }
   }
 
   eof(): boolean {
@@ -243,7 +317,7 @@ function consumeName(cursor: Cursor): { name: string; isWildcard: boolean } | nu
     return { name: '*', isWildcard: true }
   }
   const start = cursor.pos
-  while (!cursor.eof() && NAME_CHAR.test(cursor.peek()!)) cursor.pos += 1
+  cursor.advancePastName()
   if (cursor.pos === start) return null
   return { name: cursor.source.slice(start, cursor.pos), isWildcard: false }
 }
@@ -357,8 +431,11 @@ function matchesWord(cursor: Cursor, word: string): boolean {
   for (let i = 0; i < word.length; i++) {
     if (cursor.source[start + i] !== word[i]) return false
   }
+  // A code unit is enough here: the question is only whether *something*
+  // name-like follows, and a high surrogate is not reserved, so an astral
+  // character after `and` correctly denies the word boundary.
   const after = cursor.source[start + word.length]
-  if (after !== undefined && NAME_CHAR.test(after)) return false
+  if (isNameChar(after)) return false
   cursor.pos = start + word.length
   return true
 }
@@ -398,7 +475,7 @@ function parseOperand(
     cursor.pos += 1
     subjectName = '*'
   } else {
-    while (!cursor.eof() && NAME_CHAR.test(cursor.peek()!)) cursor.pos += 1
+    cursor.advancePastName()
     if (cursor.pos === nameStart) {
       return {
         ok: false,
@@ -731,7 +808,7 @@ export function parsePath(query: string, resolveName: NameResolver): PathParseRe
       }
     }
 
-    if (!isNameStart(cursor.peek())) {
+    if (!isNameStart(cursor.nextCodePoint())) {
       return fail(cursor.pos, "expected a name or '*'")
     }
     const nameStart = cursor.pos // just past the separator, if any
