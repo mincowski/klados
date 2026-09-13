@@ -35,26 +35,7 @@ interface OpenFrame {
   sawTextChild: boolean
   sawNonTextChild: boolean
   sawEmptyValue: boolean
-  /**
-   * R134: `prefix → URI` in scope for this node, `''` keying the default
-   * namespace. `undefined` when namespace tracking is off (`interner`
-   * doesn't split names) or this document has declared nothing yet.
-   * Shared by reference with the parent frame until this node's own
-   * `xmlns`/`xmlns:*` attribute first extends it (copy-on-write) — cloning
-   * on every `openNode` regardless would be per-node allocation for a
-   * document that never rebinds anything, which is exactly the cost §6
-   * says a namespace-free (or declaration-free) document must not pay.
-   */
-  nsScope: ReadonlyMap<string, string> | undefined
 }
-
-const XMLNS = 'xmlns'
-/** Decodes an `xmlns`/`xmlns:*` declaration's prefix and URI text — small,
- * per-declaration decodes, not per node. UTF-8 unconditionally, matching
- * `Interner.text()`'s own existing convention (`NodeStore` has no
- * encoding of its own to decode by; `SourceBuffer`/`ParseOptions.encoding`
- * live above this layer). */
-const utf8Decoder = new TextDecoder('utf-8')
 
 export interface Span {
   readonly start: Offset
@@ -87,18 +68,6 @@ export interface NodeStoreBuffers {
   attrValueEnd: Int32Array
   nodeCount: number
   attrCount: number
-}
-
-/** R134–R136's derived namespace-resolution state, transferred alongside
- * (but separately from) `NodeStoreBuffers` — see `NodeStore.exportNamespaceState`'s
- * own doc comment for why this is a second structure rather than folded
- * into the first. */
-export interface NamespaceResolutionBuffers {
-  readonly anyDeclarationSeen: boolean
-  readonly hasRebinding: boolean
-  readonly resolvedIdArr: Int32Array
-  readonly uriByResolvedId: readonly string[]
-  readonly declarations: readonly { declaringNode: NodeRef; prefix: string; uri: string }[]
 }
 
 /**
@@ -142,50 +111,6 @@ export class NodeStore implements NodeSink {
   private diagnosticsView: readonly Diagnostic[] | null = null
   private lastProgress = 0
 
-  // ---------------------------------------------------------------------
-  // Namespace resolution (R134–R136) — active only when `interner_`
-  // splits names (`FormatCapabilities.hasNamespaces`, never a format id —
-  // invariant 8). See `resolvedNameIdOf`'s own doc comment for the public
-  // surface; everything below is the bookkeeping that fills it in as the
-  // sink descends, the "sink accumulates prefix → URI... during parse"
-  // mechanism `R134-xml-namespaces.md` §3 describes.
-  // ---------------------------------------------------------------------
-
-  private readonly nsEnabled: boolean
-  /** Set the moment any `xmlns`/`xmlns:*` attribute is seen anywhere —
-   * gates *all* further namespace bookkeeping so a namespace-*capable*
-   * format that a given document simply doesn't use (an XML file with no
-   * declarations) pays only this one flag check per node, not a resolution
-   * per node (§6's regression requirement). */
-  private nsAnyDeclarationSeen = false
-  /** `nameId → resolved id` — the common-case O(1) answer, filled in once
-   * per distinct name at `closeNode` (never per node beyond the one flag
-   * check above). `-1` = not yet resolved for this id. Grown lazily,
-   * parallel to nothing else here since it is indexed by `nameId`, not by
-   * node ref. */
-  private nsResolvedIdArr: Int32Array = new Int32Array(0)
-  private readonly nsResolvedKeyToId = new Map<string, number>()
-  private nsNextResolvedId = 0
-  /** `resolvedId → URI text`, indexed in step with `nsResolvedKeyToId` —
-   * R136's column tooltip needs the URI string a resolved id stands for,
-   * not just the id itself. Sized with the resolved-id space, which §
-   * "headline" already sizes at kilobytes. */
-  private readonly nsUriByResolvedId: string[] = []
-  /** Doc-wide `prefix → URI`, kept only to notice a *second*, different
-   * URI for a prefix already seen — R135's trigger for the scope table. */
-  private readonly nsPrefixLastUri = new Map<string, string>()
-  private nsHasRebinding = false
-  /** One row per `xmlns`/`xmlns:*` declaration actually seen, `endRef`
-   * filled in lazily (`declarationEndRef`) since a declaring node's own
-   * subtree isn't known to be complete until later siblings exist —
-   * R135's scope table, in source form. Never consulted unless
-   * `nsHasRebinding` is true; a document that never rebinds pays for this
-   * array (proportional to *declaration* count, not node count — "a few
-   * hundred on a schema-driven document" per §"headline") but never pays
-   * for a materialized lookup table, which is the thing R135's acceptance
-   * 3 asserts is absent. */
-  private readonly nsDeclarations: { declaringNode: NodeRef; prefix: string; uri: string }[] = []
-
   /**
    * `source` is the buffer being parsed. `openNode`/`attribute` receive only
    * byte offsets (types.ts: parsers "never decode text"), so the sink that
@@ -219,8 +144,6 @@ export class NodeStore implements NodeSink {
     this.attrNameIdArr = new Int32Array(initialCapacity)
     this.attrValueStartArr = new Int32Array(initialCapacity)
     this.attrValueEndArr = new Int32Array(initialCapacity)
-
-    this.nsEnabled = interner_.splitsNamespaces
   }
 
   // ---------------------------------------------------------------------
@@ -271,10 +194,7 @@ export class NodeStore implements NodeSink {
       childOpened: false,
       sawTextChild: false,
       sawNonTextChild: false,
-      sawEmptyValue: false,
-      // Inherited by reference (copy-on-write) — see the field's own doc
-      // comment on `OpenFrame`.
-      nsScope: parentFrame?.nsScope
+      sawEmptyValue: false
     })
     return node
   }
@@ -298,58 +218,6 @@ export class NodeStore implements NodeSink {
     this.attrValueEndArr[index] = valueEnd
 
     this.flagsArr[frame.node]! |= NodeFlags.HasAttributes
-
-    if (this.nsEnabled)
-      this.recordNamespaceDeclaration(frame, nameStart, nameEnd, valueStart, valueEnd)
-  }
-
-  /**
-   * `xmlns="…"` / `xmlns:prefix="…"` — recognized by comparing raw bytes
-   * against `this.source`, the same technique `formats/xml/index.ts`'s own
-   * `resumeContextFor` uses, just done forward during a real parse instead
-   * of reconstructed afterward from ancestors (R134 §3, item 2). An
-   * ordinary attribute costs one short byte comparison; only an actual
-   * `xmlns...` name pays for decoding — the "kilobytes, per distinct
-   * declaration" cost model, not "per attribute."
-   */
-  private recordNamespaceDeclaration(
-    frame: OpenFrame,
-    nameStart: Offset,
-    nameEnd: Offset,
-    valueStart: Offset,
-    valueEnd: Offset
-  ): void {
-    const nameLength = nameEnd - nameStart
-    if (nameLength < XMLNS.length) return
-    for (let i = 0; i < XMLNS.length; i++) {
-      if (this.source[nameStart + i] !== XMLNS.charCodeAt(i)) return
-    }
-    let prefix: string
-    if (nameLength === XMLNS.length) {
-      prefix = '' // xmlns="…" — the default namespace
-    } else if (
-      this.source[nameStart + XMLNS.length] === 0x3a /* ':' */ &&
-      nameLength > XMLNS.length + 1
-    ) {
-      // `nameLength > XMLNS.length + 1` rules out the malformed `xmlns:`
-      // (nothing after the colon) — without it, `prefix` would decode to
-      // `''` and silently collide with the default-namespace key above,
-      // corrupting `xmlns="…"` resolution with a malformed attribute.
-      prefix = utf8Decoder.decode(this.source.subarray(nameStart + XMLNS.length + 1, nameEnd))
-    } else {
-      return // e.g. an attribute literally named "xmlnsfoo", or bare "xmlns:" — not a declaration
-    }
-    const uri = utf8Decoder.decode(this.source.subarray(valueStart, valueEnd))
-
-    this.nsAnyDeclarationSeen = true
-    const scope = new Map(frame.nsScope ?? [])
-    scope.set(prefix, uri)
-    frame.nsScope = scope
-
-    this.nsDeclarations.push({ declaringNode: frame.node, prefix, uri })
-    const previousUri = this.nsPrefixLastUri.get(prefix)
-    if (previousUri !== undefined && previousUri !== uri) this.nsHasRebinding = true
-    this.nsPrefixLastUri.set(prefix, uri)
   }
 
   /**
@@ -392,76 +260,6 @@ export class NodeStore implements NodeSink {
       this.flagsArr[node]! |= NodeFlags.IsMixed
     }
     this.flagsArr[node]! |= NodeFlags.SubtreeComplete
-
-    // R134: by `closeNode`, every one of this node's own attributes —
-    // including any `xmlns`/`xmlns:*` it carries itself — has already been
-    // seen (`attribute()` may only target the innermost open node, and
-    // this frame is about to be popped), so its scope is final. Skipped
-    // entirely when nothing in the whole document has declared a
-    // namespace yet — the one-flag-check cost §6 requires of a
-    // declaration-free document.
-    if (this.nsEnabled && this.nsAnyDeclarationSeen) this.finalizeNamespace(node, frame!.nsScope)
-  }
-
-  /**
-   * Resolves `node`'s own element name to a small "resolved id" — the
-   * document-wide `(URI, localName)` identity R134 §3 describes — and
-   * caches it in `nsResolvedIdArr[nameId]`. Composite keys are plain JS
-   * strings (`uri + ' ' + local`) in a `Map`, not a second pass
-   * through `interner_`: the resolved-id space is small (distinct
-   * `(URI, local)` pairs, "kilobytes" per the plan's own sizing) and
-   * reusing the *document's* interner for it would mix synthetic
-   * resolution keys into the same id space real node/attribute names live
-   * in, for no benefit.
-   *
-   * A name resolving differently than it did on an earlier occurrence
-   * (same raw spelling, different active URI — only reachable once a
-   * prefix has genuinely rebound) is the one case `nsResolvedIdArr`
-   * *cannot* represent, since it is one slot per raw name, not per
-   * occurrence: `resolvedNameIdOf` detects this via `nsHasRebinding` and
-   * falls back to `resolveNamespaceLive`, which is position-aware.
-   */
-  private finalizeNamespace(node: NodeRef, scope: ReadonlyMap<string, string> | undefined): void {
-    const nameId = this.nameIdArr[node]!
-    if (nameId === NO_NAME) return
-    const resolvedId = this.resolveNamespaceKey(nameId, scope)
-    this.ensureResolvedIdCapacity(nameId + 1)
-    this.nsResolvedIdArr[nameId] = resolvedId
-  }
-
-  /** The resolved id for `nameId` under `scope` — shared by the parse-time
-   * fast path (`finalizeNamespace`) and the post-parse rebinding fallback
-   * (`resolveNamespaceLive`), so both ultimately agree with whatever a
-   * fresh resolution of the same `(nameId, scope)` pair would produce. */
-  private resolveNamespaceKey(
-    nameId: number,
-    scope: ReadonlyMap<string, string> | undefined
-  ): number {
-    const prefix = this.interner_.prefixOf(nameId)
-    // XML 1.0: an unprefixed *element* name inherits the default (`xmlns`)
-    // binding; a prefixed name resolves its own prefix. There is no
-    // "default namespace for attributes" — but this method only ever
-    // resolves element names (R136's only consumer), so that attribute
-    // rule has nothing to apply to here and is not encoded.
-    const uri = scope?.get(prefix ?? '') ?? ''
-    const local = prefix !== null ? this.interner_.localNameOf(nameId) : this.interner_.text(nameId)
-    const key = `${uri} ${local}`
-    let resolvedId = this.nsResolvedKeyToId.get(key)
-    if (resolvedId === undefined) {
-      resolvedId = this.nsNextResolvedId++
-      this.nsResolvedKeyToId.set(key, resolvedId)
-      this.nsUriByResolvedId[resolvedId] = uri
-    }
-    return resolvedId
-  }
-
-  private ensureResolvedIdCapacity(needed: number): void {
-    if (needed <= this.nsResolvedIdArr.length) return
-    let capacity = Math.max(this.nsResolvedIdArr.length, 1)
-    while (capacity < needed) capacity *= 2
-    const grown = new Int32Array(capacity).fill(-1)
-    grown.set(this.nsResolvedIdArr)
-    this.nsResolvedIdArr = grown
   }
 
   /**
@@ -705,62 +503,16 @@ export class NodeStore implements NodeSink {
     }
   }
 
-  /**
-   * The namespace resolution state (R134–R136) computed live during a real
-   * parse — everything `resolvedNameIdOf`/`namespaceUriOf`/
-   * `hasNamespaceRebinding` need, none of which lives in `NodeStoreBuffers`
-   * (those are the tree's own shape; this is derived, per-name/per-
-   * declaration data). Small by construction: `resolvedIdArr` is sized by
-   * distinct interned names, `uriByResolvedId` by distinct resolved
-   * `(URI, local)` pairs, `declarations` by actual `xmlns` attributes —
-   * every one of those is the "kilobytes, not megabytes" quantity R134's
-   * own headline measured, not the node count.
-   */
-  exportNamespaceState(): NamespaceResolutionBuffers {
-    return {
-      anyDeclarationSeen: this.nsAnyDeclarationSeen,
-      hasRebinding: this.nsHasRebinding,
-      resolvedIdArr: this.nsResolvedIdArr.slice(0, this.interner_.size),
-      uriByResolvedId: this.nsUriByResolvedId.slice(),
-      declarations: this.nsDeclarations.slice()
-    }
-  }
-
-  /** Rehydrates namespace state exported by `exportNamespaceState` — a
-   * worker transfer's own far side, same as `fromBuffers` is for the tree
-   * itself, but namespace state lives outside `NodeStoreBuffers` (see that
-   * method's own doc comment) and so needs its own restore step, called
-   * separately by `fromBuffers`'s own callers that pass it. `nsNextResolvedId`
-   * resumes *after* the transferred ids, not from 0 — a later live
-   * resolution (R135's rebinding fallback, position-aware and therefore
-   * never cached across a transfer) must never mint an id that collides
-   * with one already baked into `resolvedIdArr`. */
-  private importNamespaceState(state: NamespaceResolutionBuffers): void {
-    this.nsAnyDeclarationSeen = state.anyDeclarationSeen
-    this.nsHasRebinding = state.hasRebinding
-    this.nsResolvedIdArr = Int32Array.from(state.resolvedIdArr)
-    this.nsUriByResolvedId.length = 0
-    this.nsUriByResolvedId.push(...state.uriByResolvedId)
-    this.nsNextResolvedId = state.uriByResolvedId.length
-    this.nsDeclarations.length = 0
-    this.nsDeclarations.push(...state.declarations)
-  }
-
   /** Reconstructs a fully queryable NodeStore from buffers produced by
    * `exportBuffers` — the far side of a worker transfer. `source` and
    * `interner` must themselves already be transferred/rebuilt.
-   * `namespaceState`, from `exportNamespaceState`, is optional: omitting it
-   * (as `subtreeSplice.ts`'s incremental-reparse graft still does — a
-   * disclosed gap, `R134-xml-namespaces.md`'s Owed entry) leaves the
-   * reconstructed store's namespace resolution at its just-constructed
-   * default (nothing declared yet), so `resolvedNameIdOf` falls back to the
-   * raw `nameIdOf` until the document is next fully reopened. */
-  static fromBuffers(
-    source: Uint8Array,
-    interner: Interner,
-    buffers: NodeStoreBuffers,
-    namespaceState?: NamespaceResolutionBuffers
-  ): NodeStore {
+   *
+   * R209 removed a fourth parameter carrying namespace-resolution state.
+   * It was optional, and `subtreeSplice.ts` omitted it — so a spliced store
+   * silently reverted to raw names after any edit. That the parameter
+   * *could* be omitted is what made the defect invisible; the whole
+   * category is gone with the feature. */
+  static fromBuffers(source: Uint8Array, interner: Interner, buffers: NodeStoreBuffers): NodeStore {
     // 1, not buffers.nodeCount: every array below is about to be overwritten
     // wholesale by the transferred buffers, so sizing the constructor's own
     // allocation at the real node count just to discard it immediately would
@@ -783,7 +535,6 @@ export class NodeStore implements NodeSink {
     store.attrValueStartArr = buffers.attrValueStart
     store.attrValueEndArr = buffers.attrValueEnd
     store.attrCount = buffers.attrCount
-    if (namespaceState !== undefined) store.importNamespaceState(namespaceState)
     return store
   }
 
@@ -805,135 +556,6 @@ export class NodeStore implements NodeSink {
    * `NO_NAME` case to guard: `attribute()` only ever interns a real span. */
   textOf(id: number): string {
     return this.interner_.text(id)
-  }
-
-  /**
-   * R134/R136: `node`'s own name, resolved to `(URI, localName)` — the id
-   * two differently-prefixed spellings of one namespace share, and the
-   * key `gridDetection.ts` groups children by instead of the raw `nameId`
-   * (closing that file's own documented gap). Falls back to the raw
-   * `nameIdOf(node)` — correct by construction, since an unresolved name
-   * *is* its own resolution — whenever there is nothing to resolve:
-   * namespaces disabled for this document's format, or a document that
-   * declared no namespace at all (§6's "must stay unchanged" case, and the
-   * common one).
-   *
-   * **O(1) except when this document rebinds a prefix** (R135) — the one
-   * case a single `nameId → resolvedId` slot cannot represent (the same
-   * raw spelling resolving to two different URIs in two different
-   * subtrees), where this instead does a live, position-aware lookup
-   * (`resolveNamespaceLive`) over the declarations actually seen.
-   */
-  resolvedNameIdOf(node: NodeRef): number {
-    const nameId = this.nameIdArr[node]!
-    if (!this.nsEnabled || !this.nsAnyDeclarationSeen) return nameId
-    if (this.nsHasRebinding) return this.resolveNamespaceLive(node, nameId)
-    const resolved = this.nsResolvedIdArr[nameId]
-    return resolved !== undefined && resolved !== -1 ? resolved : nameId
-  }
-
-  /**
-   * The URI backing `resolvedNameIdOf(node)` — R136's column header
-   * tooltip ("the resolved URI appears in the header tooltip"), the only
-   * way a user can tell *why* two differently-prefixed sections merged
-   * into one group. `null` when there is nothing to show: namespaces
-   * disabled, no declaration anywhere in the document, or a name that
-   * genuinely has no namespace in scope (unprefixed with no default
-   * binding, or a prefix this document never declares).
-   */
-  namespaceUriOf(node: NodeRef): string | null {
-    if (!this.nsEnabled || !this.nsAnyDeclarationSeen) return null
-    // Resolved directly (not through `resolvedNameIdOf`) so a name that was
-    // never finalized — unreachable in practice, since `closeNode` finalizes
-    // every node exactly once, but not a case worth trusting blindly here —
-    // is reported as "no URI" rather than indexing `nsUriByResolvedId` with
-    // a raw `nameId` from the wrong id space.
-    const nameId = this.nameIdArr[node]!
-    const resolvedId = this.nsHasRebinding
-      ? this.resolveNamespaceLive(node, nameId)
-      : this.nsResolvedIdArr[nameId]
-    if (resolvedId === undefined || resolvedId === -1) return null
-    const uri = this.nsUriByResolvedId[resolvedId]
-    return uri !== undefined && uri !== '' ? uri : null
-  }
-
-  /**
-   * The best-effort resolved URI for a name id **alone**, with no node
-   * context — for a UI surface that has one `nameId` per column rather
-   * than one particular occurrence (`Grid.tsx`'s column header tooltip,
-   * R136). Uses whichever occurrence resolved first; under R135 rebinding
-   * this is not necessarily every occurrence's true URI (`namespaceUriOf`
-   * is the position-aware answer for that), which is an acceptable
-   * approximation for an informational tooltip and is never consulted on
-   * a grouping or query path.
-   */
-  namespaceUriOfName(nameId: number): string | null {
-    if (!this.nsEnabled || !this.nsAnyDeclarationSeen) return null
-    const resolvedId = this.nsResolvedIdArr[nameId]
-    if (resolvedId === undefined || resolvedId === -1) return null
-    const uri = this.nsUriByResolvedId[resolvedId]
-    return uri !== undefined && uri !== '' ? uri : null
-  }
-
-  /** Whether this document binds any single prefix to more than one URI —
-   * R135's trigger. `false` for every document that never allocates the
-   * declaration list beyond the handful of rows real `xmlns` attributes
-   * produce; asserted directly in tests rather than inferred from timing,
-   * per that round's own acceptance criteria. */
-  get hasNamespaceRebinding(): boolean {
-    return this.nsHasRebinding
-  }
-
-  /**
-   * R135's fallback: which URI was actually in scope for `node`'s prefix
-   * *at `node`'s own position* — a binary search would need a table
-   * sorted and range-checked the way `evaluate.ts`'s own `subtreeEndRef`
-   * trick sizes a subtree without walking it; this instead does a direct
-   * scan over `nsDeclarations`; because that list is sized per
-   * *declaration*, not per node ("kilobytes… a few hundred on a schema-
-   * driven document" per §"headline"), a linear scan here is the same
-   * order of cost a sorted-table binary search would be for any
-   * declaration count small enough to matter, and only the rebinding path
-   * ever reaches this method at all — never the common case.
-   */
-  private resolveNamespaceLive(node: NodeRef, nameId: number): number {
-    const prefix = this.interner_.prefixOf(nameId)
-    const wantPrefix = prefix ?? ''
-    let bestStart = -1
-    let uri = ''
-    for (const decl of this.nsDeclarations) {
-      if (decl.prefix !== wantPrefix) continue
-      if (decl.declaringNode > node) continue
-      if (node >= this.subtreeEndRefOf(decl.declaringNode)) continue
-      if (decl.declaringNode > bestStart) {
-        bestStart = decl.declaringNode
-        uri = decl.uri
-      }
-    }
-    const local = prefix !== null ? this.interner_.localNameOf(nameId) : this.interner_.text(nameId)
-    const key = `${uri} ${local}`
-    let resolvedId = this.nsResolvedKeyToId.get(key)
-    if (resolvedId === undefined) {
-      resolvedId = this.nsNextResolvedId++
-      this.nsResolvedKeyToId.set(key, resolvedId)
-      this.nsUriByResolvedId[resolvedId] = uri
-    }
-    return resolvedId
-  }
-
-  /** The same fact `evaluate.ts`'s own `subtreeEndRef` rests on: contiguous
-   * ref allocation means a subtree's ref boundary is found by walking
-   * ancestors' `nextSibling`, never by walking the subtree's own contents.
-   * Duplicated locally (rather than imported) because `core/path/` depends
-   * on `nodeStore.ts`, not the other way around. */
-  private subtreeEndRefOf(node: NodeRef): NodeRef {
-    for (let n = node; ;) {
-      const next = this.nextSiblingArr[n]
-      if (next !== undefined && next !== NO_REF) return next
-      const parent = this.parentArr[n]
-      if (parent === undefined || parent === NO_REF) return this.count
-      n = parent
-    }
   }
 
   parentOf(node: NodeRef): NodeRef {

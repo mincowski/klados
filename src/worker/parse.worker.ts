@@ -11,11 +11,7 @@
 import { bomLengthAt, detectEncoding } from '../core/encoding'
 import { Interner } from '../core/interner'
 import { buildNameIndex, type NameIndex } from '../core/nameIndex'
-import {
-  NodeStore,
-  type NamespaceResolutionBuffers,
-  type NodeStoreBuffers
-} from '../core/nodeStore'
+import { NodeStore, type NodeStoreBuffers } from '../core/nodeStore'
 import { DEFAULT_MAX_DEPTH } from '../core/parseDefaults'
 import {
   buildLineIndex,
@@ -121,14 +117,6 @@ export interface ParseDoneMessage {
    * `Interner.fromBuffers` needs it to know whether to recompute the
    * prefix/local split (R134) after reconstruction. */
   readonly hasNamespaces: boolean
-  /** `store.exportNamespaceState()` — without this, the main-thread store
-   * `rehydrateParseResult` builds would have empty namespace state (a
-   * freshly constructed store's default), and `resolvedNameIdOf` would
-   * silently fall back to the raw `nameIdOf` for every query even on a
-   * document that genuinely declares namespaces — found in review, not by
-   * a failing test, since every namespace test up to that point constructed
-   * its `NodeStore` directly rather than through this round trip. */
-  readonly namespaceState: NamespaceResolutionBuffers
 }
 
 export interface ParseErrorMessage {
@@ -259,8 +247,7 @@ export function runParseJob(
       formatId: format.capabilities.id,
       encoding,
       bomLength,
-      hasNamespaces: format.capabilities.hasNamespaces,
-      namespaceState: store.exportNamespaceState()
+      hasNamespaces: format.capabilities.hasNamespaces
     }
   }
 
@@ -292,8 +279,7 @@ export function runParseJob(
     formatId: format.capabilities.id,
     encoding,
     bomLength,
-    hasNamespaces: format.capabilities.hasNamespaces,
-    namespaceState: store.exportNamespaceState()
+    hasNamespaces: format.capabilities.hasNamespaces
   }
 }
 

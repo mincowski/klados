@@ -71,6 +71,15 @@ export interface GridDetectionResult {
  * per name is collected here; gathering the winning group's actual member
  * refs is a second, later pass (E3's column collection), done only for the
  * group that wins.
+ *
+ * **Grouping keys on the raw interned name** — D-013's "grouping keys on
+ * name alone", where the name is the one the document actually contains.
+ * R134–R136 keyed this on a namespace-*resolved* id instead, so `inv:price`
+ * and `s:price` bound to one URI formed a single group; R209 removed that
+ * (D-101). Two prefixes for one URI are now two groups, which
+ `Detail.tsx` renders as a table plus a list beneath it (D-014). The
+ * trigger was always narrow — one prefix throughout, the overwhelmingly
+ * common case, resolved to the raw name anyway.
  */
 export function detectGrid(store: NodeStore, node: NodeRef): GridDetectionResult {
   const counts = new Map<number, number>()
@@ -79,7 +88,7 @@ export function detectGrid(store: NodeStore, node: NodeRef): GridDetectionResult
   for (const child of store.childrenOf(node)) {
     if (!isGridEligible(store, child)) continue
     compositeChildCount++
-    const nameId = store.resolvedNameIdOf(child)
+    const nameId = store.nameIdOf(child)
     counts.set(nameId, (counts.get(nameId) ?? 0) + 1)
   }
 

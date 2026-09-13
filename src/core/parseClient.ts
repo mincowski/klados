@@ -72,12 +72,7 @@ export function rehydrateParseResult(response: ParseDoneMessage): ParseClientRes
     response.hasNamespaces
   )
   const bytes = new Uint8Array(response.bytes)
-  const store = NodeStore.fromBuffers(
-    bytes,
-    interner,
-    response.storeBuffers,
-    response.namespaceState
-  )
+  const store = NodeStore.fromBuffers(bytes, interner, response.storeBuffers)
   // Both halves together, before anything reads the store: `store.diagnostics`
   // is what `subtreeSplice.ts` merges from on the next edit, and a store
   // rehydrated without them would drop the document's diagnostics at the
