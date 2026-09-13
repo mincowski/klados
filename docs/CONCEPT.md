@@ -67,18 +67,23 @@ No branching on format anywhere above the parser layer.
 
 ### XML namespaces
 
-Namespaces are stored, not flattened away:
+A namespace-prefixed name is **the qualified name as written** (`inv:price`), and nothing
+else. There is no prefix/local split, no scope table, and no URI resolution.
 
-- The interned name (§6.5) is the **qualified name as written** (`inv:price`); the
-  prefix/local split is recorded on the intern table entry, not as an offset into the
-  buffer
-- Namespace declarations build a scope table keyed by node range; URI resolution is lazy,
-  computed only when asked for
-- **Grid grouping keys on the resolved `(URI, localName)` pair**, not the prefix. Two
-  sections of a document using different prefixes for the same namespace must group into
-  one table, or the feature fails on exactly the documents that need it most
-- Column headers display the prefix **as written in the source**, so what the user sees
-  matches what is in the file; the resolved URI appears in the header tooltip
+- The interned name (§6.5) is the whole name, colon included. A colon is an ordinary
+  byte here, exactly as it is in a JSON key
+- `inv:price` and `s:price` are **two names**, even where the document binds both
+  prefixes to one URI. Grid grouping keys on that name (§4.3), so they are two groups —
+  one renders as a table, the other in the list beneath it (D-014)
+- Column headers display the prefix as written, which is now simply the name
+
+**This section previously specified the opposite**, and R134–R136 built it: a scope table,
+lazy `(URI, localName)` resolution, grouping on the resolved pair, and the resolved URI in
+the header tooltip. **R209 removed all of it** — the state was derived, lived outside
+`NodeStoreBuffers`, and had to be hand-carried through both paths that rebuild a store;
+both got it wrong. D-101 records what the feature bought against what it cost. A tool
+premised on byte-faithful inspection showing the two names the file actually contains is
+the defensible end state, not merely a retreat from the other one.
 
 `xmlns` declarations are attributes and appear in the scalar facets table like any other,
 rather than being hidden.
@@ -407,12 +412,12 @@ children's first-level field names.
 
 **Detection algorithm:**
 
-1. Group composite children by **resolved name id** — the interned id (§6.5), and for
-   XML the id of the resolved `(URI, localName)` pair rather than the prefix (§2), so that
-   two sections using different prefixes for one namespace group into a single table.
-   "Composite" here means grid-eligible (D-088): has children, **or** has scalar facets —
-   not just §3.2's plain "has children," since a CSV row (§2's array-of-records) is
-   attributes-only by design and would otherwise never qualify
+1. Group composite children by **interned name id** (§6.5) — the name as the document
+   writes it, for every format. R209 removed the XML-only resolved-`(URI, localName)`
+   variant this step used to key on (§2, D-101). "Composite" here means grid-eligible
+   (D-088): has children, **or** has scalar facets — not just §3.2's plain "has children,"
+   since a CSV row (§2's array-of-records) is attributes-only by design and would
+   otherwise never qualify
 2. A group qualifies for grid mode if it has ≥ 2 members and covers ≥ 5% of the
    composite children (a floor, not a majority — both thresholds configurable)
 3. The largest qualifying group renders as a grid; any remaining children render in

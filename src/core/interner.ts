@@ -16,8 +16,6 @@ export function fnv1a32(bytes: Uint8Array, start: number, end: number): number {
   return hash >>> 0
 }
 
-const COLON = 0x3a // ':'
-
 export class Interner {
   private nameBytes: Uint8Array
   private nameLength = 0
@@ -37,39 +35,17 @@ export class Interner {
    * lookup arrives with a different encoding. */
   private nfcIndexCount = -1
   private nfcIndexEncoding = ''
-  /** Byte offset of the first `:` within each name (absolute, into
-   * `nameBytes`, the same convention as `starts`/`ends`), or `-1` when the
-   * name has no prefix — populated only when `namespaces` is `true`
-   * (R134). `null` for the whole array when disabled, so a JSON/TOML
-   * document pays not even the array allocation, let alone the per-name
-   * scan. */
-  private colonAt: Int32Array | null
-
   /**
-   * `namespaces` gates the prefix/local split (R134 §"the colon scan must
-   * be capability-gated") — pass `FormatCapabilities.hasNamespaces`, never
-   * a format id (invariant 8). `Interner` is shared by every format
-   * (`core/`), and a colon is an ordinary character in a JSON key: an
-   * unconditional split would read `"12:30"` as prefix `12`, local `30` —
-   * latent wrongness for formats that can never have namespaces, plus a
-   * scan on every distinct name for no reason.
+   * R209 removed a second parameter, `namespaces`, which gated a
+   * prefix/local split at intern time (R134). An interned name is now the
+   * name as written, for every format — a colon in it is an ordinary byte,
+   * which is what it always was for JSON and TOML and is now also what it is
+   * for XML.
    */
-  constructor(
-    initialCapacity = INITIAL_CAPACITY,
-    private readonly namespaces = false
-  ) {
+  constructor(initialCapacity = INITIAL_CAPACITY) {
     this.nameBytes = new Uint8Array(initialCapacity * 8)
     this.starts = new Int32Array(initialCapacity)
     this.ends = new Int32Array(initialCapacity)
-    this.colonAt = namespaces ? new Int32Array(initialCapacity) : null
-  }
-
-  /** Whether this interner splits names into prefix/local at intern time —
-   * `NodeStore` reads this (rather than taking a second, redundant
-   * capability flag) to decide whether to do any namespace-resolution work
-   * at all (R134). */
-  get splitsNamespaces(): boolean {
-    return this.namespaces
   }
 
   get size(): number {
@@ -97,31 +73,19 @@ export class Interner {
 
   /** Rebuilds a fully functional Interner (including the hash index, so
    * `intern()` still works) from buffers produced by `exportBuffers`.
-   * `namespaces` must match what the original interner was constructed
-   * with (`ParseDoneMessage.hasNamespaces`, threaded through rather than
-   * re-derived from a format id) — when `true`, the prefix/local split is
-   * recomputed here by re-scanning the (already reconstructed) name bytes
-   * once per distinct name, the same "per distinct name, never per node"
-   * cost §3 promises, rather than trying to serialize `colonAt` across the
-   * worker boundary as a sixteenth buffer. */
-  static fromBuffers(
-    nameBytes: Uint8Array,
-    starts: Int32Array,
-    ends: Int32Array,
-    namespaces = false
-  ): Interner {
-    const interner = new Interner(Math.max(1, starts.length), namespaces)
+   *
+   * R209 removed a fourth parameter here too. It had to match what the
+   * original interner was constructed with, and the prefix/local split was
+   * recomputed on this side by re-scanning the name bytes — a correctness
+   * obligation on the caller that no longer exists, because there is no
+   * derived state left to reconstruct. */
+  static fromBuffers(nameBytes: Uint8Array, starts: Int32Array, ends: Int32Array): Interner {
+    const interner = new Interner(Math.max(1, starts.length))
     interner.nameBytes = nameBytes
     interner.nameLength = nameBytes.length
     interner.starts = Int32Array.from(starts)
     interner.ends = Int32Array.from(ends)
     interner.count = starts.length
-    if (namespaces) {
-      interner.colonAt = new Int32Array(interner.count)
-      for (let id = 0; id < interner.count; id++) {
-        interner.colonAt[id] = interner.findColon(interner.starts[id]!, interner.ends[id]!)
-      }
-    }
     for (let id = 0; id < interner.count; id++) {
       const hash = fnv1a32(interner.nameBytes, interner.starts[id]!, interner.ends[id]!)
       const bucket = interner.byHash.get(hash)
@@ -252,41 +216,6 @@ export class Interner {
     return decoded
   }
 
-  /**
-   * The prefix of an interned name, decoded — `null` when the name has no
-   * `:` or when this interner doesn't split names at all (`namespaces` is
-   * `false`; R134 §"the colon scan must be capability-gated"). `"inv"` for
-   * `inv:price`; `null` for `price`, and `null` for a JSON key like
-   * `"12:30"` when this interner was never told the format has namespaces.
-   */
-  prefixOf(id: number): string | null {
-    const colon = this.colonAt?.[id] ?? -1
-    if (colon === -1) return null
-    return this.decoder.decode(this.nameBytes.subarray(this.starts[id]!, colon))
-  }
-
-  /** The local part of an interned name — everything after the first `:`,
-   * or the whole name when there is none (or splitting is disabled). Never
-   * cached separately from `text()`'s own cache; called only per distinct
-   * name during namespace resolution (R134 §3), not per node. */
-  localNameOf(id: number): string {
-    const colon = this.colonAt?.[id] ?? -1
-    if (colon === -1) return this.text(id)
-    return this.decoder.decode(this.nameBytes.subarray(colon + 1, this.ends[id]!))
-  }
-
-  /** Byte offset of the first `:` in `nameBytes[start, end)`, or `-1`. A
-   * colon at `start` itself (an empty prefix, `:foo`) is treated as "no
-   * prefix" — not a namespace-worthy split, and not worth a diagnostic
-   * either, since this scan happens at intern time with no query context
-   * to report one against. */
-  private findColon(start: number, end: number): number {
-    for (let i = start; i < end; i++) {
-      if (this.nameBytes[i] === COLON) return i > start ? i : -1
-    }
-    return -1
-  }
-
   private bytesEqual(id: number, source: Uint8Array, start: number, length: number): boolean {
     const nameStart = this.starts[id]!
     if (this.ends[id]! - nameStart !== length) return false
@@ -314,13 +243,6 @@ export class Interner {
     this.starts[id] = nameStart
     this.ends[id] = this.nameLength
     this.count++
-    // R134: the colon scan, once per distinct name (this is `add`, reached
-    // only on a genuine miss in `intern`/never on a repeat), never per
-    // node — and never at all when `namespaces` is false.
-    if (this.colonAt !== null) {
-      this.colonAt[id] = this.findColon(nameStart, this.nameLength)
-    }
-
     if (candidates !== undefined) {
       candidates.push(id)
     } else {
@@ -348,10 +270,5 @@ export class Interner {
     const grownEnds = new Int32Array(capacity)
     grownEnds.set(this.ends)
     this.ends = grownEnds
-    if (this.colonAt !== null) {
-      const grownColonAt = new Int32Array(capacity)
-      grownColonAt.set(this.colonAt)
-      this.colonAt = grownColonAt
-    }
   }
 }

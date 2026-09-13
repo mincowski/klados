@@ -113,8 +113,14 @@ Search for the id to jump to one.
 | **D-091** | Klados installs per-user and one-click, and that is now a decision rather than a default |  |
 | **D-092** | A save holds its own watcher open; the write-window race is accepted and recorded |  |
 | **D-093** | Enter copies the line's own ending; a document majority was measured and rejected |  |
+| **D-094** | The packaging `files:` list is an allowlist, never a list of exclusions |  |
+| **D-095** | Rehearse a release with `workflow_dispatch` before tagging |  |
 | **D-096** | Diagnostic *records* are capped per code; diagnostic *positions* never are |  |
 | **D-097** | One folding algorithm on the decoded path; canonical equivalence, not compatibility |  |
+| **D-098** | The notification's severity edge carries the contrast, not its hairline |  |
+| **D-099** | A rounded corner that would not render was a sibling painting over it |  |
+| **D-100** | The title bar's optical alignment comes from `text-box-trim`, not a measured constant |  |
+| **D-101** | XML namespace resolution is removed; a prefixed name is the name as written |  |
 
 ---
 
@@ -377,6 +383,12 @@ An earlier draft folded attribute and child names into a shape signature. That s
 `<car>` elements into separate groups whenever one carries an optional field — fragmenting
 exactly the table the feature exists to build. Optional fields should widen the column set,
 not break it apart.
+
+**R209: "name" here means the raw interned name — the name the document writes.** R134–R136
+made it the resolved `(URI, localName)` pair for XML, so `inv:price` and `s:price` bound to
+one URI grouped together; D-101 reverses that. This entry's own argument is untouched by
+either reading — it is about shape versus name, not about which name — but it was the
+sentence R134 pointed at when it changed the key, so it is worth saying which one is meant.
 
 ### D-014 — Coverage is a floor, not a majority · `settled`
 
@@ -3523,3 +3535,92 @@ the round the wrong way:
 
 **Chromium-only, and deliberately unguarded.** The application ships as Electron, so `CSS.supports`
 is not a question; a browser without the feature degrades to exactly the pre-R208 rendering.
+
+---
+
+### D-101 — XML namespace resolution is removed; a prefixed name is the name as written (R209) · `settled`
+
+**Reverses D-013's R134 reading and the whole of R134–R136**, which built namespace
+resolution and shipped it. Decided by the project lead after the alternatives were measured.
+The numbers are here so the next person to propose namespace support finds them rather than
+re-deriving them.
+
+**What broke.** Resolution survived opening a document and did not survive editing one.
+Two prefixes bound to one URI:
+
+```
+BEFORE EDIT  inv:price -> resolved id 0     s:price -> resolved id 0     same? true
+AFTER EDIT   inv:price -> resolved id 3     s:price -> resolved id 4     same? false
+```
+
+One character changed, nowhere near an `xmlns`, and the store had forgotten namespaces —
+silently, with nothing marked stale.
+
+**Why it was not repaired.** The memory was never the problem: R134 already made the state
+per-name and per-declaration, kilobytes. **The shape was.** It was derived state living
+outside `NodeStoreBuffers` that had to be hand-carried through every path rebuilding a
+store. There are two such paths and **both got it wrong** — the worker round trip caught in
+review, the splice still broken when R209 started. Two for two is a design signal.
+
+And the repair had a trap: the resolution cache is memoized by `` `${uri} ${local}` `` and
+only the URI half was exported, so the key map could not be rebuilt across a graft. A store
+mixing transferred ids with newly minted ones would give one name two identities — the same
+defect in a harder-to-see form.
+
+**A third option existed and was not taken.** `xmlns` attributes are stored as ordinary
+attributes, so declarations are recoverable from the buffers and the state could have been
+*derived on demand* rather than transferred — removing the defect class while keeping the
+feature. **Rejected on what the feature is worth, not on whether it would work.**
+
+**What it was worth, measured.** Three consumers, all in the Detail grid
+(`gridDetection.ts`, `gridColumns.ts`, one header tooltip). Nothing else — not the tree,
+not search, not path queries; R137 was never built. `prefixOf`/`localNameOf` had no
+consumers outside the namespace code itself.
+
+On screen, through the real `detectGrid` on a merged feed — two suppliers, two prefixes,
+one URI, three `a:item` and two `b:item`:
+
+| | groups found | table rows |
+|---|---|---|
+| with resolution | one group of 5 | **5** |
+| without | 3 and 2 | **3**, with the other 2 in the list beneath |
+
+**The remainder is not lost** — D-014 renders non-winning children as a list below the grid.
+And **the trigger is narrow**: it fires only when one document uses two *different* prefixes
+for the same URI. One prefix throughout — the overwhelmingly common case — was resolved to
+its own raw name anyway, so nothing there ever depended on this.
+
+So the feature bought a merged table instead of a table-plus-list, on documents that mix
+prefixes. It cost ~112 lines of `NodeStore`, an interner split with no other consumer, two
+Owed entries, two README limitations, and a defect in both store-rebuilding paths.
+
+**Decided: not worth it.** A tool premised on byte-faithful inspection showing `inv:price`
+and `s:price` as the two names the file actually contains is defensible on its own terms.
+
+**What went with it**: the whole `ns*` apparatus,
+`exportNamespaceState`/`importNamespaceState`, `fromBuffers`'s fourth parameter,
+`subtreeEndRefOf` (whose only caller was the rebinding fallback), the worker threading, the
+interner's prefix/local split, and the grid's two call sites plus the tooltip.
+
+**`FormatCapabilities.hasNamespaces` is removed too**, from the contract and from all four
+format modules. It lives on `src/core/types.ts`, which `CLAUDE.md` says to report on rather than
+edit — so R209 reported it unread and left it, and **the project lead decided to remove it**:
+*"if that is not used anymore, we should not drag it around. If we re-introduce namespaces, we
+can always add this back."* Two comments in that file went with it, because they had become
+false rather than merely unused: the `NodeSink` header calling namespace resolution the sink's
+responsibility, and the "deliberately NOT in this contract" list entry claiming the sink
+maintains `xmlns` scope.
+
+**And one more thing that was built and read by nothing**: `XmlResumeContext.namespaces`, a
+`prefix -> URI` map `resumeContextFor` accumulated from ancestor attributes on every resume.
+`R134-xml-namespaces.md` noticed it was never consulted and planned to build on it; R209
+removed the feature that would have. `xml:space` is what that function actually resumes.
+
+**Closes R137** — path queries resolving a prefix against document declarations — as
+not-applicable rather than outstanding: with no resolved identity, a prefixed query matches
+the prefix as written, which is now the intended behaviour rather than a gap.
+
+**Does not close** the question underneath it, which R209's own measurement exposed: a node
+whose composite children fall into two groups shows one as a table and the rest as a list,
+**with or without namespaces**. Dropping resolution makes that reachable more often; it did
+not create it. That is `docs/plans/R210-grid-grouping.md`.

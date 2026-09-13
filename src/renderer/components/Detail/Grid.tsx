@@ -1030,12 +1030,12 @@ function GridHeaderCell({
     kind === 'composite'
       ? `${store.textOf(column.nameId)} — composite in ${column.kindCounts[2]! + column.kindCounts[4]!} of ${column.frequency} rows`
       : store.textOf(column.nameId)
-  // R136: the only way a user can tell *why* this column exists under a
-  // namespace-resolved name — the header itself still shows the prefix as
-  // written (`store.textOf` above), never the URI.
-  const namespaceUri = store.namespaceUriOfName(column.nameId)
-  const breakdown =
-    namespaceUri === null ? breakdownBase : `${breakdownBase} — namespace: ${namespaceUri}`
+  // R209 removed the namespace-URI suffix that used to hang off this
+  // tooltip. It existed to explain why two differently-prefixed sections
+  // had merged into one column; without resolution there is nothing to
+  // explain, and a tooltip printing a prefix's declaration would be a new
+  // feature rather than a leftover of the old one.
+  const breakdown = breakdownBase
 
   // R43/D-071: same `window`-level listener shape `Scrollbar.tsx`'s own
   // thumb drag uses, for the same reason — a drag must keep tracking the

@@ -27,7 +27,7 @@ const OPTIONS: ParseOptions = { maxDepth: 1000, encoding: 'utf-8' }
 
 function parse(format: FormatModule, text: string): { store: NodeStore; bytes: Uint8Array } {
   const bytes = new TextEncoder().encode(text)
-  const store = new NodeStore(bytes, new Interner(undefined, format.capabilities.hasNamespaces))
+  const store = new NodeStore(bytes, new Interner())
   format.parse(bytes, store, OPTIONS)
   return { store, bytes }
 }

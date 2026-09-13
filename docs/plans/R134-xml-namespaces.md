@@ -1,8 +1,17 @@
 # R134–R137 — XML namespaces: resolution that costs per *name*, not per node
 
-<!-- status: built-caveat -->
+<!-- status: superseded -->
 
-**R134–R136 built; R137 not started — see the Owed table in `docs/TASKS.md` and §8's Results.**
+**Superseded by `docs/plans/R209-drop-namespaces.md` (D-101). R134–R136 were built and have
+been removed; R137 was never started and is now not-applicable.** The feature shipped, then
+did not survive an edit: the resolution state was derived, lived outside `NodeStoreBuffers`,
+and had to be hand-carried through both paths that rebuild a store — both of which got it
+wrong. R209 measured what it bought (three consumers, all in the Detail grid, firing only on
+documents that use two different prefixes for one URI) against what it cost, and the project
+lead decided to remove it rather than repair it.
+
+**This document is kept, not rewritten.** Everything below describes what was built and why,
+including the memory result that motivated it, and it is the record R209 argued against.
 Register: `docs/TASKS.md`. Namespace resolution — the second of the three items the XPath
 sizing turned up, and the one CONCEPT already specifies in two places without any of it existing.
 Sibling investigations: `docs/plans/R132-existence-predicates.md` (the third item, planned) and the

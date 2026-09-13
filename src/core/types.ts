@@ -71,9 +71,9 @@ export interface Diagnostic {
  * sink, and the store stays swappable. The hot path is monomorphic in practice
  * because exactly one implementation is live per parse.
  *
- * CRITICAL: parsers pass byte offsets and never decode text. Interning, hashing
- * and namespace resolution are the sink's responsibility — it owns the buffer and
- * the intern table (§6.5). The parser's only job is finding boundaries.
+ * CRITICAL: parsers pass byte offsets and never decode text. Interning and hashing
+ * are the sink's responsibility — it owns the buffer and the intern table (§6.5).
+ * The parser's only job is finding boundaries.
  */
 export interface NodeSink {
   /**
@@ -141,7 +141,6 @@ export interface FormatCapabilities {
   /** Drives the scalar-facet table in the Detail view (§4.3). */
   readonly hasAttributes: boolean;
   readonly hasComments: boolean;
-  readonly hasNamespaces: boolean;
 
   /** Whether `format()` is implemented (§5.7). */
   readonly canFormat: boolean;
@@ -295,8 +294,6 @@ export interface FormatOptions {
  *                          `capabilities.rowBreakBytes`
  *   Name interning       — the sink owns the intern table so that ids are
  *                          comparable across the whole document (§6.5)
- *   Namespace resolution — the sink recognizes xmlns attributes and maintains
- *                          scope; parsers just emit attributes
  *   Comment attachment   — leading/trailing association is a shared rule (§5.3)
  *   Syntax token classes — derived from NodeKind, which is already unified
  *   Search indexing      — built from the intern table, format-agnostic

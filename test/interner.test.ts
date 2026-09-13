@@ -42,19 +42,69 @@ describe('Interner', () => {
     expect(interner.text(idA)).not.toBe(interner.text(idB))
   })
 
-  it('interns 1,000,000 occurrences of 50 distinct names in under 500ms, size === 50', () => {
-    const names = Array.from({ length: 50 }, (_, i) => utf8(`distinct-name-${i}`))
-    const interner = new Interner()
-
-    const start = performance.now()
-    for (let i = 0; i < 1_000_000; i++) {
-      const bytes = names[i % 50]!
-      interner.intern(bytes, 0, bytes.length)
+  /**
+   * **This asserted a wall-clock budget and flaked on CI; the shape was wrong,
+   * not the constant.** It measured one run of 1,000,000 interns against
+   * `< 500 ms` — comfortable on a developer machine (p50 **83 ms**, measured)
+   * and marginal on a contended `windows-latest` runner, which came in at
+   * **509.2 ms** during R209 and passed on the same branch one commit earlier.
+   *
+   * `R183-ci-flakes.md` § 6 is explicit that raising the ceiling is not
+   * available without a measurement, because it is the move that hides a real
+   * regression. The measurement was taken: the same loop is **82.7 ms before
+   * R209 and 83.4 ms after** on one machine, so CI was seeing the same code
+   * roughly six times slower, not slower code. § 6's own first branch then
+   * applies — *the test's shape is wrong for CI, not its constant.*
+   *
+   * **So it asserts the algorithmic property instead, which no machine's speed
+   * can move.** Interning is a hash lookup, so the cost of one occurrence must
+   * not grow with how many *distinct* names the table already holds. Growing
+   * that count 100× measures **1.48×** here; losing the hash index and
+   * scanning candidates would be nearer 100×. Both halves run back to back on
+   * the same hardware in the same test, so contention lands on both.
+   *
+   * The absolute ceiling stays as a catastrophe net rather than a precision
+   * instrument, and is set from what a regression looks like — an order of
+   * magnitude — instead of from what a clean run measures.
+   */
+  it('interning costs the same per occurrence however many distinct names exist', () => {
+    function run(distinct: number): { ms: number; size: number } {
+      const names = Array.from({ length: distinct }, (_, i) => utf8(`distinct-name-${i}`))
+      const interner = new Interner()
+      const start = performance.now()
+      for (let i = 0; i < 1_000_000; i++) {
+        const bytes = names[i % distinct]!
+        interner.intern(bytes, 0, bytes.length)
+      }
+      return { ms: performance.now() - start, size: interner.size }
     }
-    const elapsed = performance.now() - start
 
-    expect(interner.size).toBe(50)
-    expect(elapsed).toBeLessThan(500)
+    /** Median of three, the shape `pathPredicateBudget.test.ts` already uses —
+     * one GC pause must not decide the verdict. */
+    function median(distinct: number): number {
+      const samples: number[] = []
+      let size = -1
+      for (let i = 0; i < 3; i++) {
+        const r = run(distinct)
+        samples.push(r.ms)
+        size = r.size
+      }
+      expect(size).toBe(distinct)
+      samples.sort((a, b) => a - b)
+      return samples[1]!
+    }
+
+    const few = median(50)
+    const many = median(5000)
+
+    // 100× the distinct names, measured at 1.48× the time. A candidate scan
+    // instead of a hash lookup would be two orders of magnitude, so 5× is
+    // generous against noise and nowhere near the failure it guards.
+    expect(many / few).toBeLessThan(5)
+
+    // The catastrophe net: anything quadratic blows through this by minutes,
+    // and the slowest hardware yet observed for the 50-name case is 509 ms.
+    expect(few).toBeLessThan(5000)
   })
 
   it('text() decodes lazily and is stable across calls', () => {
@@ -154,63 +204,66 @@ describe('Interner', () => {
     expect(ids.size).toBe(5000)
   })
 
-  describe('R134 — prefix/local split, capability-gated', () => {
-    it('splits a prefixed name when namespaces are enabled', () => {
-      const interner = new Interner(undefined, true)
-      const bytes = utf8('inv:price')
-      const id = interner.intern(bytes, 0, bytes.length)
-      expect(interner.prefixOf(id)).toBe('inv')
-      expect(interner.localNameOf(id)).toBe('price')
-    })
-
-    it('an unprefixed name has no prefix, and localNameOf is the whole name', () => {
-      const interner = new Interner(undefined, true)
-      const bytes = utf8('price')
-      const id = interner.intern(bytes, 0, bytes.length)
-      expect(interner.prefixOf(id)).toBeNull()
-      expect(interner.localNameOf(id)).toBe('price')
-    })
-
-    it('a colon in a position that is not a prefix separator (leading colon) is not a prefix', () => {
-      const interner = new Interner(undefined, true)
-      const bytes = utf8(':oops')
-      const id = interner.intern(bytes, 0, bytes.length)
-      expect(interner.prefixOf(id)).toBeNull()
-      expect(interner.localNameOf(id)).toBe(':oops')
-    })
-
-    it('splitsNamespaces reports the constructor flag', () => {
-      expect(new Interner().splitsNamespaces).toBe(false)
-      expect(new Interner(undefined, true).splitsNamespaces).toBe(true)
-    })
-
-    it('a JSON-shaped key with a colon is not split when namespaces are disabled (the default)', () => {
+  describe('R209 — no prefix/local split; an interned name is the name as written', () => {
+    /**
+     * **R134's block, inverted rather than deleted.** It asserted that an
+     * `Interner` constructed with namespaces enabled split `inv:price` into a
+     * prefix and a local name, and that a JSON key like `"12:30"` was spared
+     * that only by a capability gate. R209 removed the split entirely
+     * (D-101), so the gate has nothing to gate and every format gets the
+     * behaviour JSON and TOML already had.
+     */
+    it('a prefixed name interns whole, colon included', () => {
       const interner = new Interner()
-      const bytes = utf8('12:30')
-      const id = interner.intern(bytes, 0, bytes.length)
-      expect(interner.prefixOf(id)).toBeNull()
-      expect(interner.localNameOf(id)).toBe('12:30')
-    })
-
-    it('fromBuffers recomputes the split when told the original interner had namespaces enabled', () => {
-      const original = new Interner(undefined, true)
       const bytes = utf8('inv:price')
-      const id = original.intern(bytes, 0, bytes.length)
-      const buffers = original.exportBuffers()
-
-      const rehydrated = Interner.fromBuffers(buffers.nameBytes, buffers.starts, buffers.ends, true)
-      expect(rehydrated.prefixOf(id)).toBe('inv')
-      expect(rehydrated.localNameOf(id)).toBe('price')
+      const id = interner.intern(bytes, 0, bytes.length)
+      expect(interner.text(id)).toBe('inv:price')
     })
 
-    it('fromBuffers defaults to no split when the flag is omitted', () => {
-      const original = new Interner(undefined, true)
+    it('two prefixes for one local name are two ids, not one', () => {
+      // The property the whole round turns on, at the layer it starts from.
+      const interner = new Interner()
+      const a = utf8('inv:price')
+      const b = utf8('s:price')
+      const idA = interner.intern(a, 0, a.length)
+      const idB = interner.intern(b, 0, b.length)
+      expect(idA).not.toBe(idB)
+      expect(interner.size).toBe(2)
+    })
+
+    it('the split surface is gone, not merely unused', () => {
+      const interner = new Interner()
+      for (const member of ['prefixOf', 'localNameOf', 'splitsNamespaces']) {
+        expect(member in interner).toBe(false)
+      }
+    })
+
+    it('fromBuffers takes no namespace flag', () => {
+      // Both flags were **optional**, which is what let a caller forget one
+      // and get silently different behaviour — the same shape as
+      // `NodeStore.fromBuffers`'s fourth parameter. Asserted on arity so a
+      // future optional flag of that kind fails here.
+      //
+      // Only `fromBuffers`: the constructor's own remaining parameter has a
+      // default, and `Function.length` counts only parameters before the
+      // first defaulted one — so it reads 0 whether there are one or three,
+      // and cannot say anything about this. A second constructor argument is
+      // a compile error instead, which is the stronger guarantee anyway.
+      expect(Interner.fromBuffers.length).toBe(3)
+    })
+
+    it('a round trip through fromBuffers needs nothing recomputed', () => {
+      // R134 re-scanned every name here to rebuild `colonAt`, and the caller
+      // had to pass a flag matching the original interner or the rehydrated
+      // one behaved differently. There is no derived state left to get wrong.
+      const original = new Interner()
       const bytes = utf8('inv:price')
       const id = original.intern(bytes, 0, bytes.length)
       const buffers = original.exportBuffers()
 
       const rehydrated = Interner.fromBuffers(buffers.nameBytes, buffers.starts, buffers.ends)
-      expect(rehydrated.prefixOf(id)).toBeNull()
+      expect(rehydrated.text(id)).toBe('inv:price')
+      expect(rehydrated.size).toBe(original.size)
     })
   })
 })

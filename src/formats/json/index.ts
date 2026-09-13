@@ -44,7 +44,6 @@ export const jsonCapabilities: FormatCapabilities = {
   extensions: ['.json'],
   hasAttributes: false,
   hasComments: false,
-  hasNamespaces: false,
   canFormat: true,
   canIncrementalReparse: true,
   rowBreakBytes: [COMMA, CLOSE_BRACE, CLOSE_BRACKET]

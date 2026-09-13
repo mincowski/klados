@@ -25,7 +25,7 @@ function parseXml(text: string): { store: NodeStore } {
  * behaviour unchanged. */
 function parseXmlNamespaced(text: string): { store: NodeStore } {
   const source = new TextEncoder().encode(text)
-  const store = new NodeStore(source, new Interner(undefined, true))
+  const store = new NodeStore(source, new Interner())
   xmlFormatModule.parse(source, store, xmlOptions)
   return { store }
 }
@@ -219,24 +219,36 @@ describe('detectGrid (M2-PLAN.md E1)', () => {
   })
 })
 
-describe('R136 — grid grouping on the resolved name', () => {
-  it('two sections with different prefixes for one URI produce ONE grid group (fails without R136)', () => {
+describe('R209 — grid grouping on the raw name, namespace resolution removed', () => {
+  /**
+   * **R136's inverse, kept in place rather than deleted.** This block used to
+   * assert that two prefixes bound to one URI produced ONE grid group. R209
+   * removed namespace resolution (D-101), so they produce two — and this file
+   * is where a future reader will look to find out whether the merged-group
+   * behaviour ever existed and why it went.
+   */
+  it('two prefixes for one URI produce TWO groups, one per name as written', () => {
     const { store } = parseXmlNamespaced(
       '<root>' +
         '<a:car xmlns:a="urn:cars"><v>1</v></a:car>' +
         '<b:car xmlns:b="urn:cars"><v>2</v></b:car>' +
-        '<c:car xmlns:c="urn:cars"><v>3</v></c:car>' +
+        '<b:car xmlns:b="urn:cars"><v>3</v></b:car>' +
         '</root>'
     )
     const root = store.firstChildOf(ROOT)
     const result = detectGrid(store, root)
 
-    expect(result.groups).toHaveLength(1)
+    // Under R136 this was one group of 3. The two `b:car` win the grid; the
+    // single `a:car` is a group of one, which never qualified as a grid
+    // anyway (§4.3 rule: at least 2 members) and renders in the list
+    // beneath, per D-014.
+    expect(result.groups).toHaveLength(2)
     expect(result.grid).not.toBeNull()
-    expect(result.grid!.memberCount).toBe(3)
+    expect(result.grid!.memberCount).toBe(2)
+    expect(store.textOf(result.grid!.nameId)).toBe('b:car')
   })
 
-  it('two sections with the SAME prefix bound to different URIs produce TWO groups', () => {
+  it('the same prefix bound to different URIs still produces two groups — for the simpler reason', () => {
     const { store } = parseXmlNamespaced(
       '<root>' +
         '<x xmlns:p="urn:one"><p:car><v>1</v></p:car><p:car><v>2</v></p:car></x>' +
@@ -244,26 +256,50 @@ describe('R136 — grid grouping on the resolved name', () => {
         '</root>'
     )
     const root = store.firstChildOf(ROOT)
-    // Both <p:car> groups live under <root>'s grandchildren, not directly
-    // under <root> — detectGrid groups one node's own children, so
-    // exercise it on a synthetic parent holding both sets of <p:car>
-    // siblings directly, which is the shape §4.3 actually groups.
     const x = store.firstChildOf(root)
     const y = store.nextSiblingOf(x)
     const carsUnderX = detectGrid(store, x)
     const carsUnderY = detectGrid(store, y)
     expect(carsUnderX.grid!.memberCount).toBe(2)
     expect(carsUnderY.grid!.memberCount).toBe(2)
-    // The two groups' resolved ids differ — "p:car" means something
-    // different in each subtree.
-    expect(carsUnderX.grid!.nameId).not.toBe(carsUnderY.grid!.nameId)
+
+    // **The outcome is unchanged and the reason is inverted.** Under R135
+    // these ids differed because `p:car` resolved to two different URIs in
+    // two subtrees. Now they are the *same* id — one raw interned name —
+    // and the two groups are separate only because `detectGrid` groups one
+    // parent's own children. Asserted explicitly, because a test still
+    // passing for a different reason is worth saying out loud.
+    expect(carsUnderX.grid!.nameId).toBe(carsUnderY.grid!.nameId)
+    expect(store.textOf(carsUnderX.grid!.nameId)).toBe('p:car')
   })
 
-  it('the column header tooltip contains the resolved URI, while the header text stays the prefix as written', () => {
+  it('the column header shows the prefix as written, and there is no URI to append', () => {
     const { store } = parseXmlNamespaced('<root><a:car xmlns:a="urn:cars">1</a:car></root>')
     const root = store.firstChildOf(ROOT)
     const car = store.firstChildOf(root)
-    expect(store.nameOf(car)).toBe('a:car') // displayed as written
-    expect(store.namespaceUriOfName(store.nameIdOf(car))).toBe('urn:cars') // tooltip material
+    expect(store.nameOf(car)).toBe('a:car')
+
+    // R209 removed `namespaceUriOfName` along with the tooltip suffix it fed.
+    // The header text is unchanged — it always showed the prefix as written.
+    expect('namespaceUriOfName' in store).toBe(false)
+  })
+
+  it('a single-prefix document groups exactly as it always did', () => {
+    // **The case that must not regress** (R209 acceptance 2), and it is
+    // almost every namespaced document: one prefix throughout resolved to
+    // its own raw name under R136 too, so nothing here ever depended on
+    // resolution.
+    const { store } = parseXmlNamespaced(
+      '<root xmlns:a="urn:cars">' +
+        '<a:car><v>1</v></a:car>' +
+        '<a:car><v>2</v></a:car>' +
+        '<a:car><v>3</v></a:car>' +
+        '</root>'
+    )
+    const root = store.firstChildOf(ROOT)
+    const result = detectGrid(store, root)
+    expect(result.groups).toHaveLength(1)
+    expect(result.grid!.memberCount).toBe(3)
+    expect(store.textOf(result.grid!.nameId)).toBe('a:car')
   })
 })

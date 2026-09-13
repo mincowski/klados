@@ -73,11 +73,10 @@ export interface GridColumn {
  * done only for the group that won — E1's own doc comment on why this
  * isn't folded into detection itself).
  *
- * `groupNameId` is `GroupInfo.nameId` — the group's **resolved** id
- * (R136), so this matches on `resolvedNameIdOf`, the same key
- * `gridDetection.ts` grouped by, not the raw `nameIdOf`. For a document
- * with no namespace resolution in play the two are identical, so this is
- * a no-op change for JSON and namespace-free XML. */
+ * `groupNameId` is `GroupInfo.nameId` — the raw interned name id, the
+ * same key `gridDetection.ts` groups by. These two must always agree about
+ * what a group *is*; R209 changed both together, from a namespace-resolved
+ * id back to the raw one. */
 export function collectGroupMembers(
   store: NodeStore,
   parent: NodeRef,
@@ -85,7 +84,7 @@ export function collectGroupMembers(
 ): NodeRef[] {
   const members: NodeRef[] = []
   for (const child of store.childrenOf(parent)) {
-    if (store.resolvedNameIdOf(child) === groupNameId && hasChildren(store, child)) {
+    if (store.nameIdOf(child) === groupNameId && hasChildren(store, child)) {
       members.push(child)
     }
   }
