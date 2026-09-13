@@ -16,6 +16,83 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R209 — XML namespace resolution removed, not repaired · built
+
+**Plan:** `docs/plans/R209-drop-namespaces.md` · **Decision:** D-101
+
+**A feature that shipped, then stopped working the moment you edited the file.** Two prefixes bound
+to one URI resolved to the same id on open and to two different raw ids after a one-character edit
+nowhere near an `xmlns` — silently, with nothing marked stale. `inv:price` and `s:price` are two
+names now, as the document writes them.
+
+**The memory was never the problem and the shape always was.** R134 had already made the state
+per-name and per-declaration, kilobytes. But it was derived state living outside
+`NodeStoreBuffers`, which every path rebuilding a store had to hand-carry, and there are two such
+paths: the worker round trip (caught in review) and the splice (still broken when this round
+started). Two for two.
+
+**And the repair had a trap.** The resolution cache is memoized by URI *and* local name, and only
+the URI half was exported, so it could not be rebuilt across a graft — a store mixing transferred
+ids with freshly minted ones would have given one name two identities. Same defect, harder to see.
+
+**A third option would have worked and was rejected on value, not soundness.** `xmlns` attributes
+are ordinary attributes, so the state could have been derived on demand from the buffers instead of
+transferred, removing the defect class while keeping the feature. What settled it was measuring
+what the feature bought: three consumers, all in the Detail grid, firing only on documents that use
+two *different* prefixes for one URI, and buying a merged table instead of a table-plus-list — the
+remainder was never lost, since D-014 already renders non-winning children as a list beneath.
+
+**The sharper version of "the shape was wrong", found while removing it:** both
+`NodeStore.fromBuffers` and `Interner.fromBuffers` took the reconstruction state through an
+**optional parameter with a safe-looking default**. That is precisely why the defect was invisible
+rather than loud — `subtreeSplice.ts` omitting it was not a type error, and the store it produced
+was correct in every respect nobody asserted. Required parameters would have made both defects
+compile errors on the day they were written. Both functions now have their arity asserted.
+
+**Three things came out that § 4's inventory did not list**, each bounded by callers rather than by
+name: `subtreeEndRefOf`, whose only caller was the rebinding fallback and whose name says nothing
+about namespaces; `COLON`, read only by `findColon`; and `ParseDoneMessage.hasNamespaces`, which
+existed solely to tell `Interner.fromBuffers` whether to recompute the split.
+
+**`FormatCapabilities.hasNamespaces` stays and is read by nothing.** It is on `src/core/types.ts`,
+which `CLAUDE.md` says to report rather than edit. Reported.
+
+**Every test was inverted in place rather than deleted** — `namespaceResolution`, `gridDetection`'s
+R136 block, `interner`'s R134 block — because they are where the next person to propose namespace
+support will look. **Three of the new assertions were wrong first**, all caught by running rather
+than reading: a JSON fixture filtered children by `NodeKind.Element`, which a JSON property is not,
+so it silently traversed nothing and asserted against garbage; a worker call passed one argument to
+a two-argument synchronous function and `await`ed it, which runs fine and only `tsc` catches; and
+`Interner.length` reads 0 whether the constructor takes one optional parameter or three, so an
+arity assertion written on it could not say what it meant. **A traversal that quietly matches
+nothing is worse than an assertion that quietly passes** — it is `CLAUDE.md`'s shape-not-values
+trap one level further down.
+
+**One test now passes for a different reason and says so.** Two `p:car` groups under different
+parents are still separate — because `detectGrid` groups one parent's own children, not because
+their resolved ids differ.
+
+**Closes** the Owed entry for namespace state across the splice, and **R137** as not-applicable
+rather than outstanding: with no resolved identity, a prefixed query matches the prefix as written,
+which is now the intended behaviour. Both README limitation bullets go, `CONCEPT.md` §2's
+XML-namespaces section is rewritten to say what is true (with a note that it previously specified
+the opposite, since that section is why R134 existed), and §4.3's detection algorithm keys on the
+interned name id.
+
+**Does not close** what the measurement exposed underneath: a node whose composite children fall
+into two groups shows one as a table and the rest as a list, **with or without namespaces**. This
+makes it reachable more often; it did not create it. That is `docs/plans/R210-grid-grouping.md`.
+
+**Found on the way:** `DECISIONS.md`'s index table stopped at D-097 — D-098 through D-100 were
+added last round without indexing them, my own miss, and D-094/D-095 had never been indexed at all.
+
+**Cost:** 861 lines removed against 308 added, D-101, R134–R137 marked superseded, 2127 tests
+passing. Version stays at 1.0.0 against the plan's own minor candidate — the project lead's call
+for the fourth round running, and this is the first of the four that changes what an existing
+document looks like on screen.
+
+---
+
 ## R206–R208 — three disclosed cosmetic defects, and all three records were wrong · built
 
 **Plan:** `docs/plans/R206-disclosed-ui-defects.md`

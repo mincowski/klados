@@ -80,11 +80,6 @@ The handful worth memorising:
 Listed here so you meet them on this page rather than in the middle of your work. The project keeps
 a fuller list in [`docs/TASKS.md`](docs/TASKS.md)'s *Owed* table.
 
-- **XML namespaces stop resolving after you edit a file**, until you close and reopen it. They
-  resolve correctly when a file is opened; the faster reparse that runs while you type does not
-  carry that information through yet.
-- **A namespace-prefixed search** (`//inv:price`) matches the prefix as you typed it rather than
-  what it stands for. It tells you "no matches" rather than giving you a wrong answer.
 - **A CSV file with no header row keeps only its first unnamed column.** Files with a header row —
   almost all of them — are unaffected.
 - **Very wide CSV files are expensive.** Memory depends on how many columns there are rather than
