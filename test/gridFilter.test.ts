@@ -173,3 +173,66 @@ describe('filterIndices hidden-match reporting (R34 §5)', () => {
     expect(result.hiddenMatchColumns).toEqual([])
   })
 })
+
+describe('filterIndices — NFC (R202)', () => {
+  // Fixtures from escapes with a codepoint guard, per `docs/FINDINGS.md`:
+  // typing these directly is how R72 and R202's own measurements went wrong,
+  // because a tool normalizes them away and the test still passes against
+  // text that is no longer the text under examination.
+  const COMPOSED = 'Caf\u00e9' // C a f U+00E9
+  const DECOMPOSED = 'Cafe\u0301' // C a f e U+0301
+
+  const CAFES =
+    '<list>' +
+    `<shop><name>${COMPOSED}</name></shop>` +
+    `<shop><name>${DECOMPOSED}</name></shop>` +
+    '<shop><name>Diner</name></shop>' +
+    '</list>'
+
+  function quick(text: string): readonly number[] {
+    const { store, source, members, columns } = setup(CAFES)
+    return filterIndices(store, source, members, columns, { quick: text, perColumn: new Map() })
+      .indices
+  }
+
+  it('guards its own fixtures', () => {
+    expect([...COMPOSED].map((c) => c.codePointAt(0))).toEqual([0x43, 0x61, 0x66, 0x00e9])
+    expect([...DECOMPOSED].map((c) => c.codePointAt(0))).toEqual([0x43, 0x61, 0x66, 0x65, 0x0301])
+    expect(COMPOSED).not.toBe(DECOMPOSED)
+    expect(COMPOSED.normalize('NFC')).toBe(DECOMPOSED.normalize('NFC'))
+  })
+
+  it('a composed query matches a decomposed cell, and both spellings at once', () => {
+    // Before R202 this returned only row 0 — the two spellings are different
+    // strings, and nothing in the codebase called `normalize`.
+    expect(quick(COMPOSED)).toEqual([0, 1])
+  })
+
+  it('a decomposed query matches a composed cell', () => {
+    expect(quick(DECOMPOSED)).toEqual([0, 1])
+  })
+
+  it('an ASCII query still matches the decomposed spelling it always did', () => {
+    // The gate's reason for existing. `cafe` matches `Cafe` + U+0301
+    // character for character today; normalizing the *cell* would compose
+    // that into `é` and lose the match. NFC can never add an ASCII
+    // character that was not there, so skipping it for an ASCII needle is
+    // strictly more permissive as well as free.
+    expect(quick('cafe')).toEqual([1])
+  })
+
+  it('normalizes per-column filters too, and only the ones that need it', () => {
+    const { store, source, members, columns } = setup(CAFES)
+    const nameId = columns[0]!.nameId
+    expect(
+      filterIndices(store, source, members, columns, {
+        quick: '',
+        perColumn: new Map([[nameId, COMPOSED]])
+      }).indices
+    ).toEqual([0, 1])
+  })
+
+  it('still folds case across the normalization', () => {
+    expect(quick(COMPOSED.toUpperCase())).toEqual([0, 1])
+  })
+})
