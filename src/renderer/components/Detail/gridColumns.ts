@@ -68,29 +68,6 @@ export interface GridColumn {
   readonly kindCounts: readonly number[]
 }
 
-/** The largest qualifying group's actual member refs (E1 only counts and
- * names groups; this is the second, later pass over the same children,
- * done only for the group that won — E1's own doc comment on why this
- * isn't folded into detection itself).
- *
- * `groupNameId` is `GroupInfo.nameId` — the raw interned name id, the
- * same key `gridDetection.ts` groups by. These two must always agree about
- * what a group *is*; R209 changed both together, from a namespace-resolved
- * id back to the raw one. */
-export function collectGroupMembers(
-  store: NodeStore,
-  parent: NodeRef,
-  groupNameId: number
-): NodeRef[] {
-  const members: NodeRef[] = []
-  for (const child of store.childrenOf(parent)) {
-    if (store.nameIdOf(child) === groupNameId && hasChildren(store, child)) {
-      members.push(child)
-    }
-  }
-  return members
-}
-
 export interface GridColumnResult {
   /** Columns to render, in first-appearance order, capped at
    * `GRID_COLUMN_CAP`. */

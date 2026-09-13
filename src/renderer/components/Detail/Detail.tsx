@@ -34,7 +34,6 @@ import {
   type PathSegment
 } from './detailModel'
 import { detectGrid } from './gridDetection'
-import { collectGroupMembers } from './gridColumns'
 import { focusGrid } from './gridController'
 import { Grid } from './Grid'
 import { resolveWrapperTarget, skippedComments } from '../../wrapperDescent'
@@ -42,6 +41,10 @@ import { useRovingTabIndex } from '../../rovingTabIndex'
 import './Detail.css'
 
 const ROW_HEIGHT = 23
+
+/** A stable empty array, so `gridMembers` keeps one identity across renders
+ * that have no table — a fresh `[]` would invalidate every memo below it. */
+const NO_MEMBERS: readonly NodeRef[] = []
 
 export function Detail(): JSX.Element {
   const state = useDocumentSession()
@@ -103,17 +106,20 @@ export function DetailContent({ document, selectedNode }: DetailContentProps): J
       : []
 
   // UI-FEEDBACK.md M5b / D-049: the manual grid/list override (M2 E9)
-  // is gone — `detection.grid` is now the only source of grid mode, so
-  // there's nothing left to reconcile against an override.
+  // is gone — detection is the only source of grid mode, so there's nothing
+  // left to reconcile against an override.
   const detection = useMemo(() => detectGrid(store, node), [store, node])
-  const useGrid = detection.grid !== null
-  const gridMembers = useMemo(
-    () =>
-      useGrid && detection.grid !== null
-        ? collectGroupMembers(store, node, detection.grid.nameId)
-        : [],
-    [useGrid, detection.grid, store, node]
-  )
+  // R210 (`docs/plans/R210-grid-grouping.md`): the first qualifying group in
+  // **document order**, where this used to take the *largest* one. R211
+  // renders all of them; until it does, taking the first is already the new
+  // model's ordering rather than the old largest-wins promotion, so adding
+  // members to a later group no longer steals the table from an earlier one.
+  //
+  // `detection` carries the members, so there is no second pass to collect
+  // them — see `gridDetection.ts`'s header for what that pass cost.
+  const gridTable = detection.tables[0] ?? null
+  const useGrid = gridTable !== null
+  const gridMembers = gridTable?.members ?? NO_MEMBERS
   const gridMemberSet = useMemo(() => new Set(gridMembers), [gridMembers])
 
   const paneRef = useRef<HTMLDivElement>(null)

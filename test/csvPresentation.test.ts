@@ -45,14 +45,18 @@ describe('CSV Tree/Detail presentation (§6)', () => {
     const store = parseCsv('a,b\n1,2\n3,4\n5,6\n')
     const arr = resolveWrapperTarget(store, 0).destination
     const detection = detectGrid(store, arr)
-    expect(detection.grid).not.toBeNull()
-    expect(detection.grid!.memberCount).toBe(3)
+    expect(detection.tables).toHaveLength(1)
+    expect(detection.tables[0]!.members).toHaveLength(3)
   })
 
   it('collectColumns names columns from the header, in header order', () => {
     const store = parseCsv('name,age,city\nAlice,30,NYC\nBob,25,LA\n')
     const arr = resolveWrapperTarget(store, 0).destination
-    const members = [...store.childrenOf(arr)]
+    // **Through the detection result, not `childrenOf` directly.** Taking
+    // the members straight from the store is what hid R210's defect: the
+    // application collects them through detection, which until R210 used a
+    // different eligibility test and returned none of them for a CSV.
+    const members = detectGrid(store, arr).tables[0]!.members
     const { columns } = collectColumns(store, members)
     expect(columns.map((c) => store.textOf(c.nameId))).toEqual(['name', 'age', 'city'])
   })

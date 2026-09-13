@@ -341,7 +341,8 @@ call stack. Each parser maintains an explicit operand stack with a configurable 
 limit that produces a diagnostic rather than a crash.
 
 **Streaming and grid detection interact.** Grid mode needs a node's *complete* child set
-to compute coverage and the column union; a node selected mid-parse would otherwise show
+to know which groups there are and to compute each one's column union (coverage went with
+R210); a node selected mid-parse would otherwise show
 a grid that mutates under the user. A node's subtree carries a `complete` flag, and the
 Detail view shows a pending state rather than a provisional grid until it is set.
 
@@ -418,10 +419,12 @@ children's first-level field names.
    (D-088): has children, **or** has scalar facets — not just §3.2's plain "has children,"
    since a CSV row (§2's array-of-records) is attributes-only by design and would
    otherwise never qualify
-2. A group qualifies for grid mode if it has ≥ 2 members and covers ≥ 5% of the
-   composite children (a floor, not a majority — both thresholds configurable)
-3. The largest qualifying group renders as a grid; any remaining children render in
-   list mode beneath it
+2. A group qualifies for grid mode if it has ≥ 2 members. **That is the whole rule**
+   — R210 removed the 5% coverage floor that used to sit beside it (see below)
+3. **Every qualifying group renders as its own grid, in document order**; any remaining
+   children render in list mode beneath them. R210 replaced "the largest qualifying group
+   renders as a grid" (see below). Rendering is capped at `GRID_TABLE_CAP` grids, with the
+   overflow listed — a budget on live virtualizers, not a statement about the document
 4. Columns = union of the group's first-level field names, ordered by first appearance,
    then by frequency
 5. Missing values render visually distinct from present-but-empty values
@@ -431,13 +434,31 @@ and child names into a shape signature, but that splits `<car>` elements into se
 groups whenever one carries an optional field — the opposite of what the feature is for.
 Optional fields should widen the column set, not fragment the table.
 
-**Coverage is a floor, not a majority.** An 80% threshold makes a second qualifying
-group arithmetically impossible, since two groups cannot both exceed 80%. The floor
-exists only to suppress noise from one-off children.
+**The coverage floor is gone, and so is the competition between groups** (R210,
+`docs/plans/R210-grid-grouping.md`; D-103). Both halves went together, because the floor
+only ever answered *"is this group dominant enough to be **the** table?"* — a question
+that stops existing once every group is its own table.
 
-*Post-v1:* multiple qualifying groups could each render as their own stacked grid
-(`<book>`×40 and `<magazine>`×3 side by side). Deferred — it complicates the layout for
-a case that is uncommon in practice, and list mode covers it adequately.
+The largest-wins rule made the view a function of the document's **data** rather than its
+**structure**: three `<a>` and two `<b>` gave an `<a>` table, and adding two more `<b>`
+switched the whole view to a `<b>` table with the `<a>` rows dropping into the list
+beneath. Ties broke on first appearance, which the implementation's own comment called
+arbitrary. Nothing on screen explained the choice.
+
+And the floor carried a **discontinuity** nobody had noticed until R210 measured it:
+spread children evenly across 21 groups and each covers 4.76%, so **no group qualified
+and no table rendered at all**. At 20 groups there was a table; at 21 there was none.
+
+What replaced both is one sentence — *every group of two or more same-named composite
+children is its own table, in document order* — which **degenerates to the old behaviour
+for the common case**: 1000 `<car>` plus one `<metadata>` is still one table, because
+`metadata` has a single member and stays in the list.
+
+*Previously deferred post-v1, now built:* multiple qualifying groups each rendering as
+their own stacked grid (`<book>`×40 and `<magazine>`×3). The deferral said the case was
+"uncommon in practice, and list mode covers it adequately"; R209 made it reachable more
+often (two namespace prefixes for one URI are two groups), and "list mode covers it" was
+never true of the case where the *second* group is the one you came to look at.
 
 **Refinements:**
 
@@ -1620,8 +1641,6 @@ multiple stacked grids, background-document eviction, plugin API for additional 
 - **Wrapper descent depth** — the limit is ~3, but Appendix A reaches it in a deliberately
   small example (root → `garage` → `cars` → `elements`). Is 3 too tight, or should descent
   be unbounded and simply stop at the first node with repeating children?
-- **Grid coverage floor** — 5% is a guess for suppressing one-off children. Needs real
-  documents.
 - **Legacy encodings** — detection and preservation are settled (§5.5), but which code
   pages are worth supporting at all, given that lossy re-encoding means refusing edits?
 - **Delta list threshold** — folding at ~64 pending deltas (§5.2) is a guess; the right

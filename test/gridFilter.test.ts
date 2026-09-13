@@ -4,14 +4,26 @@ import { NodeStore } from '../src/core/nodeStore'
 import { SourceBuffer } from '../src/core/buffer'
 import type { ParseOptions } from '../src/core/types'
 import { xmlFormatModule } from '../src/formats/xml/index'
-import {
-  collectColumns,
-  collectGroupMembers,
-  type GridColumn
-} from '../src/renderer/components/Detail/gridColumns'
+import { collectColumns, type GridColumn } from '../src/renderer/components/Detail/gridColumns'
 import { EMPTY_GRID_FILTERS, filterIndices } from '../src/renderer/components/Detail/gridFilter'
+import { detectGrid } from '../src/renderer/components/Detail/gridDetection'
 
 const xmlOptions: ParseOptions = { maxDepth: 1000, encoding: 'utf-8' }
+
+/** R210 replaced `collectGroupMembers`: detection collects each group's
+ * members in the same pass that finds the groups. Going through `detectGrid`
+ * is not just a rename — it is the path the application actually takes, and
+ * the old two-function split is what let a CSV detect a row group and then
+ * collect zero members for four rounds, because the two used different
+ * eligibility tests. */
+function membersOf(store: NodeStore, parent: number, nameId: number): number[] {
+  const group = detectGrid(store, parent).groups.find((g) => g.nameId === nameId)
+  if (group === undefined) throw new Error(`no group with nameId ${nameId}`)
+  // A mutable copy: several callers here declare their own members as
+  // `NodeRef[]` and a few sort it, which is a test convenience rather than
+  // anything the application does (it permutes an index list instead).
+  return [...group.members]
+}
 
 function parseXml(text: string): { store: NodeStore; source: SourceBuffer } {
   const bytes = new TextEncoder().encode(text)
@@ -38,7 +50,7 @@ function setup(text: string): {
   const { store, source } = parseXml(text)
   const garage = store.firstChildOf(ROOT)
   const carNameId = store.nameIdOf(store.firstChildOf(garage))
-  const members = collectGroupMembers(store, garage, carNameId)
+  const members = membersOf(store, garage, carNameId)
   const columns = collectColumns(store, members).columns
   return { store, source, members, columns }
 }
@@ -117,7 +129,7 @@ describe('filterIndices (M2-PLAN.md E7)', () => {
     )
     const garage = store.firstChildOf(ROOT)
     const carNameId = store.nameIdOf(store.firstChildOf(garage))
-    const members = collectGroupMembers(store, garage, carNameId)
+    const members = membersOf(store, garage, carNameId)
     const columns = collectColumns(store, members).columns
 
     // Rows 0 and 2 are red, row 1 is blue — the surviving subset skips the
