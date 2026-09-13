@@ -3,9 +3,13 @@
 <!-- status: built -->
 
 **Built, both ids.** Detection is one bucketing pass producing one table per qualifying group in
-document order, with `GRID_MIN_COVERAGE` removed; the Detail view stacks them, capped at five —
-a value the project lead chose from 2, 5, 10 and 20 rendered in the running application. D-103 and
-D-104 record the two decisions; `CONCEPT.md` §4.3 and §13 are updated.
+document order, with `GRID_MIN_COVERAGE` removed. The Detail view shows **one table at a time with
+a tab per group** — no cap, one grid mounted — and a node with a single group shows no tabs at all.
+D-103 and D-104 record the two decisions; `CONCEPT.md` §4.3 and §13 are updated.
+
+**§ 7's rendering was built twice.** The first version stacked the tables, capped at five; it was
+rendered, shipped to the branch, and rejected by the project lead because the cap was arbitrary on
+screen. § 11 records both, since the rejected one is the reason the second looks the way it does.
 
 **And it fixed a shipped format that had never worked.** Detection and member collection used
 *different* eligibility tests, so every CSV document rendered an empty table above a list of
@@ -209,66 +213,102 @@ sixth instance, and the first found by removing the pipeline rather than by meas
 Every grid test file now goes through `detectGrid` rather than a second collector, which is the
 point of deleting the second function rather than making its predicate match.
 
-### The cap (R211), chosen by rendering
+### Rendering, first attempt: a stack capped at five — rejected
 
-2, 5, 10 and 20 rendered against a document with 21 equal groups of 4 rows, in a 900×2100 window
-so each whole stack fits one frame. **Five**, the project lead's call — the plan called it a
-measurement placeholder and rendering did not argue against it. Groups past it list beneath, in
-document order, with a line saying how many.
+Every qualifying group rendered as its own table, stacked in document order. The cap was chosen by
+rendering 2, 5, 10 and 20 against a document with 21 equal groups; five was picked; groups past it
+listed beneath with *"Showing 5 of 8 tables — the rest are listed below."* Each stacked table was
+sized to its own rows, and the grid controller registry became plural, tracking the focused grid.
 
-Two layout decisions came out of rendering rather than the plan:
+**Rejected by the project lead after using it**: *"it still is arbitrary: Why do 5 tables show and
+then no more?"* That is correct, and the argument for five did not answer it. The cap was a sound
+rendering budget — live virtualizers, column collection — but a budget is invisible, and what the
+user sees is a number with nothing on screen to justify it. **It moved R210's arbitrariness from
+"which group wins" to "which groups fit"**, which is a smaller version of the same defect.
 
-- **Each stacked table is sized to its own rows**, bounded at 320px. `flex: 1` across five tables
-  divides the pane equally, which gives a two-row group the same height as a twenty-four-row one.
-  A **single** table is untouched and keeps R43/D-071's `flex: 1` and 230px floor, so the common
-  case is pixel-identical to before.
-- **A name heading appears only when there is more than one table.** With one, "Children" and the
-  table together are unambiguous; a repeated name would spend a row of chrome in the common case
-  for nothing (§9.4's budget, applied to vertical space).
+Recorded rather than squashed away, because it is the reason for the design below, and because a
+future proposal to "just show them all stacked" should find that it was tried.
 
-### What the plural broke, and how
+### Rendering, as built: one table, a tab per group
 
-**The grid controller was a single slot.** Several mounted grids meant every palette command went
-to whichever registered last — R210's arbitrary target, moved one layer up and made invisible.
-It now holds every mounted grid plus the most recently focused, and commands act on that one,
-falling back to the first.
+Four options were costed before choosing (a picker in Detail; group rows in the Tree; an uncapped
+collapsible stack; a groups summary to drill into). **Group rows in the Tree were rejected on
+cost**: they reorder the document where a name repeats non-contiguously, widen selection from a
+node to "a node or a group" across every consumer, and bring R210's problem back through their own
+trigger — group rows only when there are several groups means adding one `<metadata>` reshapes
+the Tree. The picker in Detail was the one that removes the cap instead of tuning it.
 
-Two details are load-bearing and neither is obvious:
+**Three renderings of the picker** in the running application, on the 8-group demo and the
+21-group document: tabs that wrap, tabs that overflow into a menu, and a dropdown. **Tabs with a
+"+N more" menu**, the project lead's choice. Wrapping pushes the table down a line per row of tabs
+on a wide node — the 21-group file already took two at 1180px. The dropdown hides the one fact the
+control exists to communicate, that this node has several tables. On the 8-group file the two tab
+versions are indistinguishable; they differ only where the tabs do not fit.
 
-1. **The grid's identity is a ref, not the controller object.** `Grid` re-registers its controller
-   whenever its sort, filter or column set changes, so keying "which grid has the keyboard" on the
-   controller would lose the target on a single filter keystroke.
-2. **Focus is sticky — never cleared on blur.** Running a palette command moves focus into the
-   palette; a registry that cleared on blur would have no target by the time the command ran.
+What it does:
 
-Verified in the built application: Ctrl+2 with nothing focused lands on the first table; after
-using the fourth and leaving to the Tree, Ctrl+2 comes back to the fourth, and `Filter Grid Rows`
-follows it. **The clipboard commands could not be verified end to end** — `navigator.clipboard`
-silently fails under Playwright automation, with one table or five, so this is a harness limit
-rather than a finding; the routing they share with the filter command is asserted directly in
-`test/gridController.test.ts`.
+- **No cap, one grid.** Every group is named on screen or one menu away, and exactly one grid is
+  mounted whatever the group count — cheaper than the stack at any count.
+- **One group, no tabs.** The common case is the view from before R210.
+- **The current group is never invisible**: when it lives in the menu, the more button names it
+  and carries the selected underline.
+- **Remembered by name per document.** Stepping between sibling nodes of the same shape keeps
+  `magazine` open; a node without that group shows its first and does not forget the choice.
+- **Keyboard**: one Tab stop for the strip (roving tabindex), arrows move focus without switching —
+  switching remounts the grid, which on a two-million-row group is not free, so activation is
+  Enter/Space/click. The menu closes on Escape and on a press outside it.
+- **Palette**: `Show Next Grid Group` / `Show Previous Grid Group`, wrapping (invariant 10).
+- **A fresh grid per group.** Sort, filters and pinned columns are keyed by one group's column
+  name ids and do not carry to another group's table. **Switching back also resets them** — a
+  known limitation, not an oversight; keeping every group's grid mounted to preserve it would
+  reintroduce the cost the tabs removed.
 
-Each grid also carries its group's name as its accessible name. Five tables announcing
-"Data grid" is the same ambiguity in a screen reader.
+The plural controller registry from the first attempt is reverted to `main`'s single slot, since
+one grid mounts. Each grid keeps its group's name as its accessible name.
 
-### The review found two things
+### How the tab strip is fitted
 
-- **The stacked-height chrome constants were wrong, and the comment claimed they were measured.**
-  Written as `41 + 24`; the real values are 44 and 23, so every stacked table clipped 2px off its
-  last row. Measured now, with a test asserting a table whose rows fit does not scroll —
-  mutation-verified against the old constants.
-- **`Grid.tsx`'s export soft-cap comment still said "there's exactly one `Grid` instance at a
-  time"**, which R211 makes false. It now says why the mechanism still holds: `pendingExport` is
-  per grid, the resolving commands route to the focused grid, and the click that started the
-  export was on that grid's own toolbar.
+An invisible copy of every tab is laid out at natural width and measured; the real row shows as
+many as fit. Three details, each of which was a defect before it was a detail:
+
+1. **Measured bold.** The selected tab renders bold, so a normal-weight measurement lets it clip.
+2. **The more button's width depends on the answer.** It names the selected group when that group
+   is hidden and reads "+N more" otherwise, so `tabsThatFit` takes its width as a function of the
+   candidate count — and **scans every count rather than stopping at the first that fails**,
+   because the button narrows once the selected group becomes visible. Pure and DOM-free, with its
+   own test.
+3. **Clipped, not merely hidden.** At natural width the copy can be thousands of pixels wide, and an
+   absolutely positioned box that wide still extends its scroll container: **the Detail pane's
+   scroll width measured 4,516px in a 900px pane** before the copy was put inside a clipping box.
+   Invisible in a screenshot, since the pane draws no horizontal scrollbar — a trackpad swipe would
+   have slid it sideways into nothing. Asserted now.
+
+### What the review and the project's own guards found
+
+- **The palette's step command read a stale selection.** It used the index captured at render, so
+  two commands before a re-render — a held key repeating — moved once instead of twice. It reads
+  the current selection at call time, and the test that caught it is kept.
+- **The 4,516px scroll width** above.
+- **`▾` failed R71's text-as-icons guard** (`test/textAsIcons.test.ts`); it is the tab strip's own
+  `chevron-down` icon, the one the document tab strip's overflow button already uses.
+- **The menu is a new `--elev-2-bg` surface**, and the completeness check R212 added to
+  `test/elevationBorders.test.ts` failed until `Detail.css` was listed — the first new surface it has
+  caught, one round after it was written.
+- **After a pick from the menu, focus fell to `<body>`**, because the clicked item unmounts. Focus
+  returns to the more button, which survives the re-render and now names the chosen group.
+- **The tab panel had no accessible name.**
+- **From the first attempt**, before it was replaced: its stacked-height chrome constants were
+  written as `41 + 24` under a comment claiming they were measured, and clipped 2px off every
+  stacked table. Recorded because the comment lied, not because the code survives.
 
 ### Acceptance
 
 1. **Met** — asserted as the property, in detection (`test/gridDetection.test.ts`) and at the
-   render level (`test/detailMultiGrid.test.tsx`): growing a second group across 2, 3, 4, 10 and
-   100 members never changes which groups render.
+   render level (`test/detailGridGroupTabs.test.tsx`): growing a second group never changes the
+   tabs or the selected one.
 2. **Met** — 21 evenly-sized groups produce 21 tables, and the 20-vs-21 pair is kept as its own
-   regression test.
+   regression test. At the render level all 21 are reachable: the visible tabs plus the menu's
+   items come to 21.
 3. **Met** — 1000 `<car>` plus one `<metadata>` is one table of 1000 with the singleton listed.
 4. **Met** — `spike/r210-grid-models.ts` re-run against the shipped code. It needed updating
    twice over: it called `Interner`'s removed second constructor argument (R209) and read
@@ -276,8 +316,10 @@ Each grid also carries its group's name as its accessible name. Five tables anno
    `legacyDetect`, now the only thing that can reproduce § 2's cliff.
 5. **Met** — `GRID_MIN_COVERAGE` is gone; `CONCEPT.md` §4.3 and §13 updated, D-014 annotated,
    D-103 added.
-6. **Met** — see the cap section above.
-7. **Met** — `npm test` 2162 passing, 5 skipped, 175 files; typecheck, lint and stylelint clean.
+6. **Superseded, and met in the form that replaced it.** The criterion was "the table cap is chosen
+   by rendering"; the cap was chosen by rendering and then removed. The picker that replaced it was
+   chosen the same way, from three renderings in the running application.
+7. **Met** — `npm test` 2166 passing, 5 skipped; typecheck, lint and stylelint clean.
 
 ### Measured again, against the shipped implementation
 
@@ -291,8 +333,10 @@ Each grid also carries its group's name as its accessible name. Five tables anno
 | 21 | **NO TABLE AT ALL** | 132.9 ms | 8.5 ms | 49.1 ms | 10.7 ms |
 | 100 | **NO TABLE AT ALL** | 649.0 ms | 13.4 ms | 71.1 ms | 2.1 ms |
 
-§ 4's three findings hold: the naive per-group collection is the one that does not scale, the
-bucketing pass is flat in group count, and the cap is what bounds column collection.
+§ 4's three findings hold: the naive per-group collection is the one that does not scale, and the
+bucketing pass is flat in group count. The third — that a table cap bounds column collection — is
+now moot rather than wrong: with one table shown, columns are collected for **one** group, which is
+cheaper than the "capped at 5" column at every row of the table.
 
 ### Version
 

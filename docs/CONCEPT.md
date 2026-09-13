@@ -421,10 +421,10 @@ children's first-level field names.
    otherwise never qualify
 2. A group qualifies for grid mode if it has ≥ 2 members. **That is the whole rule**
    — R210 removed the 5% coverage floor that used to sit beside it (see below)
-3. **Every qualifying group renders as its own grid, in document order**; any remaining
-   children render in list mode beneath them. R210 replaced "the largest qualifying group
-   renders as a grid" (see below). Rendering is capped at `GRID_TABLE_CAP` grids, with the
-   overflow listed — a budget on live virtualizers, not a statement about the document
+3. **Every qualifying group is its own grid, in document order, shown one at a time**:
+   a tab per group above the grid when there are several, no tabs when there is one. Any
+   remaining children render in list mode beneath. R210 replaced "the largest qualifying
+   group renders as a grid" (see below); R211 chose tabs over a stack of grids (D-104)
 4. Columns = union of the group's first-level field names, ordered by first appearance,
    then by frequency
 5. Missing values render visually distinct from present-but-empty values
@@ -454,11 +454,18 @@ children is its own table, in document order* — which **degenerates to the old
 for the common case**: 1000 `<car>` plus one `<metadata>` is still one table, because
 `metadata` has a single member and stays in the list.
 
-*Previously deferred post-v1, now built:* multiple qualifying groups each rendering as
-their own stacked grid (`<book>`×40 and `<magazine>`×3). The deferral said the case was
-"uncommon in practice, and list mode covers it adequately"; R209 made it reachable more
-often (two namespace prefixes for one URI are two groups), and "list mode covers it" was
-never true of the case where the *second* group is the one you came to look at.
+*Previously deferred post-v1, now built — as tabs rather than a stack:* multiple qualifying
+groups each reachable as their own grid (`<book>`×40 and `<magazine>`×3). The deferral said
+the case was "uncommon in practice, and list mode covers it adequately"; R209 made it
+reachable more often (two namespace prefixes for one URI are two groups), and "list mode
+covers it" was never true of the case where the *second* group is the one you came to look
+at.
+
+**Why tabs and not a stack** (R211, D-104). A stack of grids was built first and needs a cap —
+every grid is a live virtualizer — and a cap is an arbitrary number on screen: nothing says why
+the sixth group is a list. One grid with a tab per group needs no cap, mounts one virtualizer
+whatever the count, and leaves the single-group case with no extra chrome at all. What it gives
+up is seeing two groups side by side.
 
 **Refinements:**
 

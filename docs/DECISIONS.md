@@ -123,7 +123,7 @@ Search for the id to jump to one.
 | **D-101** | XML namespace resolution is removed; a prefixed name is the name as written |  |
 | **D-102** | Dark keeps a shadow, tuned to the ceiling a black shadow has on a near-black pane |  |
 | **D-103** | Every repeating group is its own table; the coverage floor is deleted, not retuned |  |
-| **D-104** | Five tables at once, each sized to its own rows |  |
+| **D-104** | One table at a time, a tab per group — not a capped stack |  |
 
 ---
 
@@ -400,7 +400,8 @@ cannot both exceed 80%. Now ≥2 members and ≥5%, with the largest group rende
 and the remainder as a list. Multiple stacked grids deferred past v1.
 
 **Superseded by D-103 (R210).** The coverage floor is gone rather than retuned, the largest
-group no longer wins anything, and the stacked grids this entry deferred are built. The
+group no longer wins anything, and the multiple grids this entry deferred are built — as tabs,
+not the stack it imagined (D-104). The
 reasoning above is still correct about the 80% threshold it was written against — it is the
 question that stopped existing, not the answer.
 
@@ -3746,31 +3747,46 @@ functions used *different* eligibility tests: detection counted with `isGridElig
 CSV shipped detected a row group and collected zero members** — an empty table above a list of
 anonymous `Object` rows. One pass means one eligibility test, so the class cannot recur.
 
-### D-104 — Five tables at once, each sized to its own rows (R211) · `settled`
+### D-104 — One table at a time, a tab per group — not a capped stack (R211) · `settled`
 
-**`GRID_TABLE_CAP = 5`**, chosen by the project lead from 2, 5, 10 and 20 rendered in the running
-application against a document with 21 equal groups, in a window tall enough to show each whole
-stack in one frame. The plan called five a measurement placeholder rather than a recommendation;
-rendering did not argue against it.
+**A node whose children form several groups shows one grid, with a tab per group above it.** A
+node with one group shows no tabs and looks exactly as it did before R210. Chosen by the project
+lead.
 
-**The cap is a budget, not a judgement about the document.** Each table is a live virtualizer
-against a parent D9 says may have two million children, and column collection is bounded by it —
-~46 ms for every group at 100 groups against 2.1 ms capped at five. Groups past it are **listed**,
-in document order, with a line saying how many, so nothing disappears and which tables render
-stays a function of document order rather than of size.
+**A stack was built first and rejected, and why is the decision.** Every qualifying group rendered
+as its own table, capped at five — a cap chosen by rendering 2, 5, 10 and 20, and a sound budget
+(each table is a live virtualizer; column collection for 100 groups was ~46 ms against 2.1 ms at
+five). The project lead's verdict after using it: *"it still is arbitrary: Why do 5 tables show
+and then no more?"* A budget is invisible; the number is not. **The cap moved D-103's
+arbitrariness from "which group wins" to "which groups fit"**, which is the same defect, smaller.
+Any design that shows N grids at once needs either no cap or a different shape.
 
-**Each stacked table is sized to its own rows**, bounded at 320px, rather than sharing the pane
-through `flex: 1` — five tables dividing the pane equally would give a two-row group the same
-height as a twenty-four-row one. **A single table is untouched**: R43/D-071's `flex: 1` and its
-230px floor still apply, so the common case is pixel-identical to before this round.
+**Options costed before choosing:**
 
-**A name heading appears only when there is more than one table.** With one, the section heading
-and the table together are unambiguous, and a repeated name costs a row of chrome in the common
-case for nothing — §9.4's elevation budget applied to vertical space.
+- **Group rows in the Tree** — rejected on cost. They reorder the document where a name repeats
+  non-contiguously, widen selection from a node to "a node or a group" across selection, the
+  breadcrumb, Copy path and Locate in Tree/Source, and reintroduce D-103's problem through their own
+  trigger: group rows only when there are several groups means adding one `<metadata>` reshapes the
+  Tree. Grouping very wide nodes in the Tree may still be worth having someday, as its own feature.
+- **An uncapped, collapsible stack with grids mounted on demand** — the only option that keeps
+  side-by-side comparison, rejected because it keeps the layout that was disliked and adds the
+  most machinery.
+- **A groups summary in Detail, drilled into** — rejected because the view flips from a table to a
+  summary the moment a second group appears.
+- **One grid and a picker** — chosen. It removes the cap instead of tuning it.
 
-**Commands act on the focused table.** The controller registry held a single slot, which with
-several grids would have handed every palette command to whichever registered last — D-103's
-arbitrary target, moved into the command layer where it is invisible. Two details are
-load-bearing: the grid's identity is a ref rather than the controller object, because `Grid`
-re-registers its controller on every sort, filter and column change; and focus is never cleared on
-blur, because running a palette command moves focus into the palette.
+**Tabs with a "+N more" menu, from three renderings** in the running application: tabs that wrap,
+tabs that overflow into a menu, and a dropdown. Wrapping pushes the table down a line per row of
+tabs on a wide node. The dropdown hides the fact the control exists to show — that this node has
+several tables. When the selected group is in the menu, the more button names it, so the current
+group is never invisible.
+
+**The selected group is remembered by name per document**, so stepping between sibling nodes of the
+same shape keeps the same group open. **Switching groups gives a fresh grid**: sort, filters and
+pinned columns are keyed by one group's column name ids, so they cannot carry across, and they reset
+when switching back — accepted, because keeping every group's grid mounted to preserve them would
+reintroduce the cost the tabs removed.
+
+**Arrows move focus along the tabs; Enter, Space or a click switches.** Switching remounts the
+grid, which on a two-million-row group is not free, so automatic activation on every arrow press
+was the wrong WAI-ARIA variant. The palette has `Show Next/Previous Grid Group` (invariant 10).

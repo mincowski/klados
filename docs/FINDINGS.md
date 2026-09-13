@@ -345,6 +345,17 @@ deciding membership of the same set. Also the sixth instance of *"a component me
 while the pipeline around it was not"*, and the first found by removing the pipeline rather than
 by measuring it.
 
+**`visibility: hidden` and `position: absolute` do not stop a box from widening its scroll
+container.** R211's group tabs measure an invisible copy of the whole tab row laid out at natural
+width; with 21 long group names that copy was thousands of pixels wide, and the Detail pane's
+`scrollWidth` measured **4,516px in a 900px pane**. Nothing showed it: the pane draws no horizontal
+scrollbar, so a screenshot is clean, and only a trackpad swipe or shift-wheel would have slid the
+pane sideways. An absolutely positioned descendant still contributes to its scroll container's
+scrollable overflow — the fix is a clipping ancestor (`position: absolute; inset: 0; overflow:
+hidden`) around the measuring copy, which does not affect the widths being measured. **Any
+off-screen or invisible measuring element needs the same clip**, and the check that catches it is
+`scrollWidth <= clientWidth` on the scroll container, not a look at the render.
+
 **A fixture of look-alike characters cannot be authored by typing them.** U+212B ANGSTROM SIGN and
 U+2126 OHM SIGN are *canonical singletons*: any NFC-normalising step between writing and disk
 replaces them with U+00C5 and U+03A9, silently. `test/fixtures/confusables.xml` was written that way

@@ -46,25 +46,26 @@ bucketing pass. `spike/r210-grid-models.ts` was re-run against the shipped code 
 and had to be repaired first, because it called `Interner`'s removed second constructor argument
 and read `detection.grid`. It had been unrunnable since R209 landed, which nothing noticed.
 
-**Five tables at once**, chosen by the project lead from 2, 5, 10 and 20 rendered in the running
-application; the rest list beneath with a line saying how many. Each stacked table is sized to its
-own rows rather than sharing the pane, so a two-row group is not as tall as a twenty-four-row one,
-and a **single** table is pixel-identical to before — it keeps R43's `flex: 1`, and gains no name
-heading it does not need.
+**The rendering was built twice.** First as a stack — every group its own table, capped at five,
+the cap chosen from 2, 5, 10 and 20 rendered in the app. The project lead used it and rejected it:
+*"it still is arbitrary: Why do 5 tables show and then no more?"* Correct — the cap was a sound
+budget, but a budget is invisible and the number is not, so it had moved "which group wins" to
+"which groups fit". Four alternatives were costed (a picker in Detail, group rows in the Tree, an
+uncapped collapsible stack, a groups summary) and three pickers rendered.
 
-**The plural broke the command layer, quietly.** The grid controller was a single slot, so with
-five grids mounted every palette command would have gone to whichever registered last — the same
-arbitrary target, moved somewhere it could not be seen. It now tracks the focused grid, with two
-details that are load-bearing: the grid's identity is a ref rather than the controller object
-(`Grid` re-registers on every filter keystroke), and focus is never cleared on blur (running a
-palette command puts focus in the palette). Verified in the built app: Ctrl+2 returns to the table
-you were last in, and `Filter Grid Rows` follows it.
+**As built: one grid, a tab per group, overflow into a "+N more" menu.** No cap, one virtualizer
+whatever the group count, and no tabs at all when a node has one group. The selected group is
+remembered by name, so stepping between similar siblings keeps it open. The stack's plural grid
+controller went back to a single slot.
 
-**The review found the round's own comment lying.** The stacked-table height used chrome constants
-written as `41 + 24` under a comment saying they were measured in the running application. They
-were estimates; the real values are 44 and 23, and every stacked table was clipping 2px off its
-last row. A test now asserts a table whose rows fit does not scroll, mutation-verified against the
-old constants.
+**The tab strip found three bugs of its own before it shipped.** Its invisible measuring copy of
+the row, absolutely positioned and thousands of pixels wide, gave the Detail pane a scroll width of
+**4,516px in a 900px pane** — invisible in a screenshot, because the pane draws no horizontal
+scrollbar. The palette's step command read the selection captured at render, so two commands
+before a re-render moved once. And after choosing from the menu, focus fell to `<body>` because
+the clicked item unmounted. Two more were caught by the project's own guards: `▾` failed R71's
+text-as-icons test, and the menu — a new elevated surface — failed the completeness check R212 had
+added to `elevationBorders.test.ts` one round earlier.
 
 Version **1.1.0** — the first minor since publication, and the first round in five to change what
 an existing document looks like on purpose.
