@@ -288,27 +288,23 @@ describe('notification severity is a left edge, not a fill (R57)', () => {
   })
 
   for (const theme of ['light', 'dark'] as const) {
-    // Scoped to the two severities that actually carry a diagnostic colour
-    // — `R57-notification-emphasis.md` §4's own worked table only ever
-    // computed warning's contrast (4.10:1 light, 5.54:1 dark), and measuring
-    // 'info' here found why: its edge is plain `--surface-border`, which is
-    // *not* a severity colour and does not clear 3:1 against `--elev-2-bg`
-    // in either theme (1.31:1 light; **exactly 1:1 in dark**, where
-    // `--surface-border` and `--elev-2-bg` are the literal same token,
-    // `--gray-700` — the edge is genuinely invisible there). Not a
-    // regression R57 introduced (`info` never had a severity colour to draw
-    // a border from, and relied on the shadow alone before this round too)
-    // and not fixed here — recorded in this file's own describe block below
-    // and in `R57-notification-emphasis.md`'s Results, since silently
-    // narrowing the assertion without saying why would hide a real,
-    // previously-undiscovered gap instead of disclosing it.
-    it(`severity-edge-vs-surface contrast is >= 3:1 for warning and error in ${theme}`, async () => {
+    // **R206 widened this from two severities to three.** It was scoped to
+    // warning and error because 'info' could not pass: its edge was plain
+    // `--surface-border`, which is not a severity colour and cleared 3:1
+    // against `--elev-2-bg` in neither theme — 1.31:1 light, and 1:1 in dark
+    // until R60 moved `--elev-2-bg` off `--gray-700`. That was disclosed
+    // rather than narrowed silently, and the disclosure is what R206 acted
+    // on: 'info's edge is now `--notification-edge`, the same neutral edge
+    // at a step that clears 3:1 in both themes. The level with no severity
+    // colour still has no severity colour — it has a *visible* neutral one.
+    it(`severity-edge-vs-surface contrast is >= 3:1 for every severity in ${theme}`, async () => {
       document.documentElement.dataset.theme = theme
+      notify({ severity: 'info', message: 'i', documentId: null, dedupeKey: 'i' })
       notify({ severity: 'warning', message: 'w', documentId: null, dedupeKey: 'w' })
       notify({ severity: 'error', message: 'e', documentId: null, dedupeKey: 'e' })
       await paint(<Notifications />)
 
-      for (const severity of ['warning', 'error']) {
+      for (const severity of ['info', 'warning', 'error']) {
         const el = container.querySelector(`.notification-${severity}`)!
         const style = getComputedStyle(el)
         const ratio = contrastRatio(style.borderLeftColor, style.backgroundColor)
@@ -316,31 +312,46 @@ describe('notification severity is a left edge, not a fill (R57)', () => {
       }
     })
 
-    // R60 (`R60-dark-elevation.md` §5, acceptance 1): light theme is
-    // untouched by R60 (`--surface-border` and `--elev-2-bg` were never the
-    // same token there) and stays at its known 1.31:1. Dark is the one that
-    // changes: before R60 this pinned dark's ratio at exactly 1:1 —
-    // `--surface-border` and `--elev-2-bg` were the literal same token, so
-    // 'info's plain hairline was genuinely invisible. R60 moves
-    // `--elev-2-bg` to `--gray-850` in dark (leaving `--surface-border`
-    // untouched), which is why the border now reads even with no severity
-    // colour behind it. Still sub-3:1 in both (neither has a severity
-    // colour to draw a strong border from).
-    it(`'info' has no severity colour, so its plain hairline is sub-3:1 in ${theme}`, async () => {
+    // **R206 re-pointed this test rather than deleting it.** It used to pin
+    // 'info's *left edge* as sub-3:1; R206 fixed that edge, and what is left
+    // sub-3:1 is the 1px hairline on the other three sides, which is the
+    // surviving true statement and the one still worth pinning.
+    //
+    // It is accepted rather than owed, and the reason is a cost the fix does
+    // not justify: `--surface-border` is the application's frame colour with
+    // 42 consumers, so raising it is a visibly heavier application and not a
+    // notification change at all; and giving this one surface its own
+    // hairline would split it off the elevated tier R60 deliberately
+    // unified (`R60-dark-elevation.md` §4 — the hairline belongs to the
+    // tier, and `test/elevationBorders.test.ts` asserts all of them share
+    // it). The light number is the one that matters: `--surface-bg` and
+    // `--elev-2-bg` are both `--gray-0` there, so this hairline is the only
+    // boundary the card has, and `--elev-2-shadow` is what carries the rest.
+    //
+    // Pinned to the measured value, not to "< 3", so that a token change
+    // which *does* move it is a change this test notices.
+    it(`the 1px hairline stays below 3:1 against the card in ${theme}`, async () => {
       document.documentElement.dataset.theme = theme
       notify({ severity: 'info', message: 'i', documentId: null, dedupeKey: 'i' })
       await paint(<Notifications />)
 
       const el = container.querySelector('.notification-info')!
       const style = getComputedStyle(el)
-      const ratio = contrastRatio(style.borderLeftColor, style.backgroundColor)
+      const ratio = contrastRatio(style.borderTopColor, style.backgroundColor)
       expect(ratio).toBeLessThan(3)
-      if (theme === 'dark') {
-        // No longer the same token — genuinely visible now.
-        expect(ratio).toBeGreaterThanOrEqual(1.5)
-      } else {
-        expect(ratio).toBeCloseTo(1.31, 1)
-      }
+      expect(ratio).toBeCloseTo(theme === 'light' ? 1.31 : 1.67, 1)
+    })
+
+    // The edge and the hairline are now different colours, which is the
+    // whole of R206's change and the thing a careless `border:` shorthand
+    // would silently undo.
+    it(`the left edge and the hairline are different colours in ${theme}`, async () => {
+      document.documentElement.dataset.theme = theme
+      notify({ severity: 'info', message: 'i', documentId: null, dedupeKey: 'i' })
+      await paint(<Notifications />)
+
+      const style = getComputedStyle(container.querySelector('.notification-info')!)
+      expect(style.borderLeftColor).not.toBe(style.borderTopColor)
     })
 
     // §2's own trap, checked directly rather than assumed fixed: in light
