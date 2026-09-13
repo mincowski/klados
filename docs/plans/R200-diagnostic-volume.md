@@ -238,7 +238,8 @@ implements — a documentation fix, not a parser change.
 
 ## 10. Version
 
-**Ask on landing.** Candidate: patch — a defect fix with no new capability.
+Asked on landing, per `CLAUDE.md`. Candidate was patch. **The project lead chose no bump**:
+`package.json` stays at 1.0.0 and the next round carries it.
 
 ## 11. Results
 
@@ -305,7 +306,9 @@ themes.
 marker may fade — a miss costs a user nothing. A warning may not.
 
 **Shipped solid**, which is also what shipped before this round, so nothing about the strip's
-appearance changes except how many elements draw it.
+appearance changes except how many elements draw it. **Confirmed by the project lead** against the
+rendered comparison, which is what § 7 asked for — so this is settled rather than owed, and a later
+round proposing density has the picture to argue against.
 
 ### 11e. Review
 

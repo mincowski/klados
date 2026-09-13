@@ -105,8 +105,8 @@ how the scrubber marks them. The problem is the volume, not the existence.
 
 ## 7. Version
 
-**Ask on landing.** Candidate: no bump — diagnostic wording and volume, no behaviour change to
-parsing or saving.
+Asked on landing, per `CLAUDE.md`. Candidate was no bump, and **the project lead chose no bump**
+for the round as a whole.
 
 ## 8. Results
 
