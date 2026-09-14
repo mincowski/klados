@@ -6,15 +6,30 @@ import { xmlFormatModule } from '../src/formats/xml/index'
 import { jsonFormatModule } from '../src/formats/json/index'
 import {
   collectColumns,
-  collectGroupMembers,
   FieldKind,
   GRID_COLUMN_CAP,
   isRepeatingColumn,
   widestKind
 } from '../src/renderer/components/Detail/gridColumns'
+import { detectGrid } from '../src/renderer/components/Detail/gridDetection'
 
 const xmlOptions: ParseOptions = { maxDepth: 1000, encoding: 'utf-8' }
 const jsonOptions: ParseOptions = { maxDepth: 1000, encoding: 'utf-8' }
+
+/** R210 replaced `collectGroupMembers`: detection collects each group's
+ * members in the same pass that finds the groups. Going through `detectGrid`
+ * is not just a rename — it is the path the application actually takes, and
+ * the old two-function split is what let a CSV detect a row group and then
+ * collect zero members for four rounds, because the two used different
+ * eligibility tests. */
+function membersOf(store: NodeStore, parent: number, nameId: number): number[] {
+  const group = detectGrid(store, parent).groups.find((g) => g.nameId === nameId)
+  if (group === undefined) throw new Error(`no group with nameId ${nameId}`)
+  // A mutable copy: several callers here declare their own members as
+  // `NodeRef[]` and a few sort it, which is a test convenience rather than
+  // anything the application does (it permutes an index list instead).
+  return [...group.members]
+}
 
 function parseXml(text: string): { store: NodeStore } {
   const source = new TextEncoder().encode(text)
@@ -60,7 +75,7 @@ describe('collectGroupMembers (M2-PLAN.md E3)', () => {
     const elements = store.firstChildOf(ROOT)
     const carNameId = store.nameIdOf(store.firstChildOf(elements))
 
-    const members = collectGroupMembers(store, elements, carNameId)
+    const members = membersOf(store, elements, carNameId)
 
     expect(members).toHaveLength(3)
     expect(members.every((m) => store.nameOf(m) === 'car')).toBe(true)
@@ -72,7 +87,7 @@ describe('collectColumns (M2-PLAN.md E3)', () => {
     const { store } = parseXml(APPENDIX_A_CARS)
     const elements = store.firstChildOf(ROOT)
     const carNameId = store.nameIdOf(store.firstChildOf(elements))
-    const members = collectGroupMembers(store, elements, carNameId)
+    const members = membersOf(store, elements, carNameId)
 
     const { columns } = collectColumns(store, members)
 
@@ -91,7 +106,7 @@ describe('collectColumns (M2-PLAN.md E3)', () => {
     const { store } = parseXml(APPENDIX_A_CARS)
     const elements = store.firstChildOf(ROOT)
     const carNameId = store.nameIdOf(store.firstChildOf(elements))
-    const members = collectGroupMembers(store, elements, carNameId)
+    const members = membersOf(store, elements, carNameId)
 
     const { columns } = collectColumns(store, members)
     const color = columns.find((c) => store.textOf(c.nameId) === 'color')!
@@ -107,7 +122,7 @@ describe('collectColumns (M2-PLAN.md E3)', () => {
     const { store } = parseXml(APPENDIX_A_CARS)
     const elements = store.firstChildOf(ROOT)
     const carNameId = store.nameIdOf(store.firstChildOf(elements))
-    const members = collectGroupMembers(store, elements, carNameId)
+    const members = membersOf(store, elements, carNameId)
 
     const first = collectColumns(store, members).columns.map((c) => c.nameId)
     const second = collectColumns(store, members).columns.map((c) => c.nameId)
@@ -135,7 +150,7 @@ describe('collectColumns (M2-PLAN.md E3)', () => {
     const { store } = parseXml(APPENDIX_A_CARS)
     const elements = store.firstChildOf(ROOT)
     const carNameId = store.nameIdOf(store.firstChildOf(elements))
-    const members = collectGroupMembers(store, elements, carNameId)
+    const members = membersOf(store, elements, carNameId)
 
     const { columns } = collectColumns(store, members)
     const owner = columns.find((c) => store.textOf(c.nameId) === 'owner')!
@@ -151,7 +166,7 @@ describe('collectColumns (M2-PLAN.md E3)', () => {
     const { store } = parseXml(APPENDIX_A_CARS)
     const elements = store.firstChildOf(ROOT)
     const carNameId = store.nameIdOf(store.firstChildOf(elements))
-    const members = collectGroupMembers(store, elements, carNameId)
+    const members = membersOf(store, elements, carNameId)
     const { columns } = collectColumns(store, members)
 
     const engine = columns.find((c) => store.textOf(c.nameId) === 'engine')!
@@ -166,7 +181,7 @@ describe('collectColumns (M2-PLAN.md E3)', () => {
     const { store } = parseXml(APPENDIX_A_CARS)
     const elements = store.firstChildOf(ROOT)
     const carNameId = store.nameIdOf(store.firstChildOf(elements))
-    const members = collectGroupMembers(store, elements, carNameId)
+    const members = membersOf(store, elements, carNameId)
     const { columns } = collectColumns(store, members)
 
     expect(isRepeatingColumn(columns.find((c) => store.textOf(c.nameId) === 'owner')!)).toBe(true)
@@ -187,7 +202,7 @@ describe('collectColumns (M2-PLAN.md E3)', () => {
     const { store: xmlStore } = parseXml(APPENDIX_A_CARS)
     const xmlElements = xmlStore.firstChildOf(ROOT)
     const xmlCarId = xmlStore.nameIdOf(xmlStore.firstChildOf(xmlElements))
-    const xmlMembers = collectGroupMembers(xmlStore, xmlElements, xmlCarId)
+    const xmlMembers = membersOf(xmlStore, xmlElements, xmlCarId)
     const xmlColumns = collectColumns(xmlStore, xmlMembers).columns.map((c) =>
       xmlStore.textOf(c.nameId)
     )
@@ -202,7 +217,7 @@ describe('collectColumns (M2-PLAN.md E3)', () => {
     const topObject = jsonStore.firstChildOf(ROOT)
     const itemsProperty = jsonStore.firstChildOf(topObject)
     const itemsArray = jsonStore.firstChildOf(itemsProperty)
-    const jsonMembers = collectGroupMembers(jsonStore, itemsArray, -1) // array elements are unnamed
+    const jsonMembers = membersOf(jsonStore, itemsArray, -1) // array elements are unnamed
     const jsonColumns = collectColumns(jsonStore, jsonMembers).columns.map((c) =>
       jsonStore.textOf(c.nameId)
     )

@@ -4,7 +4,7 @@
  * children section — list mode only, per M1's own scope (grid mode is M2).
  */
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type JSX } from 'react'
 import type { NodeStore } from '../../../core/nodeStore'
 import type { SourceBuffer } from '../../../core/buffer'
 import type { NodeRef } from '../../../core/types'
@@ -34,9 +34,9 @@ import {
   type PathSegment
 } from './detailModel'
 import { detectGrid } from './gridDetection'
-import { collectGroupMembers } from './gridColumns'
-import { focusGrid } from './gridController'
+import { focusGrid, registerGridGroupPicker } from './gridController'
 import { Grid } from './Grid'
+import { GridGroupPicker, groupLabelOf, rememberGroup, selectedGroupIndex } from './GridGroupPicker'
 import { resolveWrapperTarget, skippedComments } from '../../wrapperDescent'
 import { useRovingTabIndex } from '../../rovingTabIndex'
 import './Detail.css'
@@ -103,18 +103,60 @@ export function DetailContent({ document, selectedNode }: DetailContentProps): J
       : []
 
   // UI-FEEDBACK.md M5b / D-049: the manual grid/list override (M2 E9)
-  // is gone — `detection.grid` is now the only source of grid mode, so
-  // there's nothing left to reconcile against an override.
+  // is gone — detection is the only source of grid mode, so there's nothing
+  // left to reconcile against an override.
   const detection = useMemo(() => detectGrid(store, node), [store, node])
-  const useGrid = detection.grid !== null
-  const gridMembers = useMemo(
+  // R210–R211 (`docs/plans/R210-grid-grouping.md`, D-103/D-104): every group
+  // of two or more is a table, in document order, and **one is shown at a
+  // time** — a tab per group when there are several, none when there is one.
+  // `detection` carries each group's members, so there is no second pass to
+  // collect them (see `gridDetection.ts`'s header for what that pass cost).
+  //
+  // Which tab is selected is remembered by group name per document
+  // (`GridGroupPicker.tsx`), so stepping between sibling nodes of the same
+  // shape keeps the same group open. `pickCount` only forces the re-render.
+  const tables = detection.tables
+  const useGrid = tables.length > 0
+  const [, setPickCount] = useState(0)
+  const selectedIndex = selectedGroupIndex(store, tables)
+  const selectedTable = tables[selectedIndex]
+  const gridPanelId = useId()
+
+  function pickGroup(index: number): void {
+    const table = tables[index]
+    if (table === undefined) return
+    rememberGroup(store, table.nameId)
+    setPickCount((n) => n + 1)
+  }
+
+  // Invariant 10: the tabs are a click surface, so the palette gets the same
+  // move (`klados.grid.nextGroup`/`previousGroup`). Wraps at both ends.
+  useEffect(
     () =>
-      useGrid && detection.grid !== null
-        ? collectGroupMembers(store, node, detection.grid.nameId)
-        : [],
-    [useGrid, detection.grid, store, node]
+      registerGridGroupPicker({
+        step: (delta) => {
+          if (tables.length < 2) return
+          // Read the selection now, not the one captured at render: two
+          // commands before a re-render (a held key repeating) would otherwise
+          // both step from the same stale index and move once instead of twice.
+          const current = selectedGroupIndex(store, tables)
+          pickGroup((current + delta + tables.length) % tables.length)
+        }
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `pickGroup` closes over exactly these
+    [store, tables]
   )
-  const gridMemberSet = useMemo(() => new Set(gridMembers), [gridMembers])
+
+  // Every table member is excluded from the list beneath, not only the shown
+  // table's: the other groups are one tab away, and listing their rows again
+  // would put the same children in two places.
+  // Built by iteration rather than `flatMap`: the intermediate array would be
+  // a second copy of every row ref, and D9's normal case is two million.
+  const gridMemberSet = useMemo(() => {
+    const members = new Set<NodeRef>()
+    for (const table of tables) for (const member of table.members) members.add(member)
+    return members
+  }, [tables])
 
   const paneRef = useRef<HTMLDivElement>(null)
 
@@ -240,14 +282,34 @@ export function DetailContent({ document, selectedNode }: DetailContentProps): J
           <div className="detail-children-heading">
             <h3>Children</h3>
           </div>
-          {useGrid ? (
+          {useGrid && selectedTable !== undefined ? (
             <>
-              <div className="detail-grid-container">
+              {tables.length > 1 && (
+                <GridGroupPicker
+                  store={store}
+                  groups={tables}
+                  selected={selectedIndex}
+                  onSelect={pickGroup}
+                  panelId={gridPanelId}
+                />
+              )}
+              <div
+                className="detail-grid-container"
+                id={gridPanelId}
+                role={tables.length > 1 ? 'tabpanel' : undefined}
+                aria-label={tables.length > 1 ? groupLabelOf(store, selectedTable) : undefined}
+              >
                 <Grid
+                  // A fresh grid per group: sort, filters, pinned and extra
+                  // columns are all keyed by the column name ids of one group,
+                  // and carrying them into another group's table would apply
+                  // them to columns that do not exist there.
+                  key={selectedTable.nameId}
                   store={store}
                   sourceBuffer={sourceBuffer}
-                  members={gridMembers}
+                  members={selectedTable.members}
                   deltas={pendingSpanDeltas}
+                  label={groupLabelOf(store, selectedTable)}
                 />
               </div>
               {childCount > gridMemberSet.size && (

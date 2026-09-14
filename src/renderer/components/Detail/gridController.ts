@@ -64,3 +64,31 @@ export function confirmGridExport(): void {
 export function cancelGridExport(): void {
   currentGrid?.cancelExport()
 }
+
+/**
+ * R211 — the Detail view's group tabs, for the palette. A node whose children
+ * form several groups shows one table at a time with a tab per group; clicking
+ * a tab is a UI surface, so invariant 10 wants the same move reachable as a
+ * command. One slot, like `currentGrid` above: there is one Detail pane.
+ */
+export interface GridGroupPickerController {
+  /** Moves to the next/previous group, wrapping. A no-op with one group. */
+  step(delta: 1 | -1): void
+}
+
+let currentGroupPicker: GridGroupPickerController | null = null
+
+export function registerGridGroupPicker(controller: GridGroupPickerController): () => void {
+  currentGroupPicker = controller
+  return () => {
+    if (currentGroupPicker === controller) currentGroupPicker = null
+  }
+}
+
+export function nextGridGroup(): void {
+  currentGroupPicker?.step(1)
+}
+
+export function previousGridGroup(): void {
+  currentGroupPicker?.step(-1)
+}

@@ -16,10 +16,10 @@ import { NodeStore } from '../src/core/nodeStore'
 import type { ParseOptions } from '../src/core/types'
 import { xmlFormatModule } from '../src/formats/xml/index'
 import { Grid } from '../src/renderer/components/Detail/Grid'
-import { collectGroupMembers } from '../src/renderer/components/Detail/gridColumns'
 import '../src/renderer/styles/tokens.css'
 import '../src/renderer/components/Detail/Grid.css'
 import '../src/renderer/components/Scrollbar/Scrollbar.css'
+import { detectGrid } from '../src/renderer/components/Detail/gridDetection'
 
 let container: HTMLDivElement
 let root: Root
@@ -48,6 +48,21 @@ async function paint(jsx: React.ReactNode): Promise<void> {
 
 const options: ParseOptions = { maxDepth: 1000, encoding: 'utf-8' }
 
+/** R210 replaced `collectGroupMembers`: detection collects each group's
+ * members in the same pass that finds the groups. Going through `detectGrid`
+ * is not just a rename — it is the path the application actually takes, and
+ * the old two-function split is what let a CSV detect a row group and then
+ * collect zero members for four rounds, because the two used different
+ * eligibility tests. */
+function membersOf(store: NodeStore, parent: number, nameId: number): number[] {
+  const group = detectGrid(store, parent).groups.find((g) => g.nameId === nameId)
+  if (group === undefined) throw new Error(`no group with nameId ${nameId}`)
+  // A mutable copy: several callers here declare their own members as
+  // `NodeRef[]` and a few sort it, which is a test convenience rather than
+  // anything the application does (it permutes an index list instead).
+  return [...group.members]
+}
+
 function wideDocument(
   rows: number,
   cols: number
@@ -64,7 +79,7 @@ function wideDocument(
   xmlFormatModule.parse(source, store, options)
   const elements = store.firstChildOf(0)
   const rowNameId = store.nameIdOf(store.firstChildOf(elements))
-  const members = collectGroupMembers(store, elements, rowNameId)
+  const members = membersOf(store, elements, rowNameId)
   return { store, sourceBuffer: new SourceBuffer(source, 'utf-8', 0), members }
 }
 

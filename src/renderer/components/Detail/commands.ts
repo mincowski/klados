@@ -10,7 +10,9 @@ import {
   cancelGridExport,
   confirmGridExport,
   copyGridAs,
-  focusGridQuickFilter
+  focusGridQuickFilter,
+  nextGridGroup,
+  previousGridGroup
 } from './gridController'
 
 registerCommand({
@@ -63,4 +65,23 @@ registerCommand({
   category: 'Edit',
   surfaces: ['palette'],
   run: () => cancelGridExport()
+})
+
+// R211: a node whose children form several groups shows one table at a time,
+// with a tab per group. The tabs are a click surface; these are the palette's
+// way to the same move (invariant 10). No-ops with a single group or none.
+registerCommand({
+  id: 'klados.grid.nextGroup',
+  title: 'Show Next Grid Group',
+  category: 'View',
+  surfaces: ['palette'],
+  run: () => nextGridGroup()
+})
+
+registerCommand({
+  id: 'klados.grid.previousGroup',
+  title: 'Show Previous Grid Group',
+  category: 'View',
+  surfaces: ['palette'],
+  run: () => previousGridGroup()
 })

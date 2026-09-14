@@ -16,6 +16,62 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R210–R211 — one table per group, and the CSV table that never had rows · built
+
+**Plan:** `docs/plans/R210-grid-grouping.md` · **Decisions:** D-103, D-104
+
+**The Detail view used to pick a winner.** `detectGrid` promoted the largest qualifying group to
+be *the* table, so three `<a>` and two `<b>` gave an `<a>` table — and adding two more `<b>`
+switched the whole view, dropping the `<a>` rows into the list beneath. The view was a function
+of the document's data rather than its structure. Now every group of two or more renders as its
+own table, in document order, and adding members to one group cannot change which groups render.
+
+**`GRID_MIN_COVERAGE` went with the model that needed it**, not because 5% was the wrong number
+but because "is this group dominant enough to be *the* table" stops being a question. It also
+carried a cliff nobody had found: 21 evenly-sized groups each cover 4.76%, so nothing qualified
+and **no table rendered at all** — a table at 20 groups, none at 21. `CONCEPT.md` §13's open
+question closes by deletion.
+
+**And it fixed a shipped format.** Detection counted eligible children with `isGridEligible` and
+`collectGroupMembers` collected them with `hasChildren` — two functions that had to agree about
+what a group member is, and did not. A CSV row is attributes-only by R145's own design, so **every
+CSV document since CSV shipped detected a row group of N and then collected zero members**: an
+empty table above a list of anonymous `Object` rows. Confirmed in the built application before
+and after. One pass means one predicate, so it is fixed by construction rather than by making the
+two match.
+
+**One pass was a specification, not a preference.** Collecting members with a second pass per group
+is O(children × groups): 649 ms at 100 groups over 200,000 children, against 13 ms for the
+bucketing pass. `spike/r210-grid-models.ts` was re-run against the shipped code to confirm it —
+and had to be repaired first, because it called `Interner`'s removed second constructor argument
+and read `detection.grid`. It had been unrunnable since R209 landed, which nothing noticed.
+
+**The rendering was built twice.** First as a stack — every group its own table, capped at five,
+the cap chosen from 2, 5, 10 and 20 rendered in the app. The project lead used it and rejected it:
+*"it still is arbitrary: Why do 5 tables show and then no more?"* Correct — the cap was a sound
+budget, but a budget is invisible and the number is not, so it had moved "which group wins" to
+"which groups fit". Four alternatives were costed (a picker in Detail, group rows in the Tree, an
+uncapped collapsible stack, a groups summary) and three pickers rendered.
+
+**As built: one grid, a tab per group, overflow into a "+N more" menu.** No cap, one virtualizer
+whatever the group count, and no tabs at all when a node has one group. The selected group is
+remembered by name, so stepping between similar siblings keeps it open. The stack's plural grid
+controller went back to a single slot.
+
+**The tab strip found three bugs of its own before it shipped.** Its invisible measuring copy of
+the row, absolutely positioned and thousands of pixels wide, gave the Detail pane a scroll width of
+**4,516px in a 900px pane** — invisible in a screenshot, because the pane draws no horizontal
+scrollbar. The palette's step command read the selection captured at render, so two commands
+before a re-render moved once. And after choosing from the menu, focus fell to `<body>` because
+the clicked item unmounted. Two more were caught by the project's own guards: `▾` failed R71's
+text-as-icons test, and the menu — a new elevated surface — failed the completeness check R212 had
+added to `elevationBorders.test.ts` one round earlier.
+
+Version **1.1.0** — the first minor since publication, and the first round in five to change what
+an existing document looks like on purpose.
+
+---
+
 ## R212 — dark's elevation shadow, measured against a ceiling nobody had computed · built
 
 **Plan:** `docs/plans/R212-dark-elevation-shadow.md` · **Decision:** D-102

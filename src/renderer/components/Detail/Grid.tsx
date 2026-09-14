@@ -70,6 +70,11 @@ export interface GridProps {
    * every cell this view decodes. Defaults to nothing pending so a test
    * that doesn't care about the mid-edit window doesn't have to pass it. */
   readonly deltas?: DeltaList
+  /** R211 — the group's name, used in this table's accessible name. When a node
+   * has several groups the visible tab says which one is showing; without this
+   * a screen reader hears "Data grid" whichever it is. Optional: a test
+   * mounting a bare `Grid` has no group to name it after. */
+  readonly label?: string
 }
 
 interface SortState {
@@ -89,7 +94,8 @@ export function Grid({
   store,
   sourceBuffer,
   members,
-  deltas = EMPTY_DELTA_LIST
+  deltas = EMPTY_DELTA_LIST,
+  label
 }: GridProps): JSX.Element {
   const [sort, setSort] = useState<SortState | null>(null)
   const [filterInputs, setFilterInputs] = useState<GridFilters>(EMPTY_GRID_FILTERS)
@@ -758,7 +764,7 @@ export function Grid({
           className={`grid-scroll scrollbar-host${hasHorizontalOverflow ? ' grid-scroll-has-horizontal-track' : ''}`}
           ref={parentRef}
           role="grid"
-          aria-label="Data grid"
+          aria-label={label === undefined ? 'Data grid' : `${label} data grid`}
           aria-rowcount={members.length}
           aria-colcount={orderedColumns.length}
           tabIndex={0}

@@ -41,6 +41,9 @@ const ELEV_2_SURFACES = [
   'components/Help/Shortcuts.css',
   // R212 §5 — `.raw-wrapping-overlay`, the one this list had missed.
   'components/Raw/Raw.css',
+  // R211 (D-104) — the group tabs' overflow menu. The completeness test
+  // below found it the moment it was added, which is what that test is for.
+  'components/Detail/Detail.css',
   // Also checked as rendered computed styles in `test/notifications.test.tsx`,
   // which is why R60 left it out here. The completeness test below does not
   // know about that, and should not have to: a surface covered twice costs
