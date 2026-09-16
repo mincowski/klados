@@ -12,11 +12,17 @@
  *
  * **What it costs, stated.** One `Int32Array` of display order per entry,
  * **4 bytes per visible row**: 2.5 MB for the 200 MB fixture unfiltered, 8 MB for
- * a two-million-row group. At most two entries, and at most **one** belongs to a
- * grid that is not on screen — the other, when present, is the mounted grid's
- * own, whose rows are held by that grid anyway. That is what makes flipping
- * between two sorted groups instant both ways, which a single slot does not: the
- * slot would always hold the grid just left, never the one being returned to.
+ * a two-million-row group.
+ *
+ * **R214 (`docs/plans/R214-filter-pass.md` § 1): bounded by bytes, not by
+ * count.** R213 kept two entries. Every table's order is now kept, for the whole
+ * application, until the entries together exceed `GRID_RESULT_CACHE_BUDGET_BYTES`
+ * (64 MB, the project lead's figure): about 25 fully sorted 633K-row tables, and
+ * effectively every table a small or medium file has. **Oldest-left out first**:
+ * leaving a table moves its entry to the back of the queue, so a table the user
+ * keeps returning to is not the first evicted. An order larger than the whole
+ * budget is not cached, rather than evicting everything for one entry. The total
+ * is shown in the Statistics panel.
  *
  * **What it never holds**: the document. Entries reference the `NodeStore` and
  * `SourceBuffer` weakly, because every edit replaces both, and a strong reference
@@ -28,6 +34,7 @@ import type { NodeStore } from '../../../core/nodeStore'
 import type { NodeRef } from '../../../core/types'
 import type { GridFilters } from './gridFilter'
 import type { SortDirection } from './gridSort'
+import { getTabIds } from '../../session/tabs'
 import type { GridViewKey } from './gridViewState'
 
 export interface ResultIdentity {
@@ -64,11 +71,32 @@ interface Entry {
   readonly result: CachedResult
 }
 
-export const GRID_RESULT_CACHE_ENTRIES = 2
+export const GRID_RESULT_CACHE_BUDGET_BYTES = 64 * 1024 * 1024
 
-/** Oldest first. */
+/** Oldest-left first. */
 let entries: Entry[] = []
+let totalBytes = 0
+let budgetBytes = GRID_RESULT_CACHE_BUDGET_BYTES
 let hits = 0
+const listeners = new Set<() => void>()
+
+function setEntries(next: Entry[]): void {
+  const nextBytes = next.reduce((sum, e) => sum + e.result.order.byteLength, 0)
+  const changed = next.length !== entries.length || nextBytes !== totalBytes
+  entries = next
+  totalBytes = nextBytes
+  if (changed) for (const listener of listeners) listener()
+}
+
+/** The cache's size in bytes — exact, a sum of `byteLength`s. */
+export function gridResultCacheBytes(): number {
+  return totalBytes
+}
+
+export function subscribeGridResultCache(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => listeners.delete(listener)
+}
 
 function sameGrid(entry: Entry, id: ResultIdentity): boolean {
   return (
@@ -92,26 +120,23 @@ function sameState(entry: Entry, id: ResultIdentity): boolean {
   return true
 }
 
+/** Drops entries whose document is gone — collected, or its tab closed. */
 function prune(): void {
-  entries = entries.filter((e) => e.store.deref() !== undefined)
+  const open = new Set(getTabIds())
+  const kept = entries.filter(
+    (e) => e.store.deref() !== undefined && (e.tabId === null || open.has(e.tabId))
+  )
+  if (kept.length !== entries.length) setEntries(kept)
 }
 
-/**
- * A mounting grid asks for its result. **Also enforces the memory rule**: after
- * this, the only entries left are this grid's own (if it matched) and the most
- * recent entry for any other grid — so at most one grid not on screen is held.
- */
+/** A mounting grid asks for the order it left with. The entry stays: the grid
+ * will leave again, and until then the cache may as well still answer. */
 export function takeCachedResult(id: ResultIdentity): CachedResult | null {
   prune()
   const hit = entries.find((e) => sameGrid(e, id) && sameState(e, id))
-  const others = entries.filter((e) => !sameGrid(e, id))
-  const newestOther = others.at(-1)
-  entries = [
-    ...(newestOther === undefined ? [] : [newestOther]),
-    ...(hit === undefined ? [] : [hit])
-  ]
-  if (hit !== undefined) hits++
-  return hit?.result ?? null
+  if (hit === undefined) return null
+  hits++
+  return hit.result
 }
 
 /**
@@ -127,23 +152,31 @@ export function leaveCachedResult(
   hiddenMatchColumns: readonly number[]
 ): void {
   prune()
-  entries = entries.filter((e) => !sameGrid(e, id))
+  const others = entries.filter((e) => !sameGrid(e, id))
   const filtered = id.filters.quick.trim().length > 0 || id.filters.perColumn.size > 0
-  if (id.sort === null && !filtered) return
-  entries.push({
-    tabId: id.viewKey.tabId,
-    filePath: id.viewKey.filePath,
-    store: new WeakRef(id.store),
-    sourceBuffer: new WeakRef(id.sourceBuffer),
-    node: id.node,
-    groupKey: id.groupKey,
-    sort: id.sort,
-    extraColumns: [...id.extraColumns],
-    quick: id.filters.quick,
-    perColumn: [...id.filters.perColumn],
-    result: { order: Int32Array.from(displayIndices), hiddenMatchCount, hiddenMatchColumns }
-  })
-  while (entries.length > GRID_RESULT_CACHE_ENTRIES) entries.shift()
+  if ((id.sort === null && !filtered) || displayIndices.length * 4 > budgetBytes) {
+    setEntries(others)
+    return
+  }
+  const next = [
+    ...others,
+    {
+      tabId: id.viewKey.tabId,
+      filePath: id.viewKey.filePath,
+      store: new WeakRef(id.store),
+      sourceBuffer: new WeakRef(id.sourceBuffer),
+      node: id.node,
+      groupKey: id.groupKey,
+      sort: id.sort,
+      extraColumns: [...id.extraColumns],
+      quick: id.filters.quick,
+      perColumn: [...id.filters.perColumn],
+      result: { order: Int32Array.from(displayIndices), hiddenMatchCount, hiddenMatchColumns }
+    }
+  ]
+  let bytes = next.reduce((sum, e) => sum + e.result.order.byteLength, 0)
+  while (bytes > budgetBytes) bytes -= next.shift()!.result.order.byteLength
+  setEntries(next)
 }
 
 /** For tests: how many rows' worth of order the cache holds in total. */
@@ -158,7 +191,12 @@ export function cacheHitCountForTests(): number {
   return hits
 }
 
+export function setGridResultCacheBudgetForTests(bytes: number): void {
+  budgetBytes = bytes
+}
+
 export function resetGridResultCacheForTests(): void {
-  entries = []
+  setEntries([])
   hits = 0
+  budgetBytes = GRID_RESULT_CACHE_BUDGET_BYTES
 }

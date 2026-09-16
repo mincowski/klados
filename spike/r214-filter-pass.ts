@@ -86,10 +86,13 @@ const { columns } = collectColumns(store, members)
 console.log(`group <${store.textOf(table.nameId)}>: ${members.length.toLocaleString()} rows, ${columns.length} visible columns\n`)
 
 const quickFilter = (quick: string): GridFilters => ({ quick, perColumn: new Map() })
+/** The pass without R214's shipped prefilter — the baseline every section below
+ * compares against, and what sections 2 and 2b build their prototypes on. */
+const PLAIN = { prefilter: false } as const
 
 // --- 1. breakdown ---------------------------------------------------------------
 console.log('1. Where a full pass goes (no needle matched: `zzzz`)')
-const full = time(() => filterIndices(store, source, members, columns, quickFilter('zzzz'))).ms
+const full = time(() => filterIndices(store, source, members, columns, quickFilter('zzzz'), PLAIN)).ms
 const structural = time(() => {
   let n = 0
   for (const row of members) {
@@ -181,10 +184,10 @@ function candidateRows(needle: string): number[] {
 
 function viaPrefilter(needle: string): FilterResult {
   const quick = needle.trim().toLowerCase()
-  if (!prefilterSafe(quick)) return filterIndices(store, source, members, columns, quickFilter(needle))
+  if (!prefilterSafe(quick)) return filterIndices(store, source, members, columns, quickFilter(needle), PLAIN)
   const rows = candidateRows(quick)
   const subset = rows.map((r) => members[r]!)
-  const result = filterIndices(store, source, subset, columns, quickFilter(needle))
+  const result = filterIndices(store, source, subset, columns, quickFilter(needle), PLAIN)
   return {
     indices: result.indices.map((i) => rows[i]!),
     hiddenMatchCount: result.hiddenMatchCount,
@@ -301,10 +304,10 @@ function viaPrefilterV2(needle: string): { result: FilterResult; candidates: num
   const quick = needle.trim().toLowerCase()
   const plan = prefilterToken(quick)
   if (plan === null)
-    return { result: filterIndices(store, source, members, columns, quickFilter(needle)), candidates: null }
+    return { result: filterIndices(store, source, members, columns, quickFilter(needle), PLAIN), candidates: null }
   const rows = candidateRowsV2(plan.token, plan.digits)
   const subset = rows.map((r) => members[r]!)
-  const result = filterIndices(store, source, subset, columns, quickFilter(needle))
+  const result = filterIndices(store, source, subset, columns, quickFilter(needle), PLAIN)
   return {
     result: {
       indices: result.indices.map((i) => rows[i]!),
@@ -326,7 +329,7 @@ function sameResult(a: FilterResult, b: FilterResult): boolean {
 console.log('2. Byte prefilter, then the unchanged exact check on candidate rows')
 console.log('   needle        matches   candidates   today       prefiltered   speed-up')
 for (const needle of ['Golf', 'Weber', 'Zaragoza', 'WVW99', 'zzzz', 'car', 'e', 'electric', '2016', 'hybrid 1']) {
-  const today = time(() => filterIndices(store, source, members, columns, quickFilter(needle)))
+  const today = time(() => filterIndices(store, source, members, columns, quickFilter(needle), PLAIN))
   const safe = prefilterSafe(needle.trim().toLowerCase())
   const candidates = safe ? candidateRows(needle.trim().toLowerCase()).length : members.length
   const fast = time(() => viaPrefilter(needle))
@@ -341,7 +344,7 @@ console.log('2b. Value bytes only, by token, with the generated-text rules')
 console.log(`   group scan for case-lowering characters: ${fmt(loweringChars.ms)} (found: ${loweringChars.value})`)
 console.log('   needle        matches   candidates   today       prefiltered   speed-up')
 for (const needle of ['Golf', 'Weber', 'Zaragoza', 'WVW99', 'zzzz', 'car', 'e', 'electric', '2016', '223', 'hybrid 1', 'Golf, Po']) {
-  const today = time(() => filterIndices(store, source, members, columns, quickFilter(needle)))
+  const today = time(() => filterIndices(store, source, members, columns, quickFilter(needle), PLAIN))
   const fast = time(() => viaPrefilterV2(needle))
   if (!sameResult(today.value, fast.value.result)) throw new Error(`MISMATCH v2 for ${JSON.stringify(needle)}`)
   const c = fast.value.candidates
@@ -355,7 +358,7 @@ console.log('   (every row above: identical indices, hidden-match count and colu
 
 // --- 3. narrowing ----------------------------------------------------------------
 console.log('3. Narrowing: `Gol` → `Golf` over the previous matches')
-const gol = filterIndices(store, source, members, columns, quickFilter('Gol'))
+const gol = filterIndices(store, source, members, columns, quickFilter('Gol'), PLAIN)
 // Hidden matches must be rescanned too: a row that matched `Gol` only in a
 // hidden column can match `Golf` only there, but it still has to be counted.
 // So narrowing keeps every row that matched anywhere.
@@ -371,10 +374,10 @@ const golAnywhere = time(() => {
   }
   return rows
 }).value
-const fullGolf = time(() => filterIndices(store, source, members, columns, quickFilter('Golf')))
+const fullGolf = time(() => filterIndices(store, source, members, columns, quickFilter('Golf'), PLAIN))
 const narrowed = time(() => {
   const subset = golAnywhere.map((r) => members[r]!)
-  const r = filterIndices(store, source, subset, columns, quickFilter('Golf'))
+  const r = filterIndices(store, source, subset, columns, quickFilter('Golf'), PLAIN)
   return { indices: r.indices.map((i) => golAnywhere[i]!), hiddenMatchCount: r.hiddenMatchCount, hiddenMatchColumns: r.hiddenMatchColumns }
 })
 if (!sameResult(fullGolf.value, narrowed.value)) throw new Error('MISMATCH narrowing')
@@ -384,3 +387,15 @@ console.log(`   \`Golf\`, narrowed       ${fmt(narrowed.ms)}   identical result`
 
 // --- slice sizing ----------------------------------------------------------------
 console.log(`\n4. Rows per 8 ms slice at today's per-row cost: ${Math.floor(8 / (full / members.length)).toLocaleString()}`)
+
+// --- 5. the shipped pass ------------------------------------------------------------
+console.log('\n5. The shipped pass (gridFilter.ts + gridPrefilter.ts) against the plain pass')
+console.log('   needle        plain       shipped     speed-up')
+for (const needle of ['Golf', 'Weber', 'WVW99', 'zzzz', 'car', 'e', 'electric', '2016', 'hybrid 1']) {
+  const plain = time(() => filterIndices(store, source, members, columns, quickFilter(needle), PLAIN))
+  const shipped = time(() => filterIndices(store, source, members, columns, quickFilter(needle)))
+  if (!sameResult(plain.value, shipped.value)) throw new Error(`MISMATCH shipped for ${JSON.stringify(needle)}`)
+  console.log(
+    `   ${JSON.stringify(needle).padEnd(12)} ${fmt(plain.ms)}   ${fmt(shipped.ms)}   ${(plain.ms / shipped.ms).toFixed(1).padStart(6)}×`
+  )
+}

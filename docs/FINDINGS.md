@@ -36,6 +36,19 @@ ids are only half-stable**: a splice reuses the `Interner`, but a full reparse b
 the worker, and the same name can get a different id. State meant to survive editing keys by tab and
 path, and stores names as text (`gridViewState.ts`, D-105).
 
+**Small `TextDecoder.decode` calls are expensive in the renderer, and per-cell work makes millions of
+them.** Four million decodes of a dozen bytes cost **1,647 ms** in Electron's renderer, **908 ms** in
+Node, and **287 ms** as a plain character loop in the renderer — the binding's per-call cost, not the
+decoding. It was most of the grid filter pass's 6.9 s on the 200 MB fixture. `SourceBuffer.slice`
+now builds short all-ASCII slices itself (R214, D-106); **decode cell-sized values through it**, not
+with a `TextDecoder` of your own, and measure in the renderer rather than trusting a Node bench.
+
+**Only two non-ASCII code points lower-case to ASCII, and NFC maps three to ASCII — one of them the same.**
+Checked over every code point (R214): `toLowerCase` maps U+0130 to `i̇` and U+212A KELVIN SIGN to `k`;
+NFC maps U+212A to `K`, U+037E to `;` and U+1FEF to a backtick. Any byte-level shortcut for
+case-insensitive or normalized ASCII matching has to account for exactly these — and R202's records
+claimed NFC had none, which R214 corrected.
+
 **Everything above `src/formats/` is format-agnostic, and it holds.** M6 proved it: TOML needed
 zero lines changed outside its own file plus two registration points, no new `NodeKind`, and
 `detectGrid` identified TOML arrays-of-tables as grid-eligible with no TOML-specific code. If a

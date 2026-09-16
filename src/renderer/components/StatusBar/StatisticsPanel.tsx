@@ -17,6 +17,11 @@ import { getFormatCapabilities } from '../../../formats/registry'
 import type { OpenDocument } from '../../session/documentSession'
 import { formatBytes } from '../../session/documentSession'
 import { getCrossTabMemoryBytes, getTabIds, subscribeTabs } from '../../session/tabs'
+import {
+  GRID_RESULT_CACHE_BUDGET_BYTES,
+  gridResultCacheBytes,
+  subscribeGridResultCache
+} from '../Detail/gridResultCache'
 import { computeMemoryBudget } from './memoryBudget'
 import { closeStatisticsPanel } from './statisticsPanelStore'
 import './StatisticsPanel.css'
@@ -79,6 +84,16 @@ export function StatisticsPanel({
     subscribeTabs,
     () => getCrossTabMemoryBytes(),
     () => getCrossTabMemoryBytes()
+  )
+  // R214 (`docs/plans/R214-filter-pass.md` § 1): the grid view cache, which is
+  // one budget for the whole application rather than part of this document —
+  // so it is its own row below the document's total, not a part of it. That
+  // total is also what `documentSession.ts` estimates an open against, and an
+  // evictable cache does not belong in that estimate.
+  const gridViewBytes = useSyncExternalStore(
+    subscribeGridResultCache,
+    gridResultCacheBytes,
+    gridResultCacheBytes
   )
   const displayName = getFormatCapabilities(doc.formatId)?.displayName ?? doc.formatId
   // Uncapped totals — see `StatusBar.tsx`'s own note on why these do not
@@ -165,6 +180,14 @@ export function StatisticsPanel({
             <tr className="statistics-panel-cross-tab">
               <th>All tabs ({tabCount})</th>
               <td>{formatBytes(crossTabBytes)}</td>
+            </tr>
+          )}
+          {gridViewBytes > 0 && (
+            <tr className="statistics-panel-grid-cache">
+              <th>Grid view cache (all tabs)</th>
+              <td>
+                {formatBytes(gridViewBytes)} of {formatBytes(GRID_RESULT_CACHE_BUDGET_BYTES)}
+              </td>
             </tr>
           )}
         </tbody>

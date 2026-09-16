@@ -132,7 +132,7 @@ so a reader of an old commit message can still find out what `R41` was.
 | **R210–R211** | built | `docs/plans/R210-grid-grouping.md` |
 | **R212** | built | `docs/plans/R212-dark-elevation-shadow.md` |
 | **R213** | built | `docs/plans/R213-grid-view-state.md` |
-| **R214** | **OPEN** | `docs/plans/R214-filter-pass.md` |
+| **R214** | built ⚠ | `docs/plans/R214-filter-pass.md` |
 
 ### Pre-`R` milestones
 
@@ -155,6 +155,8 @@ disclosed in its own document too; this is the list that did not exist before.
 
 | Owed | Where | Why it is still open |
 |---|---|---|
+| **R214: the grid sort is one synchronous step** — 715 ms on the 200 MB fixture, a frozen window on a header click. The filter pass beside it is sliced. | `docs/plans/R214-filter-pass.md` § 9 | A comparison sort does not pause as simply as a scan; the likely route is keys extracted in slices and a merge sort stepped to a deadline — a round of its own rather than an extension of R214's. |
+| **R214: typing a filter's second character on a large group** took 867 ms on the 200 MB fixture, against § 5's half second. From the third character it is met. | `docs/plans/R214-filter-pass.md` § 9 | A one-letter filter matches so many rows anywhere that narrowing from it saves little. Nothing obvious fixes it without an index, which § 7 rejected. |
 | **R187 acceptance 4's mutation was not run**: that removing `findSpliceNode`'s Property escalation turns the *splice* tests red while invariant 4 stays green. | `docs/plans/R187-large-suite-honesty.md` §13 | Named rather than dropped. The invariant is no longer standing in for that guard, but the guard itself has not been re-confirmed in this round. |
 | **Closed by R209 — the mechanism it was about no longer exists.** R185's wall-clock ratio had a blind spot: a 2.7× per-node regression passed silently, because the 3× ceiling only fired at 5.2×. The entry said closing it needed *the mechanism* asserted — that no per-node namespace work runs on a document with no declarations — rather than its wall-clock shadow. **R209 removed the per-node namespace work entirely**, so there is nothing left to leak and nothing left to assert. | `docs/plans/R209-drop-namespaces.md` and D-101, from `docs/plans/R183-ci-flakes.md` §13 | **Worth reading as a near miss.** The ratio test lived in `test/namespaceResolution.test.ts`, which R209 rewrote — so the test this entry describes was deleted before anyone noticed the entry pointed at it. Found while investigating an unrelated CI failure in the same round. Tightening the ratio had already been tried and reverted one CI run later, because `macos-latest` paired ratios ranged 0.737–2.078; that failed attempt is what establishes a tighter wall-clock bound was never available on this hardware. |
 | **R183 acceptance 2: twenty consecutive clean `main` runs.** The three tests that were failing are fixed on measurement and mutation, not on observed CI. | `docs/plans/R183-ci-flakes.md` §13 | Only accumulated runs can confirm it, and the round cannot wait for them. Check the next time CI history is being read anyway. |

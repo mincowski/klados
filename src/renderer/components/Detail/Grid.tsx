@@ -49,7 +49,8 @@ import {
   GRID_EXPORT_CONFIRM_ROWS,
   type GridExportFormat
 } from './gridExport'
-import { EMPTY_GRID_FILTERS, filterIndices, type GridFilters } from './gridFilter'
+import { EMPTY_GRID_FILTERS, type GridFilters } from './gridFilter'
+import { useFilterPass } from './useFilterPass'
 import { registerGridController } from './gridController'
 import { isColumnSortable, sortByColumn, type SortDirection } from './gridSort'
 import { defaultColumnWidthPx, sampleColumnStats, type ColumnStats } from './gridColumnWidth'
@@ -246,14 +247,20 @@ export function Grid({
     [orderedColumns, pinned]
   )
 
-  const [initialColumns] = useState(columns)
-  const filterResult = useMemo(
-    () =>
-      fromCache !== null && filters === initialFilters && columns === initialColumns
-        ? fromCache.filterResult
-        : filterIndices(store, sourceBuffer, members, columns, filters),
-    [store, sourceBuffer, members, columns, filters, fromCache, initialFilters, initialColumns]
+  // R214 (`useFilterPass.ts`): the pass runs in slices once it outlasts a frame,
+  // so the window never freezes; while it runs `filterResult` is the previous
+  // result and `filterPending` says so. R213's cached outcome is only for the
+  // request the grid mounted with, so it is handed over with that request.
+  const [initialPass] = useState(() =>
+    fromCache === null
+      ? null
+      : { outcome: { ...fromCache.filterResult, anywhere: null }, columns, filters: initialFilters }
   )
+  const {
+    result: filterResult,
+    pending: filterPending,
+    progress: filterProgress
+  } = useFilterPass(store, sourceBuffer, members, columns, filters, initialPass)
   const filteredIndices = filterResult.indices
 
   // R34 §3: `orderedColumns` changes on every column-picker tick, and this
@@ -395,18 +402,26 @@ export function Grid({
     extraColumns,
     filters,
     displayIndices,
-    filterResult
+    filterResult,
+    filterPending
   }
   const latestContentRef = useRef(latestValues)
   useEffect(() => {
     latestContentRef.current = latestValues
   })
+  // R214: the restored offset is applied once the first filter result is in,
+  // not at mount — a filter pass running in slices has no rows to scroll through
+  // yet, and the browser would clamp the offset to zero.
+  const scrollRestoredRef = useRef(false)
   useLayoutEffect(() => {
+    if (scrollRestoredRef.current || filterPending) return
+    scrollRestoredRef.current = true
     const el = parentRef.current
-    if (el !== null) {
-      el.scrollTop = scrollRef.current.top
-      el.scrollLeft = scrollRef.current.left
-    }
+    if (el === null) return
+    el.scrollTop = scrollRef.current.top
+    el.scrollLeft = scrollRef.current.left
+  }, [filterPending])
+  useLayoutEffect(() => {
     return () => {
       if (!persisted) return
       const latest = latestContentRef.current
@@ -424,6 +439,10 @@ export function Grid({
         nodeCount: latest.store.nodeCount
       }
       writeContent(viewKey, node, groupKey, isDefaultContent(content) ? null : content)
+      // R214: a pass still running means the rows on screen belong to the
+      // previous filter, and caching them under the current one would restore
+      // the wrong rows.
+      if (latest.filterPending) return
       leaveCachedResult(
         {
           viewKey,
@@ -683,7 +702,22 @@ export function Grid({
    * lives in the notification stack, resolved through
    * `klados.grid.confirmExport`/`cancelExport` (§3g) via `gridController.ts`.
    */
+  // R214: an export asked for while the filter pass runs waits for it, rather
+  // than copying the previous filter's rows under the current filter's name.
+  const queuedExportRef = useRef<GridExportFormat | null>(null)
+  useEffect(() => {
+    if (filterPending || queuedExportRef.current === null) return
+    const format = queuedExportRef.current
+    queuedExportRef.current = null
+    copyAs(format)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs the queued export once the pass finishes; `copyAs` reads the finished order at that moment
+  }, [filterPending])
+
   function copyAs(format: GridExportFormat): void {
+    if (filterPending) {
+      queuedExportRef.current = format
+      return
+    }
     if (displayIndices.length > GRID_EXPORT_CONFIRM_ROWS) {
       setPendingExport(format)
       exportPromptRef.current = notify({
@@ -745,7 +779,7 @@ export function Grid({
     () =>
       registerGridController({ copyAs, focusQuickFilter, confirmExport, cancelExport, focusGrid }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-registers whenever the exported snapshot would change; the closures here are recreated every render and aren't meaningful dependencies on their own
-    [store, sourceBuffer, members, displayIndices, orderedColumns, pendingExport]
+    [store, sourceBuffer, members, displayIndices, orderedColumns, pendingExport, filterPending]
   )
 
   // The debounced filter commit (above) must not fire setFilters after
@@ -867,7 +901,8 @@ export function Grid({
           title={quickFilterLabel}
           aria-label={quickFilterLabel}
         />
-        {filters.quick.length > 0 && filterResult.hiddenMatchCount > 0 && (
+        {filterPending && <FilterProgress progress={filterProgress} />}
+        {!filterPending && filters.quick.length > 0 && filterResult.hiddenMatchCount > 0 && (
           // R34 §5: the quick filter's scope stays the visible column set —
           // this says what it excluded rather than silently narrowing an
           // "anywhere" search to "the columns currently shown," and clicking
@@ -1015,6 +1050,8 @@ export function Grid({
           role="grid"
           aria-label={label === undefined ? 'Data grid' : `${label} data grid`}
           aria-rowcount={members.length}
+          // R214: the rows shown belong to the previous filter until the pass ends.
+          aria-busy={filterPending}
           aria-colcount={orderedColumns.length}
           tabIndex={0}
           onKeyDown={onKeyDown}
@@ -1682,6 +1719,33 @@ function GridBodyCell({
           ▸
         </span>
       )}
+    </div>
+  )
+}
+
+/** A pass shorter than this never shows progress — on small tables the
+ * indication would only flicker. */
+const FILTER_PROGRESS_DELAY_MS = 150
+
+/**
+ * R214 (`docs/plans/R214-filter-pass.md` § 2): the grid is still showing the
+ * previous filter's rows while a pass runs, and something has to say so. Shown
+ * only once the pass has run for `FILTER_PROGRESS_DELAY_MS`.
+ */
+function FilterProgress({ progress }: { readonly progress: number }): JSX.Element | null {
+  const [visible, setVisible] = useState(false)
+  useEffect(() => {
+    const timer = setTimeout(() => setVisible(true), FILTER_PROGRESS_DELAY_MS)
+    return () => clearTimeout(timer)
+  }, [])
+  if (!visible) return null
+  const percent = Math.floor(progress * 100)
+  return (
+    <div className="grid-filter-progress" role="status" aria-label={`Filtering, ${percent}%`}>
+      <span className="grid-filter-progress-label">Filtering… {percent}%</span>
+      <span className="grid-filter-progress-track" aria-hidden="true">
+        <span className="grid-filter-progress-fill" style={{ width: `${percent}%` }} />
+      </span>
     </div>
   )
 }

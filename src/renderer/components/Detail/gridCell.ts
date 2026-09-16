@@ -363,6 +363,56 @@ export function cellOf(
 }
 
 /**
+ * R214 (`docs/plans/R214-filter-pass.md` § 4): whether any cell of `row` could
+ * show text that exists in no byte of the document — a count this module
+ * generates: `N items` (`cellForOccurrences`) or `N field(s)`
+ * (`compositeSummaryOf`). The grid filter's byte prefilter cannot see those, so a
+ * row this returns `true` for stays a candidate for a needle that could match
+ * one.
+ *
+ * **A superset, never a subset**: a `true` costs a row an exact check it may not
+ * have needed; a wrong `false` would drop a matching row from the filter. So
+ * every case that is not provably count-free answers `true` — a JSON array value
+ * among them, rather than following `cellForOccurrences`' recursion into it. It
+ * lives here, beside the code that generates the counts, so a new generated
+ * label is written next to the rule that has to know about it.
+ */
+export function mayShowGeneratedCount(store: NodeStore, row: NodeRef): boolean {
+  const occurrences = new Map<number, { count: number; composite: boolean }>()
+  for (const child of store.childrenOf(row)) {
+    const nameId = store.nameIdOf(child)
+    if (nameId === -1) continue
+    const composite = hasChildren(store, child)
+    const seen = occurrences.get(nameId)
+    if (seen === undefined) {
+      occurrences.set(nameId, { count: 1, composite })
+    } else {
+      seen.count++
+      seen.composite ||= composite
+    }
+  }
+  for (const [, seen] of occurrences) {
+    if (!seen.composite) continue
+    if (seen.count > 1) return true
+  }
+  for (const child of store.childrenOf(row)) {
+    if (store.nameIdOf(child) === -1 || !hasChildren(store, child)) continue
+    const resolved = resolveWrapperTarget(store, child).destination
+    if (arrayValueOf(store, resolved) !== null) return true
+    if (store.hasFlag(resolved, NodeFlags.IsMixed)) continue
+    let valued = false
+    for (const grandchild of store.childrenOf(resolved)) {
+      if (store.ownValueOf(grandchild) !== null) {
+        valued = true
+        break
+      }
+    }
+    if (!valued) return true
+  }
+  return false
+}
+
+/**
  * Every distinct field `row` actually has, keyed by name id — one
  * structural pass over its own attributes and children (the same
  * attribute-wins tie-break `collectColumns` uses), each decoded once.

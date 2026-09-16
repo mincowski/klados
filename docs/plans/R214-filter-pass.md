@@ -1,8 +1,18 @@
 # R214 — the grid filter pass: faster, interruptible, and a cache sized in bytes
 
-<!-- status: open -->
+<!-- status: built-caveat -->
 
-**Open.** Raised by the project lead after R213 (`docs/plans/R213-grid-view-state.md`) measured a
+**Built, with two things owed.** The filter pass no longer freezes the window: on the 200 MB fixture
+typing `Golf` went from **6,888 ms frozen to 537 ms**, with no main-thread task over 50 ms while
+filtering. The largest single gain was not in the plan: § 0's question — why the application's pass
+took twice Node's — was the decoder, and short ASCII slices now skip it (6,888 → 1,978 ms on its
+own). The byte prefilter was built after its differential test held across all four formats;
+narrowing, slicing and a 64 MB result cache for every table landed as planned, the cache shown in the
+Statistics panel as its own row rather than in the document total. **Owed**: the sort is still one
+synchronous step (715 ms on 200 MB), and typing's second character on a large group took 867 ms
+against § 5's half second. D-106 records it; see § 9.
+
+Raised by the project lead after R213 (`docs/plans/R213-grid-view-state.md`) measured a
 seven-second frozen window switching back to a filtered table on the 200 MB fixture: *"we claim
 Klados works well with large files. So we should pay a bit attention to that."* R213's cache fixed
 the *second* visit. This round is about the first one, and about typing: the filter pass itself
@@ -223,3 +233,170 @@ budget the saving does not pay for a second representation.
 ## 8. Version
 
 **Ask on landing.**
+
+## 9. Results — built, with two things owed
+
+### What landed
+
+- **`SourceBuffer.slice`**: short all-ASCII slices are built without `TextDecoder` — § 0's discrepancy,
+  explained below, and the largest single gain of the round.
+- **`gridPrefilter.ts`**: § 4's byte prefilter, built after the differential test held.
+- **`gridFilter.ts`**: the pass became `createFilterPass`, stepped to a deadline, optionally within a
+  narrowed row set, with the prefilter applied; `filterIndices` runs one to completion for callers
+  that need an answer now. Each outcome also carries the rows that matched anywhere, for § 3.
+- **`gridCell.ts`**: `mayShowGeneratedCount`, the rule for rows that could show `3 items` or
+  `1 field`, written beside the code that generates them.
+- **`useFilterPass.ts`**: § 2's slices, cancellation and narrowing, as a runner read through
+  `useSyncExternalStore` and started from a layout effect.
+- **`Grid.tsx`**: the grid keeps its previous rows while a pass runs, marks itself `aria-busy`, shows
+  progress after 150 ms, queues an export until the pass ends, caches nothing when left mid-pass, and
+  restores R213's scroll offset once its first result is in rather than at mount.
+- **`gridResultCache.ts`**: § 1's budget — every table, 64 MB for the whole application,
+  oldest-left out first. **`StatisticsPanel.tsx`** shows it.
+- **D-106** records the round; D-105 is annotated where R214 replaced its two-entry rule.
+
+### § 0, explained: the decoder, not a second pass
+
+The pass ran once per commit — instrumented in the built application, one `filterIndices` call of
+**6,888 ms** for `Golf`. The gap to Node was the decoder: the same four million small `decode`
+calls cost **1,647 ms** in the renderer and **908 ms** in Node, and a character loop costs **287 ms**
+in the renderer. The pass decodes about eleven values per row. With the fast path the application's
+pass took **1,978 ms** before anything else in this round was built.
+
+The fast path is deliberately narrow: only encodings in which a byte below 0x80 is always that
+character on its own (UTF-8, `windows-*`, `iso-8859-*` — not ISO-2022-JP, whose escape sequences are
+ASCII bytes), only integer ranges of 0–128 bytes. Its equivalence test compares it with `TextDecoder`
+over random ranges in six encodings, and **found two divergences before they shipped**: a negative
+bound, which `subarray` reads as counting from the end, and a fractional one, which it truncates.
+Neither is passed by any caller; both now take the decoder, exactly as before.
+
+### § 4: the differential test, and what it decided
+
+`test/gridPrefilter.test.ts` generates sixty documents per format — XML, JSON, TOML and CSV, the JSON
+and CSV generators new — built around the cases where displayed text is not the bytes: repeated
+scalars and composites, composites with no valued children, empty and single-element JSON arrays,
+mixed content, quoted strings, U+212A and U+0130, and values spelled `items`, `field`, `3`. Needles
+are drawn from real display text plus fixed probes. Every outcome field is compared with the plain
+pass, and so are a narrowed pass and a pass stepped with a deadline already passed.
+
+**It held, so § 4 is built.** Its value was shown by removing each rule in turn:
+
+| Rule removed | Formats that fail |
+|---|---|
+| `i`/`k` not prefiltered where U+0130/U+212A occur | XML, JSON, TOML, CSV |
+| rows that could show a generated count stay candidates | XML, JSON, TOML |
+| the needle split on separators | XML, JSON, TOML |
+| a repeated composite field counts | XML |
+| a composite with no valued children counts | XML |
+| a JSON array value counts | JSON, TOML |
+
+**The code-point claim was checked, not recalled.** Over every code point, `toLowerCase` maps exactly
+two non-ASCII code points to ASCII (U+0130, U+212A), and NFC plus `toLowerCase` maps four (adding
+U+037E to `;` and U+1FEF to a backtick). That is why only ASCII needles are prefiltered. **It also
+disproved a sentence four records carried since R202**: that nothing in NFC produces an ASCII
+character that was not already there. Corrected in place in D-097, `R202-unicode-comparison.md`,
+`LOG.md` and `gridFilter.ts`; R202's rule stands on the rest of its argument.
+
+**The document scan for those two characters froze the window for 211 ms** on the first filter of
+the 200 MB document, and ran for every needle. It now runs only for a needle containing `i` or `k`,
+in 8 MB chunks between slices, and is kept per buffer.
+
+### Measured in the built application
+
+Playwright driving `electron .` with real key and mouse events, Windows 11, a long-task observer
+recording every main-thread task over 50 ms. Times run from the last keystroke to two frames after
+the grid stops being busy, less the 200 ms debounce; the harness polls from 260 ms, so **every figure
+has a floor of about 60 ms plus two frames**, which is most of the 10 MB column.
+
+| | 10 MB before | 10 MB after | 200 MB before | 200 MB after |
+|---|---|---|---|---|
+| first filter `Golf` | | 86 ms | **6,888 ms, frozen** | **537 ms** |
+| first filter `WVW99` | | 71 ms | | 429 ms |
+| first filter `2016` | | 98 ms | | 1,181 ms |
+| first filter `e` (in almost every row) | | 172 ms | | 2,289 ms |
+| typing `G` / `Go` / `Gol` / `Golf`, 400 ms apart | | 121 / 95 / 84 / 91 ms | | 1,907 / 867 / 285 / 191 ms |
+| longest main-thread task while filtering | | none over 50 ms | 6,888 ms | **none over 50 ms** |
+| sort by `year` | | 63 ms task | | **715 ms task** |
+| switch back to a sorted, filtered group (R213) | | | 519 ms | 545 ms |
+
+"Before" for 200 MB is the instrumented pass on R213's code, taken before this round changed
+anything, and R213 § 9's cached switch-back figure. **No 10 MB before-figures were taken** for these
+rows, so that column is left empty rather than filled from a different measurement. The Node bench,
+same 200 MB fixture, isolates the prefilter (the plain pass already includes the decoder fast path):
+
+| needle | plain pass | shipped pass | |
+|---|---|---|---|
+| `Golf` | 2,212 ms | 483 ms | 4.6× |
+| `Weber` | 2,206 ms | 556 ms | 4.0× |
+| `WVW99` | 2,285 ms | 380 ms | 6.0× |
+| `zzzz` | 2,235 ms | 331 ms | 6.8× |
+| `car` (a tag name) | 2,246 ms | 342 ms | 6.6× |
+| `electric` | 2,207 ms | 776 ms | 2.8× |
+| `2016` | 2,292 ms | 1,104 ms | 2.1× |
+| `hybrid 1` (spans a separator) | 2,166 ms | 847 ms | 2.6× |
+| `e` (in almost every row) | 2,030 ms | 2,192 ms | **0.9×** |
+
+The plain pass here is 2.2 s against the plan's 3.0 s — the decoder fast path helps Node too.
+
+### Against § 5's expectations
+
+- **No frozen window from the filter: met.** No task over 50 ms while filtering, on either fixture.
+- **Typing forward under half a second per commit after the first: not met for the second
+  character.** `Go` took 867 ms: `G` matches so many rows anywhere that narrowing from it saves
+  little. From the third character it is met. Owed.
+- **A first filter measured before and after: met**, above; the prefilter's own share is § 5 of the
+  bench, and the decoder's share is the 6,888 → 1,978 ms step.
+- **Cache memory never exceeds the budget: met**, asserted in bytes, and the Statistics panel figure
+  is the cache's own sum.
+- **Small files do not regress: met as far as measured.** On 10 MB every filter finished within the
+  harness's own ~60 ms floor plus about 100 ms, with no long task, and progress never showed. There
+  is no 10 MB before-figure to compare with; the unit and browser suites cover behaviour unchanged.
+
+### What the review and the tests found
+
+- **The first version of `useFilterPass` started passes inside a `useMemo`** and read refs during
+  render. Tests passed; the project's React compiler rules rejected it on twelve counts. Rebuilt as a
+  runner read through `useSyncExternalStore` — which moved the moment rows exist, so **R213's scroll
+  restore had to move with it**: it restored at mount, into a grid that might have no rows yet, and
+  now waits for the first result.
+- **A test waited on a signal that was already true.** "A newer filter abandons the running pass"
+  first waited for a row count both passes shared, released the passes before the second had
+  started, and failed — on the test, not the code. It now waits for the second pass to start and
+  asserts that exactly one pass ran to its end.
+- **The sliced-pass unit test never sliced**: generated tables were smaller than one clock check, so
+  its step counter was unused, which lint caught. It now runs 2,000 rows and asserts several steps.
+- **The in-application harness produced two impossible numbers** before it was trusted — `G` in 38 ms
+  on 633K rows, and a 727 ms sort with no long task. It raced the debounce and dispatched events from
+  script. Rewritten with real input events; the numbers above are from that version.
+- **`PreparedFilters.quickRaw` was carried and never read.** Removed.
+- **Mutation checks** on the grid wiring: removing cancellation, the export queue, the mid-pass cache
+  guard or narrowing each fails exactly its own test.
+
+### Owed
+
+- **The sort is not sliced**: 715 ms on the 200 MB fixture, one task. A comparison sort does not pause
+  as simply as a scan; the likely route is keys extracted in slices, then a merge sort stepped to a
+  deadline.
+- **Typing's second character on a large group** (867 ms, above).
+
+### Acceptance
+
+1. **Met** — the pass ran once; the decoder was the gap.
+2. **Met** — `test/gridResultCache.test.ts`.
+3. **Met, with the placement changed** — its own row rather than part of the document total (D-106
+   says why), rendered in both themes.
+4. **Met** — no long task while filtering; a newer filter abandons the pass, asserted.
+5. **Met** — three renderings; delayed 150 ms, asserted not to appear for a fast pass.
+6. **Met for correctness, not fully for § 5's typing figure** — owed.
+7. **Met** — the differential test held and the prefilter is built; its common-needle cost is the
+   `e` row (§ 5 of the bench). The plan's proposed guard — stop prefiltering past a fraction of
+   candidates — was not built: the loss measured is about 10% in the worst case, against 3–7× where
+   it helps.
+8. **Met** — export queues, the cache is not written mid-pass, and keyboard bounds and row counts
+   read the rows on screen, which are always a finished result.
+9. **Met** — above.
+10. **Met** — `npm test` 2,229 passing, 5 skipped; typecheck and lint clean.
+
+### Version
+
+1.1.0, with R213 — the project lead's call.

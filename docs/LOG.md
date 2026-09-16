@@ -16,6 +16,35 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R214 — the grid filter pass stops freezing the window · built ⚠
+
+**Plan:** `docs/plans/R214-filter-pass.md` · **Decision:** D-106
+
+**Typing `Golf` into a 633,000-row table froze Klados for almost seven seconds**, and a slow typist
+paid that again after every pause. Now the same filter takes about half a second and the window never
+stops responding: a long filter runs in slices, keeps the old rows on screen with "Filtering… 42%"
+beside the box, and gives way to a newer filter the moment one is typed.
+
+**The biggest win was the question the plan asked first, not any of its four parts.** The pass took
+twice as long in the application as in Node. The answer was `TextDecoder`: millions of tiny decode
+calls cost several times more in the renderer, and building a short ASCII string by hand avoids
+them. That one change took the pass from 6.9 s to 2.0 s before anything else was built.
+
+**The byte prefilter was built on a condition, and the condition earned its keep.** Skipping rows
+whose bytes cannot contain the search text is only safe if nothing on screen comes from somewhere
+else — and separators, generated labels like `3 items`, and two Unicode characters that lower-case to
+ASCII all do. A differential test over generated XML, JSON, TOML and CSV compared every result with
+the plain pass, and removing any one of the safety rules made it fail. Enumerating every code point
+for that rule also disproved a sentence R202 had written into four records.
+
+**Also landed**: typing forward only re-checks the previous matches (`Gol` → `Golf` in 158 ms instead
+of 2.2 s); R213's result cache now keeps every table within 64 MB for the whole app, shown in the
+Statistics panel; and the first version of the sliced pass, which passed its tests, was rebuilt
+because the project's React rules rejected work done during render.
+
+**Owed**: sorting a large table is still one step (715 ms), and a filter's second character on a
+large group still takes 867 ms.
+
 ## R213 — a table keeps its sort and filters when you switch away · built
 
 **Plan:** `docs/plans/R213-grid-view-state.md` · **Decision:** D-105
@@ -398,7 +427,8 @@ are canonical singletons only normalization resolves.
 Normalization is gated on the needle at all three sites. NFC *composes*, so normalizing the haystack
 for an ASCII needle can only **remove** matches — `cafe` matches a decomposed `cafe` + U+0301
 character for character today — and nothing in NFC can produce an ASCII character that was not
-already there. For a regex it is worse: `.` counts one character against a composed `é` and two
+already there. *(Corrected by R214, which checked every code point: three canonical singletons do —
+U+212A KELVIN SIGN to `K`, U+037E to `;`, U+1FEF to a backtick.)* For a regex it is worse: `.` counts one character against a composed `é` and two
 against a decomposed one, so an existing ASCII pattern would silently change meaning. The gate is
 also what makes the round free for almost every search: an all-ASCII find window costs 0.05 ms, and
 an ASCII quick filter over 200,000 rows is unchanged.

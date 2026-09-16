@@ -125,6 +125,7 @@ Search for the id to jump to one.
 | **D-103** | Every repeating group is its own table; the coverage floor is deleted, not retuned |  |
 | **D-104** | One table at a time, a tab per group — not a capped stack |  |
 | **D-105** | A table's view state outlives the table: shape per group name, contents per node, and one bounded cache of results |  |
+| **D-106** | The grid filter pass runs in slices, narrows, and skips rows by their bytes; its results are cached within a byte budget |  |
 
 ---
 
@@ -3406,7 +3407,8 @@ one.** Normalization is gated on the needle in all three places it was added —
 filter, `Interner.lookup`. NFC *composes*, so normalizing the haystack for an ASCII needle can only
 **remove** matches: `cafe` matches a decomposed `cafe` + U+0301 character for character today and
 would stop once the text is composed, and nothing in NFC produces an ASCII character that was not
-already there. For a regex it is worse than neutral — `.` counts one character against a composed
+already there. *(Corrected by R214, which checked every code point: three canonical singletons do — U+212A KELVIN SIGN to `K`, U+037E GREEK QUESTION MARK to `;`, U+1FEF GREEK VARIA to a backtick — so for those an unnormalized ASCII needle misses a match normalization would find. The rule stands on
+the rest of the argument — those three are rare, the `cafe` loss is not.)* For a regex it is worse than neutral — `.` counts one character against a composed
 `é` and two against a decomposed one — so an existing ASCII pattern would silently change meaning.
 
 **Rejected: NFKC.** Unchanged from D-082, and it is what would "fix" the two remaining rows. It
@@ -3837,6 +3839,8 @@ UI frozen throughout. The project lead chose a cache (`gridResultCache.ts`):
   screen** — the other is the mounted grid's own. Two, not one, because a single slot always holds
   the grid just left and never the one being returned to, so flipping between two sorted groups
   would never hit. When Detail shows no table at all, both can be off screen: 16 MB worst case.
+  *Superseded by R214 (D-106):* the project lead chose every table's order within a 64 MB budget
+  for the whole application, oldest-left out first, shown in the Statistics panel.
 - **Only a grid that paid for its order leaves one**: no sort and no filter means nothing to save.
 - **Exact, not approximate**: used only when the store, buffer, node, group, sort, extra columns and
   the *committed* filters all match — a filter still inside its keystroke debounce misses.
@@ -3855,3 +3859,64 @@ collection and mounting, not the cache.
 - **Reading the active tab inside `DetailContent`**: the first tab is minted lazily by whichever code
   reads the active session first, which can be the grid mounting below it, so the key differed between
   the first render and the second. `Detail` passes it in.
+
+### D-106 — The grid filter pass runs in slices, narrows, and skips rows by their bytes; its results are cached within a byte budget (R214) · `settled`
+
+**Five changes to one pass**, each measured in the built application on the 200 MB fixture
+(633,268 rows), where typing `Golf` into the quick filter used to freeze the window for
+**6,888 ms**:
+
+1. **Short ASCII slices are built without `TextDecoder`** (`SourceBuffer.slice`). Explaining the
+   plan's first question — why the pass took 6.9 s in the application and 3.0 s in Node — found it:
+   four million small `decode` calls cost **1,647 ms** in the renderer against **287 ms** as a
+   character loop, and the pass decodes about eleven values per row. **This alone took the pass to
+   1,978 ms.** Only for encodings where a byte below 0x80 is always that character (UTF-8,
+   `windows-*`, `iso-8859-*`), only for integer ranges of at most 128 bytes, and asserted equal to
+   `TextDecoder` for six encodings including the ones it declines.
+2. **A byte prefilter** (`gridPrefilter.ts`). A row whose value bytes cannot contain the needle is
+   skipped before any cell is decoded; the exact check is unchanged and still decides every match.
+   **Built on the project lead's condition that a differential test show it safe**: generated XML,
+   JSON, TOML and CSV, needles drawn from displayed text, every outcome field compared with the plain
+   pass. The rule, where displayed text is not the bytes:
+   - **ASCII needles only.** NFC maps three code points to ASCII and a non-ASCII needle normalizes
+     every cell; not worth proving safe for a rare case.
+   - **The longest run between spaces and commas** is searched for, because separators join parts.
+   - **`i` and `k` are not prefiltered in a document holding U+0130 or U+212A** — the only two code
+     points `toLowerCase` maps to ASCII, checked over every code point. The document scan runs once
+     per buffer, in slices (211 ms in one piece on 200 MB), and only for such a needle.
+   - **Digits and substrings of `items`/`fields`** keep every row that could show a generated count.
+   - **Value spans only**, so a needle spelled like a tag name does not match every row.
+   Removing any one of those rules fails the differential test, in several formats.
+3. **Narrowing.** A quick filter that extends the previous one visits only the rows the previous one
+   matched anywhere — visible or hidden columns, since hidden matches are counted.
+4. **Slices.** A pass is stepped for 8 ms before paint, so small tables are unchanged; past that it
+   runs in 8 ms slices between tasks, the grid keeps its previous rows with `aria-busy`, a newer
+   filter abandons the running pass, an export waits for it, and a table left mid-pass caches
+   nothing. Progress shows after 150 ms as "Filtering… 42%" beside the filter box — chosen from three
+   renderings in both themes; a bar along the toolbar's edge read as the header's border, and a bar
+   inside the box as a stray underline.
+5. **R213's result cache holds every table's order within 64 MB for the whole application**, the
+   project lead's figure, oldest-left out first; an order larger than the budget is not cached.
+   **Shown in the Statistics panel as its own row, not in the document's total** — a departure from
+   the plan: the cache is one budget for the application, and that total is also what an open is
+   estimated against, where an evictable cache does not belong.
+
+**Measured after, 200 MB, no main-thread task over 50 ms while filtering**: `Golf` 537 ms, `WVW99`
+429 ms, `2016` 1,181 ms, `e` 2,289 ms. Typing `G`, `Go`, `Gol`, `Golf` a character every 400 ms:
+1,907, 867, 285, 191 ms.
+
+**Rejected:**
+
+- **A worker.** The renderer owns the store and reads it synchronously (D-044).
+- **A per-document text index.** O(document) memory and load time for a feature many sessions never
+  use.
+- **Caching results per needle**, so deleting a character is instant too. Narrowing covers the common
+  direction.
+- **Bitset results.** A sorted order still needs 4 bytes per row, and the budget bounds the rest.
+- **Reading the clock and starting passes in render.** The first version did, inside a `useMemo`;
+  React's compiler rules reject it, and they are right to — a pass is mutable work. The pass lives in
+  a runner read through `useSyncExternalStore` and started from a layout effect.
+
+**Not done, and owed:** the **sort** is still one synchronous step — 715 ms on 200 MB. A comparison
+sort cannot be paused as simply as a scan. And **typing forward is under half a second only from the
+third character**: a one-letter filter matches so much that narrowing from it saves little.
