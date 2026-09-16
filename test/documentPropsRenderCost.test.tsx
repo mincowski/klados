@@ -46,6 +46,7 @@ import '../src/renderer/components/Detail/Detail.css'
 import '../src/renderer/components/Raw/Raw.css'
 import '../src/renderer/components/Scrubber/Scrubber.css'
 import '../src/renderer/components/StatusBar/StatusBar.css'
+import { resetGridViewStateForTests } from '../src/renderer/components/Detail/gridViewState'
 
 let container: HTMLDivElement
 let root: Root
@@ -58,6 +59,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  resetGridViewStateForTests()
   root.unmount()
   container.remove()
 })

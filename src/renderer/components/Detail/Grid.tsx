@@ -13,6 +13,7 @@ import { useVirtualizer, type ReactVirtualizer } from '@tanstack/react-virtual'
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -29,7 +30,7 @@ import { EMPTY_DELTA_LIST, type DeltaList } from '../../../core/deltaList'
 import { effectiveChordFor, formatChord } from '../../commands/keybindings'
 import { hasMatchInRange } from '../../navigation/matchSpanLookup'
 import { activeDocumentId } from '../../notifications/documentId'
-import { notify } from '../../notifications/notificationStore'
+import { dismissNotification, notify } from '../../notifications/notificationStore'
 import { selectNode } from '../../selectNode'
 import { activeSearchStore } from '../../session/activeSearchStore'
 import { formatBytes } from '../../session/documentSession'
@@ -52,6 +53,20 @@ import { EMPTY_GRID_FILTERS, filterIndices, type GridFilters } from './gridFilte
 import { registerGridController } from './gridController'
 import { isColumnSortable, sortByColumn, type SortDirection } from './gridSort'
 import { defaultColumnWidthPx, sampleColumnStats, type ColumnStats } from './gridColumnWidth'
+import {
+  columnIdsByName,
+  isDefaultContent,
+  mergeShape,
+  readContent,
+  readShape,
+  resolveShape,
+  writeContent,
+  writeShape,
+  type GridContentState,
+  type GridViewKey,
+  type ResolvedShape
+} from './gridViewState'
+import { leaveCachedResult, takeCachedResult } from './gridResultCache'
 import { Scrollbar } from '../Scrollbar/Scrollbar'
 import { useRovingTabIndex } from '../../rovingTabIndex'
 import './Grid.css'
@@ -75,6 +90,13 @@ export interface GridProps {
    * a screen reader hears "Data grid" whichever it is. Optional: a test
    * mounting a bare `Grid` has no group to name it after. */
   readonly label?: string
+  /** R213 (`docs/plans/R213-grid-view-state.md`) — where this table's view
+   * state is kept and restored from: the document (`viewKey`), the node whose
+   * children these are, and the group. All three or none; a test mounting a
+   * bare `Grid` passes none and gets a grid that remembers nothing. */
+  readonly viewKey?: GridViewKey
+  readonly node?: NodeRef
+  readonly groupKey?: string
 }
 
 interface SortState {
@@ -95,19 +117,107 @@ export function Grid({
   sourceBuffer,
   members,
   deltas = EMPTY_DELTA_LIST,
-  label
+  label,
+  viewKey,
+  node,
+  groupKey
 }: GridProps): JSX.Element {
-  const [sort, setSort] = useState<SortState | null>(null)
-  const [filterInputs, setFilterInputs] = useState<GridFilters>(EMPTY_GRID_FILTERS)
-  const [filters, setFilters] = useState<GridFilters>(EMPTY_GRID_FILTERS)
+  const { columns: cappedColumns, overflow } = useMemo(
+    () => collectColumns(store, members),
+    [store, members]
+  )
+
+  // R213: the grid is unmounted on every tab switch and node change, and
+  // starts from what the last grid for this group left behind — its shape per
+  // group name, its filters, active cell and scroll per node
+  // (`gridViewState.ts`). Resolved once, at mount, from names to this grid's
+  // column ids; a name this group does not have is dropped. **Transient state
+  // is not part of it**: the column picker, the hidden-matches list and a
+  // pending export confirmation always start closed.
+  const persisted = viewKey !== undefined && node !== undefined && groupKey !== undefined
+  const byName = useMemo(
+    () => columnIdsByName(store, cappedColumns, overflow),
+    [store, cappedColumns, overflow]
+  )
+  const overflowIds = useMemo(() => new Set(overflow.map((c) => c.nameId)), [overflow])
+  const [restored] = useState(() => {
+    if (!persisted) return null
+    const shape = resolveShape(
+      readShape(viewKey, groupKey),
+      byName,
+      overflowIds,
+      GRID_COLUMN_PICKER_CAP
+    )
+    const content = readContent(viewKey, store, node, groupKey)
+    const perColumn = new Map<number, string>()
+    for (const [name, text] of content?.columnFilters ?? []) {
+      const id = byName.get(name)
+      // A filter on a column this grid does not show would narrow the rows
+      // with nothing on screen saying why.
+      if (id !== undefined && (!overflowIds.has(id) || shape.extraColumns.has(id)))
+        perColumn.set(id, text)
+    }
+    // Committed directly, not through the keystroke debounce: a restored
+    // filter is not typing, and the table must not first render unfiltered.
+    const filters: GridFilters = { quick: content?.quickFilter ?? '', perColumn }
+    return { shape, content, filters }
+  })
+
+  const [sort, setSort] = useState<SortState | null>(restored?.shape.sort ?? null)
+  const [filterInputs, setFilterInputs] = useState<GridFilters>(
+    restored?.filters ?? EMPTY_GRID_FILTERS
+  )
+  const [filters, setFilters] = useState<GridFilters>(restored?.filters ?? EMPTY_GRID_FILTERS)
   const filterCommitRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [pinned, setPinned] = useState<ReadonlySet<number>>(new Set())
-  const [filterRowOpen, setFilterRowOpen] = useState(false)
+  const [pinned, setPinned] = useState<ReadonlySet<number>>(
+    () => restored?.shape.pinned ?? new Set()
+  )
+  const [filterRowOpen, setFilterRowOpen] = useState(restored?.content?.filterRowOpen ?? false)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [hiddenMatchesOpen, setHiddenMatchesOpen] = useState(false)
-  const [extraColumns, setExtraColumns] = useState<ReadonlySet<number>>(new Set())
-  const [active, setActive] = useState<{ row: number; col: number }>({ row: 0, col: 0 })
+  const [extraColumns, setExtraColumns] = useState<ReadonlySet<number>>(
+    () => restored?.shape.extraColumns ?? new Set()
+  )
+  const [active, setActive] = useState<{ row: number; col: number }>(
+    () => restored?.content?.active ?? { row: 0, col: 0 }
+  )
   const [pendingExport, setPendingExport] = useState<GridExportFormat | null>(null)
+
+  // R213 (`gridResultCache.ts`): a grid returned to with exactly the sort,
+  // columns and filters it was left with reuses the display order it had,
+  // rather than paying the filter pass and the sort again — 7.0 s on the
+  // 200 MB fixture with a quick filter. Used only while those three are still
+  // the restored values (compared by identity below); the first change
+  // recomputes as it always did.
+  const [fromCache] = useState(() => {
+    if (!persisted || restored === null) return null
+    const hit = takeCachedResult({
+      viewKey,
+      store,
+      sourceBuffer,
+      node,
+      groupKey,
+      sort: restored.shape.sort,
+      extraColumns: restored.shape.extraColumns,
+      filters: restored.filters
+    })
+    if (hit === null) return null
+    const displayIndices = Array.from(hit.order)
+    // The filter's own result is document order; the cached order is that,
+    // sorted. A numeric sort of the indices gives it back without a filter pass.
+    const indices =
+      restored.shape.sort === null ? displayIndices : Array.from(hit.order.slice().sort())
+    return {
+      displayIndices,
+      filterResult: {
+        indices,
+        hiddenMatchCount: hit.hiddenMatchCount,
+        hiddenMatchColumns: hit.hiddenMatchColumns
+      }
+    }
+  })
+  const [initialSort] = useState(sort)
+  const [initialFilters] = useState(filters)
   const quickFilterRef = useRef<HTMLInputElement>(null)
 
   // M4-PLAN.md G5: an overlay, not a filter — the grid's own quick/column
@@ -119,10 +229,6 @@ export function Grid({
     activeSearchStore.getSnapshot
   )
 
-  const { columns: cappedColumns, overflow } = useMemo(
-    () => collectColumns(store, members),
-    [store, members]
-  )
   const columns = useMemo(() => {
     if (extraColumns.size === 0) return cappedColumns
     const extra = overflow.filter((c) => extraColumns.has(c.nameId))
@@ -140,9 +246,13 @@ export function Grid({
     [orderedColumns, pinned]
   )
 
+  const [initialColumns] = useState(columns)
   const filterResult = useMemo(
-    () => filterIndices(store, sourceBuffer, members, columns, filters),
-    [store, sourceBuffer, members, columns, filters]
+    () =>
+      fromCache !== null && filters === initialFilters && columns === initialColumns
+        ? fromCache.filterResult
+        : filterIndices(store, sourceBuffer, members, columns, filters),
+    [store, sourceBuffer, members, columns, filters, fromCache, initialFilters, initialColumns]
   )
   const filteredIndices = filterResult.indices
 
@@ -180,14 +290,15 @@ export function Grid({
   // R43/D-071: an explicitly-dragged width wins over the derived one —
   // double-click (`GridHeaderCell`'s own resize handle) clears a column's
   // entry, resetting it to derived. Scoped to this Grid instance's own
-  // lifetime (reset alongside the stats cache below), the same "persisted
-  // for the session" `R43-grid-sizing-and-scroll.md` asks for — a
-  // *different* group's Grid (a different node selected) starts fresh
-  // rather than carrying over widths that described a different column set.
-  const [widthOverrides, setWidthOverrides] = useState<ReadonlyMap<number, number>>(new Map())
-  useEffect(() => {
-    setWidthOverrides(new Map())
-  }, [store, sourceBuffer, members])
+  // lifetime.
+  //
+  // R213: no longer reset when `store` or `members` change. Every edit
+  // replaces both, so a resized column snapped back on every keystroke typed
+  // in Raw; the ids are the same across a splice, and a different group or
+  // node is a different, keyed, `Grid` that restores its own widths.
+  const [widthOverrides, setWidthOverrides] = useState<ReadonlyMap<number, number>>(
+    () => restored?.shape.widths ?? new Map()
+  )
 
   const columnWidth = useCallback(
     (column: GridColumn): number => {
@@ -218,6 +329,12 @@ export function Grid({
 
   const displayIndices = useMemo(() => {
     if (sort === null) return filteredIndices
+    if (
+      fromCache !== null &&
+      sort === initialSort &&
+      filteredIndices === fromCache.filterResult.indices
+    )
+      return fromCache.displayIndices
     const column = orderedColumns.find((c) => c.nameId === sort.nameId)
     if (column === undefined || !isColumnSortable(column)) return filteredIndices
     return sortByColumn(
@@ -229,9 +346,102 @@ export function Grid({
       sort.direction,
       isNumeric(column)
     )
-  }, [filteredIndices, sort, orderedColumns, store, sourceBuffer, members, isNumeric])
+  }, [
+    filteredIndices,
+    sort,
+    orderedColumns,
+    store,
+    sourceBuffer,
+    members,
+    isNumeric,
+    fromCache,
+    initialSort
+  ])
 
   const parentRef = useRef<HTMLDivElement>(null)
+
+  // R213: the shape is written when it changes — a sort, a pin, a column
+  // shown, a width — never per filter keystroke, which is not in this list.
+  // Skipped on mount: restoring is not a change, and writing it back would
+  // only rewrite what was just read.
+  const shapeMountedRef = useRef(false)
+  useEffect(() => {
+    if (!shapeMountedRef.current) {
+      shapeMountedRef.current = true
+      return
+    }
+    if (!persisted) return
+    const current: ResolvedShape = { sort, extraColumns, pinned, widths: widthOverrides }
+    writeShape(viewKey, groupKey, mergeShape(readShape(viewKey, groupKey), current, store, byName))
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- written when the shape changes; `store`/`byName` are read at that moment, and a new store alone changes nothing worth writing
+  }, [sort, extraColumns, pinned, widthOverrides])
+
+  // R213: content — filters, the filter row, the active cell, the scroll
+  // offset — is written once, when this grid unmounts, from the latest values.
+  // A layout effect's cleanup, because it runs before the scroll element is
+  // detached; the offset itself is tracked by `onScroll` rather than read
+  // there, so it does not depend on that ordering either.
+  const scrollRef = useRef({
+    top: restored?.content?.scrollTop ?? 0,
+    left: restored?.content?.scrollLeft ?? 0
+  })
+  const latestValues = {
+    store,
+    sourceBuffer,
+    filterInputs,
+    filterRowOpen,
+    active,
+    sort,
+    extraColumns,
+    filters,
+    displayIndices,
+    filterResult
+  }
+  const latestContentRef = useRef(latestValues)
+  useEffect(() => {
+    latestContentRef.current = latestValues
+  })
+  useLayoutEffect(() => {
+    const el = parentRef.current
+    if (el !== null) {
+      el.scrollTop = scrollRef.current.top
+      el.scrollLeft = scrollRef.current.left
+    }
+    return () => {
+      if (!persisted) return
+      const latest = latestContentRef.current
+      const content: GridContentState = {
+        // The text boxes' contents, not the debounced commit: a filter typed
+        // a moment before switching away is still what the user typed.
+        quickFilter: latest.filterInputs.quick,
+        columnFilters: [...latest.filterInputs.perColumn].map(
+          ([id, text]) => [latest.store.textOf(id), text] as const
+        ),
+        filterRowOpen: latest.filterRowOpen,
+        active: latest.active,
+        scrollTop: scrollRef.current.top,
+        scrollLeft: scrollRef.current.left,
+        nodeCount: latest.store.nodeCount
+      }
+      writeContent(viewKey, node, groupKey, isDefaultContent(content) ? null : content)
+      leaveCachedResult(
+        {
+          viewKey,
+          store: latest.store,
+          sourceBuffer: latest.sourceBuffer,
+          node,
+          groupKey,
+          sort: latest.sort,
+          extraColumns: latest.extraColumns,
+          filters: latest.filters
+        },
+        latest.displayIndices,
+        latest.filterResult.hiddenMatchCount,
+        latest.filterResult.hiddenMatchColumns
+      )
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount and unmount only; the key in `Detail.tsx` remounts this grid for any other node or group
+  }, [])
 
   // R34 §4: pinning has no limit (a cap was proposed and rejected, D-066 —
   // pin order is legitimately used to arrange columns), so pinned columns
@@ -276,7 +486,10 @@ export function Grid({
     count: displayIndices.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => ROW_HEIGHT,
-    overscan: 12
+    overscan: 12,
+    // R213: the first render already draws the restored rows, rather than
+    // the top of the table for one frame.
+    initialOffset: () => scrollRef.current.top
   })
   const virtualizedColumns = orderedColumns.slice(stickyCount)
   const colVirtualizer = useVirtualizer({
@@ -284,7 +497,8 @@ export function Grid({
     count: virtualizedColumns.length,
     getScrollElement: () => parentRef.current,
     estimateSize: (index) => columnWidth(virtualizedColumns[index]!),
-    overscan: 4
+    overscan: 4,
+    initialOffset: () => scrollRef.current.left
   })
   // R43/D-071: `colVirtualizer` only recomputes an index's size the first
   // time it's asked (`@tanstack/virtual-core`'s own `itemSizeCache`) —
@@ -306,7 +520,18 @@ export function Grid({
   // row the virtualizer had never mounted, so the highlight vanished and
   // further presses looked dead. `row === -1` is the header row (R62),
   // which is sticky and always visible, so there's nothing to scroll to.
+  //
+  // R213: not until the active row actually moves. A restored grid has a
+  // restored scroll offset, and the user may have scrolled away from the
+  // active row; bringing it back into view would undo exactly what was
+  // restored.
+  const mountedActiveRef = useRef(active)
+  const rowMovedRef = useRef(false)
   useEffect(() => {
+    if (!rowMovedRef.current) {
+      if (active.row === mountedActiveRef.current.row) return
+      rowMovedRef.current = true
+    }
     if (active.row === -1) return
     rowVirtualizer.scrollToIndex(active.row, { align: 'auto' })
   }, [active.row, rowVirtualizer])
@@ -325,7 +550,17 @@ export function Grid({
   // `bodyLeft + start - scrollLeft`, so aligning it flush with the sticky
   // columns is `scrollLeft = start`, needing no inset at all — only the
   // right-edge target, which must reach exactly to `viewport`, needs it).
+  //
+  // R213: the same rule as the row axis above, and it matters more here — this
+  // effect also re-runs when `stickyCount` settles after the first viewport
+  // measurement, which on a restored grid with pins would scroll the restored
+  // horizontal offset away before the user has touched anything.
+  const colMovedRef = useRef(false)
   useEffect(() => {
+    if (!colMovedRef.current) {
+      if (active.col === mountedActiveRef.current.col) return
+      colMovedRef.current = true
+    }
     const el = parentRef.current
     if (el === null || active.col < stickyCount) return
     const virtualizedIndex = active.col - stickyCount
@@ -451,7 +686,7 @@ export function Grid({
   function copyAs(format: GridExportFormat): void {
     if (displayIndices.length > GRID_EXPORT_CONFIRM_ROWS) {
       setPendingExport(format)
-      notify({
+      exportPromptRef.current = notify({
         severity: 'warning',
         message: `Copying ${displayIndices.length.toLocaleString()} rows as ${format.toUpperCase()} builds about ${formatBytes(estimateExportBytes(store, sourceBuffer, members, displayIndices, orderedColumns))} of text. Continue?`,
         actions: [
@@ -465,6 +700,20 @@ export function Grid({
     }
     void runExport(format)
   }
+
+  // R213: the prompt lives in the notification stack, not in this grid, so it
+  // outlived a tab switch — and "Copy Anyway" then reached the next grid, which
+  // has nothing pending, and did nothing. Dismissed with the grid it belongs to.
+  const exportPromptRef = useRef<string | null>(null)
+  const pendingExportRef = useRef(pendingExport)
+  pendingExportRef.current = pendingExport
+  useEffect(
+    () => () => {
+      if (pendingExportRef.current !== null && exportPromptRef.current !== null)
+        dismissNotification(exportPromptRef.current)
+    },
+    []
+  )
 
   function confirmExport(): void {
     if (pendingExport === null) return
@@ -769,6 +1018,12 @@ export function Grid({
           aria-colcount={orderedColumns.length}
           tabIndex={0}
           onKeyDown={onKeyDown}
+          onScroll={(event) => {
+            scrollRef.current = {
+              top: event.currentTarget.scrollTop,
+              left: event.currentTarget.scrollLeft
+            }
+          }}
         >
           <div
             style={{ width: totalWidth, height: totalHeight + headerHeight, position: 'relative' }}

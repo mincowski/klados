@@ -1,11 +1,20 @@
 # R213 — keep a table's sort, columns and filters when switching group tabs
 
-<!-- status: open -->
+<!-- status: built -->
 
-**Open.** Raised by the project lead while accepting R211's tabs: switching to another group and
-back resets the table, and *"we'll have to keep the sorting etc"*. R211 recorded it as a known
-limitation (D-104) rather than an oversight, because keeping every group's grid mounted to preserve
-the state would reintroduce the cost the tabs removed. This plan is the other way to keep it.
+**Built.** A table keeps its sort, extra columns, pins and widths per group name per document, and
+its filters, filter row, active cell and scroll offset per node — § 3's split, built as recommended.
+Both node switching and tab switching are covered (§ 2). **§ 5's measurement turned out too slow on
+the 200 MB fixture** (7.0 s to switch back to a filtered, sorted group), so the project lead chose a
+bounded cache of display order, which § 7 had rejected in its unbounded form: switching back is now
+0.5 s. **The mechanism § 3 said to verify was worse than it assumed**: not only a full reparse but
+*every edit* replaces the store, which had been silently resetting R211's remembered tab on each
+keystroke. D-105 records the keying and the cache. See § 9.
+
+Raised by the project lead while accepting R211's tabs: switching to another group and back resets
+the table, and *"we'll have to keep the sorting etc"*. R211 recorded it as a known limitation
+(D-104) rather than an oversight, because keeping every group's grid mounted to preserve the state
+would reintroduce the cost the tabs removed. This plan is the other way to keep it.
 
 ## 1. What is lost today, from the code
 
@@ -127,3 +136,128 @@ by design); widening it is a separate question with its own privacy and stalenes
 ## 8. Version
 
 **Ask on landing.** Candidate: patch — behaviour the user already expects, no new capability.
+
+## 9. Results — built
+
+### What landed
+
+- **`gridViewState.ts`** — the view state, keyed as § 3 recommended: **shape** (sort, extra
+  columns, pins, widths) per group name per document; **contents** (quick and column filters, the
+  filter row, the active cell, the scroll offset) per node and group. Names are stored as text and
+  resolved to this grid's column ids at mount. A name the group lacks is dropped on restore and
+  **kept in the stored shape**, so changing a sibling's table does not erase what another node's had.
+  Contents are bounded to 200 nodes per document (oldest out), an untouched table writes nothing, and
+  contents written under a different node count are discarded because a node ref is a position.
+- **`Grid.tsx`** — initialised from it at mount; the shape written when it changes (never per filter
+  keystroke), the contents written once at unmount. **The text in the filter boxes** is what is kept,
+  not the debounced commit, so a filter typed a moment before switching away survives. Filters restore
+  committed, not through the debounce. The scroll offset restores before the first paint
+  (`initialOffset`), and the effects that follow the active cell no longer run until it moves.
+- **`Detail.tsx`** — the grid is keyed per interner, node and group, so a node switch remounts it
+  and restores (§ 2: node switching is covered, not only tabs). The remembered tab moved into the same
+  store and key.
+- **`gridResultCache.ts`** — the bounded cache of display order below, which § 5 said would be
+  reconsidered only on a measurement. It was.
+- **D-105** records the keying and the cache; D-104 and `R210-grid-grouping.md` are annotated in
+  place where they called the reset a known limitation. `FINDINGS.md` gains one entry (below).
+
+### § 3's mechanism, verified — and worse than asked
+
+The plan asked whether name ids survive a splice and a full reparse. Read from
+`documentSession.ts`, `subtreeSplice.ts` and `parseClient.ts`:
+
+- **Every edit replaces `document.store` and `document.sourceBuffer`.** A splice builds a new
+  `NodeStore` from the old one's buffers; `applyEdit` builds a new `SourceBuffer`. So **nothing
+  keyed by either object's identity survives one keystroke** — and R211's remembered tab was a
+  `WeakMap<NodeStore, number>`. Typing in Raw has been snapping the tabs back to the first group
+  since R211 shipped. Now asserted: a new store for the same file keeps the tab.
+- **A splice keeps the `Interner`** (`request.interner`), so ids survive it. **A full reparse builds
+  a new one** in the worker (`Interner.fromBuffers`), and an id can differ for the same name — the
+  test builds that case explicitly and asserts the ids differ before asserting the sort survives.
+- So the keying followed (acceptance 10): **tab and path for the document, text for names**, and a
+  mounted grid is also keyed by its interner, remounting across a full reparse rather than holding
+  ids that may now name other columns.
+
+### § 5's measurement, and the cache it led to
+
+Built application, `electron .` via Playwright, Windows 11, 1280×800. Each figure runs from clicking
+the tab to two animation frames after the grid committed, so it includes up to ~33 ms of frame
+alignment. Fixtures are `spike/fixtures/cars-*.xml` with two `<dealer>` elements appended, so the
+node has a second group to switch to. Median of 5 runs (10 MB) or 3 (200 MB).
+
+| Switch back to `car` | 10 MB, re-derived | 10 MB, cached | 200 MB, re-derived | 200 MB, cached |
+|---|---|---|---|---|
+| no sort, no filter | 88 ms | 101 ms | 490 ms | 478 ms |
+| sorted by `year` | 149 ms | 101 ms | **1,397 ms** | 572 ms |
+| sorted + quick filter `Golf` | 353 ms | 93 ms | **6,965 ms** | 519 ms |
+
+**The 200 MB figures were too slow**: a frozen window for seven seconds after clicking a tab. The
+filter pass is the bulk of it — typing `Golf` into the same table takes **5,854 ms** after the
+debounce, so restoring was paying exactly what typing had. Reported rather than shipped; the project
+lead chose a bounded cache of results, the option this plan's § 7 had rejected in its unbounded
+per-group form:
+
+- **Display order only, 4 bytes per visible row** (`Int32Array`): 2.5 MB for this fixture, 8 MB for
+  a two-million-row group. The filter's document-order result is recovered by a numeric sort of the
+  same indices rather than stored twice.
+- **At most two entries; once a grid mounts, at most one belongs to a grid not on screen.** One slot
+  was the proposal, and would not have worked: it always holds the grid just left, never the one
+  being returned to, so flipping between two sorted groups never hits. Two, with the rule enforced
+  at mount, is one extra group's order — 16 MB worst case only while Detail shows no table at all.
+- **Only a grid with a sort or a filter leaves an entry**; the no-state row above is column
+  collection and mounting, which the cache does not and need not touch.
+- **Exact**: store, buffer, node, group, sort, extra columns and the *committed* filters must all
+  match. A filter inside its debounce misses, and an edit misses.
+- **Weak references to the store and buffer**, so a cache entry never keeps a superseded document
+  alive.
+
+**Nothing else stored is sized by row count** (acceptance 7), asserted on the stored shape of a
+20,000-row group. The cache is the one exception, and its size is asserted in bytes.
+
+**Not addressed, and the cause of the slow row**: the filter pass itself. 5.9 s per commit on the
+200 MB fixture, uncancellable, and paid again after any pause in typing longer than the 200 ms
+debounce. R213 stops a tab switch from paying it twice; it does not make typing a filter faster.
+
+### What the review and the tests found
+
+- **Widths were reset on every edit**, not only on a group change: the effect clearing them listed
+  `store` and `members`, which every edit replaces. Found by reading the code while removing it —
+  not reproduced in the application — and gone, since a different group or node is now a different,
+  keyed grid.
+- **The column-follow effect re-ran when the pinned-column count settled** after the first viewport
+  measurement, scrolling a restored horizontal offset away before the user touched anything. Both
+  follow effects now wait until the active cell moves. The test for it passed without the fix at
+  first — the active cell was in the pinned column, where the effect returns early — and was
+  rewritten until it failed without the fix.
+- **A pending export prompt outlived its grid.** It lives in the notification stack, so after a
+  switch its "Copy Anyway" reached a grid with nothing pending and did nothing. Dismissed with its grid.
+- **Reading the active tab inside `DetailContent` keyed its first two renders differently**: the
+  first tab is minted lazily by whichever code first reads the active session, which can be the grid
+  mounting below. Found because R211's "clicking a tab swaps the table" failed when run alone and
+  passed in its file. `Detail` passes the tab in.
+- **A literal NUL byte** reached `gridViewState.ts` through a `\u0000` separator written by an
+  editing tool, which made git treat the file as binary. Replaced with `|`.
+- **Mutation checks**: disabling restore fails 9 of the view-state tests; a cache lookup that never
+  matches fails both reuse tests; storing the sorted order as the filter's result fails the unsort
+  test; the column-follow and export-prompt fixes each fail their test when reverted.
+
+### Acceptance
+
+1. **Met** — sort, switch, back: same column and direction, same rows.
+2. **Met** — pins, a resized width and a column-picker extra column survive, each asserted.
+3. **Met** — sorting `book` leaves `magazine` unsorted.
+4. **Met, both ways** — the filter is kept on its node and is not carried to the sibling shelf, which
+   does get the shared sort.
+5. **Met** — a sort and pin on `isbn` render nothing on the shelf without it, and come back on the
+   shelf with it after a pin was changed in between.
+6. **Met** — the column picker comes back closed, and a pending export prompt is dismissed.
+7. **Met** — asserted on shape; the cache is the stated exception.
+8. **Met** — `Copy Grid as CSV` after a round trip exports the restored filter and order.
+9. **Met, and it changed the design** — the table above.
+10. **Met** — the section above; the keying followed from it.
+11. **Met** — `npm test` 2,201 passing, 5 skipped; typecheck and lint clean (lint's three warnings
+    are the existing incompatible-library ones).
+
+### Version
+
+Asked on landing.

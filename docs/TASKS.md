@@ -131,7 +131,7 @@ so a reader of an old commit message can still find out what `R41` was.
 | **R209** | built | `docs/plans/R209-drop-namespaces.md` |
 | **R210–R211** | built | `docs/plans/R210-grid-grouping.md` |
 | **R212** | built | `docs/plans/R212-dark-elevation-shadow.md` |
-| **R213** | **OPEN** | `docs/plans/R213-grid-view-state.md` |
+| **R213** | built | `docs/plans/R213-grid-view-state.md` |
 
 ### Pre-`R` milestones
 

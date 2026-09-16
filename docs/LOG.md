@@ -16,6 +16,38 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R213 — a table keeps its sort and filters when you switch away · built
+
+**Plan:** `docs/plans/R213-grid-view-state.md` · **Decision:** D-105
+
+**Switching group tabs used to reset the table**, and so did selecting another node and coming
+back: the grid is unmounted, and its sort, pins, widths and filters lived inside it. They now live
+outside it. How a table *looks* — sort, extra columns, pins, widths — is kept per group name for the
+document, so sorting `book` on one shelf sorts every `book` table. What a table *contains* — filters,
+the active cell, the scroll offset — is kept per node, because a filter carried to a sibling shelf
+would show an empty table with no explanation.
+
+**The plan asked whether name ids survive an edit. The answer was worse than the question**: every
+edit replaces the node store and the source buffer, not only a full reparse. R211 had keyed the
+remembered group tab by the store, so typing one character in Raw had been snapping the tabs back to
+the first group ever since. A full reparse also builds a new interner whose ids can differ for the
+same names. So the state is keyed by tab and path, and names are stored as text.
+
+**The plan's measurement step changed the design.** Restoring re-runs the filter pass and the sort,
+and on the 200 MB fixture that meant a seven-second frozen window after clicking a tab back to a
+sorted, filtered group — the filter pass alone being what typing it had cost. The project lead chose
+a cache the plan had rejected in unbounded form: display order only, 4 bytes per visible row, at most
+one group off screen once a grid is showing. It needed two entries rather than the one proposed,
+because a single slot always holds the grid just left and never the one being returned to. Switching
+back is now half a second, most of which is mounting.
+
+**Found on the way**: resized widths were being reset by every edit too; a restored horizontal scroll
+was undone by an effect re-running once pinned columns settled; a pending export prompt outlived its
+grid as a button that did nothing; and reading the active tab inside `DetailContent` gave its first two
+renders different keys, because the first tab is created lazily by whatever reads the session first.
+That last one surfaced only because an R211 test failed when run on its own. Also, twice, a `\u0000`
+written through an editing tool landed as a literal NUL byte and turned a file binary.
+
 ## R210–R211 — one table per group, and the CSV table that never had rows · built
 
 **Plan:** `docs/plans/R210-grid-grouping.md` · **Decisions:** D-103, D-104

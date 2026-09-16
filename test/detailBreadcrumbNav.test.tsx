@@ -19,6 +19,7 @@ import type { OpenDocument } from '../src/renderer/session/documentSession'
 import '../src/renderer/styles/tokens.css'
 import '../src/renderer/components/Detail/Detail.css'
 import '../src/renderer/components/Detail/Grid.css'
+import { resetGridViewStateForTests } from '../src/renderer/components/Detail/gridViewState'
 
 let container: HTMLDivElement
 let root: Root
@@ -32,6 +33,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  resetGridViewStateForTests()
   root.unmount()
   container.remove()
 })

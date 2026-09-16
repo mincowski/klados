@@ -27,6 +27,15 @@ scalar rather than owning a `Scalar` child. Load-bearing for the memory budget �
 
 **The pending-delta list is mandatory** (D-010), not an optimization.
 
+**Every edit replaces `document.store` and `document.sourceBuffer` — so nothing may be keyed by
+their identity and expected to last.** Not only a full reparse: a splice builds a new `NodeStore`
+too, and every `applyEdit` a new `SourceBuffer`. A `WeakMap<NodeStore, …>` is therefore memory that
+is forgotten on the next keystroke typed in Raw; R211 keyed its remembered group tab that way and
+the tab silently snapped back to the first group on every edit, unnoticed until R213 checked. **Name
+ids are only half-stable**: a splice reuses the `Interner`, but a full reparse builds a new one in
+the worker, and the same name can get a different id. State meant to survive editing keys by tab and
+path, and stores names as text (`gridViewState.ts`, D-105).
+
 **Everything above `src/formats/` is format-agnostic, and it holds.** M6 proved it: TOML needed
 zero lines changed outside its own file plus two registration points, no new `NodeKind`, and
 `detectGrid` identified TOML arrays-of-tables as grid-eligible with no TOML-specific code. If a

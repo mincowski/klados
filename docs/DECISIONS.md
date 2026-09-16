@@ -124,6 +124,7 @@ Search for the id to jump to one.
 | **D-102** | Dark keeps a shadow, tuned to the ceiling a black shadow has on a near-black pane |  |
 | **D-103** | Every repeating group is its own table; the coverage floor is deleted, not retuned |  |
 | **D-104** | One table at a time, a tab per group — not a capped stack |  |
+| **D-105** | A table's view state outlives the table: shape per group name, contents per node, and one bounded cache of results |  |
 
 ---
 
@@ -3787,6 +3788,70 @@ pinned columns are keyed by one group's column name ids, so they cannot carry ac
 when switching back — accepted, because keeping every group's grid mounted to preserve them would
 reintroduce the cost the tabs removed.
 
+*R213 lifted the reset (D-105):* the grid is still unmounted on a switch, but its view state is kept
+outside it and restored by name. The remembered tab also moved off the `NodeStore` key described
+above, which every edit replaces.
+
 **Arrows move focus along the tabs; Enter, Space or a click switches.** Switching remounts the
 grid, which on a two-million-row group is not free, so automatic activation on every arrow press
 was the wrong WAI-ARIA variant. The palette has `Show Next/Previous Grid Group` (invariant 10).
+
+### D-105 — A table's view state outlives the table: shape per group name, contents per node, and one bounded cache of results (R213) · `settled`
+
+**A grid's view state is kept outside the grid and restored when a grid for the same group mounts
+again** — after a tab switch, or after selecting another node and coming back. The grid itself is
+still unmounted (D-104's reason stands). `gridViewState.ts` holds it.
+
+**Split by what the state describes**, as the plan recommended and the project lead accepted:
+
+- **Shape** — sort, extra columns, pins, widths — **per group name, per document**. It describes how
+  the user wants to read that kind of record, so sorting `book` by `year` on one shelf sorts every
+  `book` table. A column the group lacks is dropped on restore and **kept in the stored shape**, so
+  pinning something on a sibling shelf that has no `isbn` does not unpin `isbn` where it exists.
+- **Contents** — filters, the filter row, the active cell, the scroll offset — **per node and
+  group**. A quick filter carried to a sibling shelf would show an empty table with nothing on screen
+  explaining why. Bounded to 200 nodes per document, oldest out, and an untouched table writes
+  nothing. Discarded when the store's node count has changed, because a node ref is a position.
+- **Transient state never restores**: the column picker, the hidden-matches list, a pending export
+  prompt. The export prompt is dismissed with its grid, where it used to survive a switch as a
+  button that did nothing.
+
+**Keyed by tab and path, with names as text — never by `NodeStore` or name id.** Verified before
+building, as the plan required, and the finding was stronger than the plan's question: **every edit
+replaces `document.store` and `document.sourceBuffer`**, not only a full reparse, so anything keyed
+by either object's identity is forgotten on each keystroke. R211's remembered tab was keyed exactly
+that way. A splice keeps the `Interner` and so the name ids; a full reparse builds a new one in the
+worker, whose ids can differ for the same names — so a mounted grid is also keyed by its interner,
+and remounts (restoring by name) rather than sorting by whichever column now carries an old id.
+
+**One exception to "store view state, never results", chosen on a measurement.** The plan said to
+re-derive the display order on restore and reconsider caching only if switching measured too slow.
+On the 200 MB fixture (633,268 rows) switching back took 0.5 s with no state, 1.4 s sorted and
+**7.0 s sorted with a quick filter** — the filter pass being 5.9 s, the same as typing it — with the
+UI frozen throughout. The project lead chose a cache (`gridResultCache.ts`):
+
+- **Display order only**, as an `Int32Array`: 4 bytes per visible row, 2.5 MB for that fixture, 8 MB
+  for a two-million-row group. The filter's own document-order result is recovered by a numeric sort
+  of the same indices, so it is not stored twice.
+- **At most two entries, and once a grid mounts at most one of them belongs to a grid not on
+  screen** — the other is the mounted grid's own. Two, not one, because a single slot always holds
+  the grid just left and never the one being returned to, so flipping between two sorted groups
+  would never hit. When Detail shows no table at all, both can be off screen: 16 MB worst case.
+- **Only a grid that paid for its order leaves one**: no sort and no filter means nothing to save.
+- **Exact, not approximate**: used only when the store, buffer, node, group, sort, extra columns and
+  the *committed* filters all match — a filter still inside its keystroke debounce misses.
+- **Never holds the document**: store and buffer are referenced weakly, so a superseded 200 MB
+  document is not kept alive by its cache entry.
+
+Measured after: 0.5 s filtered and sorted, 0.6 s sorted — the no-state figure, which is column
+collection and mounting, not the cache.
+
+**Rejected:**
+
+- **Keeping every group's grid mounted** — D-104's cost, unchanged.
+- **Caching per group per document**, which the plan rejected and still stands: O(rows) for every
+  group ever sorted. The bound is what made the exception acceptable.
+- **Persisting view state across restarts** — session restore persists paths only (R29).
+- **Reading the active tab inside `DetailContent`**: the first tab is minted lazily by whichever code
+  reads the active session first, which can be the grid mounting below it, so the key differed between
+  the first render and the second. `Detail` passes it in.

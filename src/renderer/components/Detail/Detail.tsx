@@ -36,7 +36,15 @@ import {
 import { detectGrid } from './gridDetection'
 import { focusGrid, registerGridGroupPicker } from './gridController'
 import { Grid } from './Grid'
-import { GridGroupPicker, groupLabelOf, rememberGroup, selectedGroupIndex } from './GridGroupPicker'
+import { GridGroupPicker, groupLabelOf } from './GridGroupPicker'
+import {
+  groupKeyOf,
+  internerKeyOf,
+  rememberGroup,
+  selectedGroupIndex,
+  type GridViewKey
+} from './gridViewState'
+import { activeDocumentId } from '../../notifications/documentId'
 import { resolveWrapperTarget, skippedComments } from '../../wrapperDescent'
 import { useRovingTabIndex } from '../../rovingTabIndex'
 import './Detail.css'
@@ -57,12 +65,25 @@ export function Detail(): JSX.Element {
       </p>
     )
   }
-  return <DetailContent document={state.document} selectedNode={state.selection.selectedNode} />
+  return (
+    <DetailContent
+      document={state.document}
+      selectedNode={state.selection.selectedNode}
+      tabId={activeDocumentId()}
+    />
+  )
 }
 
 interface DetailContentProps {
   readonly document: OpenDocument
   readonly selectedNode: NodeRef
+  /** R213: the tab this document is open in — half of the key a table's view
+   * state is kept under (`gridViewState.ts`). Passed in rather than read here:
+   * the active tab is minted lazily by the first reader of the active session,
+   * which a grid mounting below this can be, so reading it here could key the
+   * first render and the second differently. `Detail` has already read the
+   * session, so the tab exists by then. A test omits it. */
+  readonly tabId?: string | null
 }
 
 /** Exported for `R19-document-props.md` §5a's render-count measurement
@@ -70,7 +91,11 @@ interface DetailContentProps {
  * `useDocumentSession()`, a module-level singleton a from-scratch render
  * can't easily stand up; this takes its document as a plain prop, same
  * reasoning `Tree.tsx`'s own `TreeContent` export gives. */
-export function DetailContent({ document, selectedNode }: DetailContentProps): JSX.Element {
+export function DetailContent({
+  document,
+  selectedNode,
+  tabId = null
+}: DetailContentProps): JSX.Element {
   const { store, sourceBuffer, formatId, pendingSpanDeltas } = document
   const capabilities = getFormatCapabilities(formatId)
 
@@ -113,19 +138,27 @@ export function DetailContent({ document, selectedNode }: DetailContentProps): J
   // collect them (see `gridDetection.ts`'s header for what that pass cost).
   //
   // Which tab is selected is remembered by group name per document
-  // (`GridGroupPicker.tsx`), so stepping between sibling nodes of the same
+  // (`gridViewState.ts`), so stepping between sibling nodes of the same
   // shape keeps the same group open. `pickCount` only forces the re-render.
+  //
+  // R213: keyed by tab and path rather than by `store`, which every edit
+  // replaces — keyed by the store, typing one character in Raw snapped the
+  // tabs back to the first group. The grids' own view state uses the same key.
   const tables = detection.tables
   const useGrid = tables.length > 0
   const [, setPickCount] = useState(0)
-  const selectedIndex = selectedGroupIndex(store, tables)
+  const viewKey = useMemo<GridViewKey>(
+    () => ({ tabId, filePath: document.filePath }),
+    [tabId, document.filePath]
+  )
+  const selectedIndex = selectedGroupIndex(viewKey, store, tables)
   const selectedTable = tables[selectedIndex]
   const gridPanelId = useId()
 
   function pickGroup(index: number): void {
     const table = tables[index]
     if (table === undefined) return
-    rememberGroup(store, table.nameId)
+    rememberGroup(viewKey, groupKeyOf(store, table))
     setPickCount((n) => n + 1)
   }
 
@@ -139,12 +172,12 @@ export function DetailContent({ document, selectedNode }: DetailContentProps): J
           // Read the selection now, not the one captured at render: two
           // commands before a re-render (a held key repeating) would otherwise
           // both step from the same stale index and move once instead of twice.
-          const current = selectedGroupIndex(store, tables)
+          const current = selectedGroupIndex(viewKey, store, tables)
           pickGroup((current + delta + tables.length) % tables.length)
         }
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `pickGroup` closes over exactly these
-    [store, tables]
+    [viewKey, store, tables]
   )
 
   // Every table member is excluded from the list beneath, not only the shown
@@ -300,11 +333,16 @@ export function DetailContent({ document, selectedNode }: DetailContentProps): J
                 aria-label={tables.length > 1 ? groupLabelOf(store, selectedTable) : undefined}
               >
                 <Grid
-                  // A fresh grid per group: sort, filters, pinned and extra
-                  // columns are all keyed by the column name ids of one group,
-                  // and carrying them into another group's table would apply
-                  // them to columns that do not exist there.
-                  key={selectedTable.nameId}
+                  // A fresh grid per node and group: its view state is keyed by
+                  // one group's columns, and R213's store (`gridViewState.ts`)
+                  // is what a grid for the same group starts from — its shape
+                  // per group name, its filters and scroll per node. The interner
+                  // too: a full reparse can renumber the column ids a mounted
+                  // grid holds (`internerKeyOf`).
+                  key={`${internerKeyOf(store)}:${node}:${selectedTable.nameId}`}
+                  viewKey={viewKey}
+                  node={node}
+                  groupKey={groupKeyOf(store, selectedTable)}
                   store={store}
                   sourceBuffer={sourceBuffer}
                   members={selectedTable.members}
