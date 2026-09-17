@@ -35,9 +35,6 @@ import {
 export const SYNC_BUDGET_MS = 8
 /** One slice between yields — well inside a 60 Hz frame. */
 export const SLICE_MS = 8
-/** Progress is published at most this often; per slice would re-render the
- * grid more than a hundred times a second for nothing anyone can read. */
-const PROGRESS_INTERVAL_MS = 100
 
 const EMPTY_OUTCOME: FilterOutcome = {
   indices: [],
@@ -51,8 +48,6 @@ export interface FilterPassState {
    * the previous request's for the same rows, or none if the rows changed. */
   readonly result: FilterOutcome
   readonly pending: boolean
-  /** 0 to 1 while pending. */
-  readonly progress: number
 }
 
 export interface FilterRequest {
@@ -137,8 +132,7 @@ export class FilterPassRunner {
     this.initial = initial
     this.snapshot = {
       result: initial?.outcome ?? EMPTY_OUTCOME,
-      pending: initial === null,
-      progress: 0
+      pending: initial === null
     }
   }
 
@@ -157,7 +151,7 @@ export class FilterPassRunner {
   private complete(request: FilterRequest, outcome: FilterOutcome): void {
     this.base = { ...request, outcome }
     this.shown = { members: request.members, outcome }
-    this.publish({ result: outcome, pending: false, progress: 1 })
+    this.publish({ result: outcome, pending: false })
   }
 
   run(request: FilterRequest): void {
@@ -200,28 +194,21 @@ export class FilterPassRunner {
     this.publish({
       result:
         this.shown !== null && this.shown.members === members ? this.shown.outcome : EMPTY_OUTCOME,
-      pending: true,
-      progress: pass.visited / Math.max(1, pass.total)
+      pending: true
     })
-    this.slice(request, pass, performance.now())
+    this.slice(request, pass)
   }
 
-  private slice(request: FilterRequest, pass: FilterPass, lastProgress: number): void {
+  private slice(request: FilterRequest, pass: FilterPass): void {
     this.cancelTask = scheduleTask(() => {
       if (this.request !== request) return
       const outcome = pass.step(performance.now() + SLICE_MS)
-      if (outcome !== null) {
-        stats.completedSliced++
-        this.complete(request, outcome)
+      if (outcome === null) {
+        this.slice(request, pass)
         return
       }
-      const now = performance.now()
-      if (now - lastProgress >= PROGRESS_INTERVAL_MS) {
-        this.publish({ ...this.snapshot, progress: pass.visited / Math.max(1, pass.total) })
-        this.slice(request, pass, now)
-      } else {
-        this.slice(request, pass, lastProgress)
-      }
+      stats.completedSliced++
+      this.complete(request, outcome)
     })
   }
 

@@ -175,9 +175,7 @@ describe('R214 — the filter pass runs in slices', () => {
     typeInto(quickFilter(), 't99')
     await waitForPending()
     expect(firstColumn(0)).toEqual(before)
-    expect(container.querySelector('.grid-filter-progress')!.textContent).toMatch(
-      /^Filtering… \d+%$/
-    )
+    expect(container.querySelector('.grid-filter-progress')!.textContent).toBe('Filtering…')
     expect(container.querySelector('.grid-filter-progress')!.getAttribute('role')).toBe('status')
     expect(container.querySelector('[role=grid]')!.getAttribute('aria-busy')).toBe('true')
 

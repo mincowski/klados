@@ -3881,10 +3881,11 @@ collection and mounting, not the cache.
    - **ASCII needles only.** NFC maps three code points to ASCII and a non-ASCII needle normalizes
      every cell; not worth proving safe for a rare case.
    - **The longest run between spaces and commas** is searched for, because separators join parts.
-   - **`i` and `k` are not prefiltered in a document holding U+0130 or U+212A** — the only two code
-     points `toLowerCase` maps to ASCII, checked over every code point. The document scan runs once
-     per buffer, in slices (211 ms in one piece on 200 MB), and only for such a needle.
-   - **Digits and substrings of `items`/`fields`** keep every row that could show a generated count.
+   - **For a needle with `i` or `k`, a row whose values hold U+0130 or U+212A stays a candidate** —
+     the only two code points `toLowerCase` maps to ASCII, checked over every code point. Checked per
+     row, inside the same byte scan.
+   - **A run of digits, or a substring of `items`/`fields`, is not prefiltered at all**, because it
+     could match a generated count.
    - **Value spans only**, so a needle spelled like a tag name does not match every row.
    Removing any one of those rules fails the differential test, in several formats.
 3. **Narrowing.** A quick filter that extends the previous one visits only the rows the previous one
@@ -3892,18 +3893,36 @@ collection and mounting, not the cache.
 4. **Slices.** A pass is stepped for 8 ms before paint, so small tables are unchanged; past that it
    runs in 8 ms slices between tasks, the grid keeps its previous rows with `aria-busy`, a newer
    filter abandons the running pass, an export waits for it, and a table left mid-pass caches
-   nothing. Progress shows after 150 ms as "Filtering… 42%" beside the filter box — chosen from three
-   renderings in both themes; a bar along the toolbar's edge read as the header's border, and a bar
-   inside the box as a stray underline.
+   nothing. "Filtering…" shows beside the filter box after 150 ms — a CSS delay on `display`, so a
+   shorter pass neither shows it nor moves the toolbar. Placement chosen from three renderings in both
+   themes; a bar along the toolbar's edge read as the header's border, and a bar inside the box as a
+   stray underline.
 5. **R213's result cache holds every table's order within 64 MB for the whole application**, the
    project lead's figure, oldest-left out first; an order larger than the budget is not cached.
    **Shown in the Statistics panel as its own row, not in the document's total** — a departure from
    the plan: the cache is one budget for the application, and that total is also what an open is
    estimated against, where an evictable cache does not belong.
 
-**Measured after, 200 MB, no main-thread task over 50 ms while filtering**: `Golf` 537 ms, `WVW99`
-429 ms, `2016` 1,181 ms, `e` 2,289 ms. Typing `G`, `Go`, `Gol`, `Golf` a character every 400 ms:
-1,907, 867, 285, 191 ms.
+**Measured after, 200 MB, no main-thread task over 50 ms while filtering**: `Golf` 579 ms, `WVW99`
+468 ms, `kilo` 406 ms, `2016` 2,226 ms, `e` 2,041 ms. Typing `G`, `Go`, `Gol`, `Golf` a character
+every 400 ms: 1,857, 873, 293, 201 ms.
+
+**Simplified after an architecture review, before landing.** The first build carried three pieces of
+complexity the result did not need, removed at the project lead's request (−596 / +157 lines,
+benchmark included):
+
+- **A document-wide scan for U+0130 and U+212A**, sliced to avoid a 211 ms freeze, with per-buffer
+  state and a plan/resolve split through the pass. Replaced by the per-row check above, which is
+  exactly as safe: a row can only show a lowered `i` or `k` that its own values hold.
+- **`mayShowGeneratedCount`**, a second description in `gridCell.ts` of when a cell shows a count,
+  so digit needles could still be prefiltered. Two descriptions of one thing drift (`FINDINGS.md`,
+  from R210). Dropped, **at a measured cost**: `2016` went from 1,181 to 2,226 ms, still without
+  freezing.
+- **A progress percentage**, which needed progress published from the pass, a throttle, and a timer in
+  a component, for a number nobody acts on.
+
+The benchmark's two prototypes of the prefilter rules went with them: once it measured the shipped
+code, they were a third copy of the rules.
 
 **Rejected:**
 

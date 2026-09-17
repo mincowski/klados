@@ -3,14 +3,16 @@
 <!-- status: built-caveat -->
 
 **Built, with two things owed.** The filter pass no longer freezes the window: on the 200 MB fixture
-typing `Golf` went from **6,888 ms frozen to 537 ms**, with no main-thread task over 50 ms while
+typing `Golf` went from **6,888 ms frozen to 579 ms**, with no main-thread task over 50 ms while
 filtering. The largest single gain was not in the plan: § 0's question — why the application's pass
 took twice Node's — was the decoder, and short ASCII slices now skip it (6,888 → 1,978 ms on its
 own). The byte prefilter was built after its differential test held across all four formats;
 narrowing, slicing and a 64 MB result cache for every table landed as planned, the cache shown in the
 Statistics panel as its own row rather than in the document total. **Owed**: the sort is still one
 synchronous step (715 ms on 200 MB), and typing's second character on a large group took 867 ms
-against § 5's half second. D-106 records it; see § 9.
+against § 5's half second. **Then simplified** after an architecture review, before landing (§ 9):
+about 600 lines out, for one measured cost — a numeric filter no longer uses the prefilter. D-106
+records it; see § 9.
 
 Raised by the project lead after R213 (`docs/plans/R213-grid-view-state.md`) measured a
 seven-second frozen window switching back to a filtered table on the 200 MB fixture: *"we claim
@@ -244,12 +246,10 @@ budget the saving does not pay for a second representation.
 - **`gridFilter.ts`**: the pass became `createFilterPass`, stepped to a deadline, optionally within a
   narrowed row set, with the prefilter applied; `filterIndices` runs one to completion for callers
   that need an answer now. Each outcome also carries the rows that matched anywhere, for § 3.
-- **`gridCell.ts`**: `mayShowGeneratedCount`, the rule for rows that could show `3 items` or
-  `1 field`, written beside the code that generates them.
 - **`useFilterPass.ts`**: § 2's slices, cancellation and narrowing, as a runner read through
   `useSyncExternalStore` and started from a layout effect.
 - **`Grid.tsx`**: the grid keeps its previous rows while a pass runs, marks itself `aria-busy`, shows
-  progress after 150 ms, queues an export until the pass ends, caches nothing when left mid-pass, and
+  "Filtering…" after 150 ms, queues an export until the pass ends, caches nothing when left mid-pass, and
   restores R213's scroll offset once its first result is in rather than at mount.
 - **`gridResultCache.ts`**: § 1's budget — every table, 64 MB for the whole application,
   oldest-left out first. **`StatisticsPanel.tsx`** shows it.
@@ -283,12 +283,12 @@ pass, and so are a narrowed pass and a pass stepped with a deadline already pass
 
 | Rule removed | Formats that fail |
 |---|---|
-| `i`/`k` not prefiltered where U+0130/U+212A occur | XML, JSON, TOML, CSV |
-| rows that could show a generated count stay candidates | XML, JSON, TOML |
+| a row holding U+0130/U+212A stays a candidate for an `i`/`k` needle | XML, JSON, TOML, CSV |
+| digit and `items`/`fields` runs are not prefiltered | JSON, TOML |
 | the needle split on separators | XML, JSON, TOML |
-| a repeated composite field counts | XML |
-| a composite with no valued children counts | XML |
-| a JSON array value counts | JSON, TOML |
+
+These are the rules as simplified (below). The first build's table had three more rows, one per case of
+the generated-count rule the simplification removed, each failing in the formats that exercise it.
 
 **The code-point claim was checked, not recalled.** Over every code point, `toLowerCase` maps exactly
 two non-ASCII code points to ASCII (U+0130, U+212A), and NFC plus `toLowerCase` maps four (adding
@@ -297,9 +297,9 @@ disproved a sentence four records carried since R202**: that nothing in NFC prod
 character that was not already there. Corrected in place in D-097, `R202-unicode-comparison.md`,
 `LOG.md` and `gridFilter.ts`; R202's rule stands on the rest of its argument.
 
-**The document scan for those two characters froze the window for 211 ms** on the first filter of
-the 200 MB document, and ran for every needle. It now runs only for a needle containing `i` or `k`,
-in 8 MB chunks between slices, and is kept per buffer.
+**The first build scanned the whole document for those two characters**, which froze the window for
+211 ms on the first filter of the 200 MB document and was then sliced to avoid it. The simplification
+below replaced it with a per-row check.
 
 ### Measured in the built application
 
@@ -310,31 +310,40 @@ has a floor of about 60 ms plus two frames**, which is most of the 10 MB column.
 
 | | 10 MB before | 10 MB after | 200 MB before | 200 MB after |
 |---|---|---|---|---|
-| first filter `Golf` | | 86 ms | **6,888 ms, frozen** | **537 ms** |
-| first filter `WVW99` | | 71 ms | | 429 ms |
-| first filter `2016` | | 98 ms | | 1,181 ms |
-| first filter `e` (in almost every row) | | 172 ms | | 2,289 ms |
-| typing `G` / `Go` / `Gol` / `Golf`, 400 ms apart | | 121 / 95 / 84 / 91 ms | | 1,907 / 867 / 285 / 191 ms |
+| first filter `Golf` | | 86 ms | **6,888 ms, frozen** | **579 ms** |
+| first filter `WVW99` | | 71 ms | | 468 ms |
+| first filter `kilo` | | | | 406 ms |
+| first filter `2016` | | 98 ms | | 2,226 ms |
+| first filter `e` (in almost every row) | | 172 ms | | 2,041 ms |
+| typing `G` / `Go` / `Gol` / `Golf`, 400 ms apart | | 121 / 95 / 84 / 91 ms | | 1,857 / 873 / 293 / 201 ms |
 | longest main-thread task while filtering | | none over 50 ms | 6,888 ms | **none over 50 ms** |
-| sort by `year` | | 63 ms task | | **715 ms task** |
+| sort by `year` | | 63 ms task | | **733 ms task** |
 | switch back to a sorted, filtered group (R213) | | | 519 ms | 545 ms |
 
 "Before" for 200 MB is the instrumented pass on R213's code, taken before this round changed
-anything, and R213 § 9's cached switch-back figure. **No 10 MB before-figures were taken** for these
+anything, and R213 § 9's cached switch-back figure. The 200 MB "after" column is the simplified build;
+the 10 MB column is the first build, before the simplification, which changed nothing a 10 MB filter
+exercises but the numeric one. The first build's 200 MB figures differed only where the
+simplification predicts: `2016` took 1,181 ms. **No 10 MB before-figures were taken** for these
 rows, so that column is left empty rather than filled from a different measurement. The Node bench,
-same 200 MB fixture, isolates the prefilter (the plain pass already includes the decoder fast path):
+same 200 MB fixture, isolates the prefilter (the plain pass already includes the decoder fast path) —
+the simplified build:
 
 | needle | plain pass | shipped pass | |
 |---|---|---|---|
-| `Golf` | 2,212 ms | 483 ms | 4.6× |
-| `Weber` | 2,206 ms | 556 ms | 4.0× |
-| `WVW99` | 2,285 ms | 380 ms | 6.0× |
-| `zzzz` | 2,235 ms | 331 ms | 6.8× |
-| `car` (a tag name) | 2,246 ms | 342 ms | 6.6× |
-| `electric` | 2,207 ms | 776 ms | 2.8× |
-| `2016` | 2,292 ms | 1,104 ms | 2.1× |
-| `hybrid 1` (spans a separator) | 2,166 ms | 847 ms | 2.6× |
-| `e` (in almost every row) | 2,030 ms | 2,192 ms | **0.9×** |
+| `Golf` | 2,287 ms | 476 ms | 4.8× |
+| `Weber` | 2,228 ms | 599 ms | 3.7× |
+| `WVW99` | 2,180 ms | 401 ms | 5.4× |
+| `zzzz` | 2,234 ms | 379 ms | 5.9× |
+| `car` (a tag name) | 2,140 ms | 363 ms | 5.9× |
+| `kilo` (`i` and `k`, checked per row) | 2,166 ms | 348 ms | 6.2× |
+| `electric` | 2,317 ms | 857 ms | 2.7× |
+| `hybrid 1` (spans a separator) | 2,089 ms | 860 ms | 2.4× |
+| `2016` (not prefiltered) | 2,210 ms | 2,166 ms | 1.0× |
+| `e` (in almost every row) | 1,962 ms | 2,103 ms | **0.9×** |
+
+Narrowing in the same run: `Golf` over `Gol`'s 39,654 rows took 162 ms against
+477 ms for a full shipped pass.
 
 The plain pass here is 2.2 s against the plan's 3.0 s — the decoder fast path helps Node too.
 
@@ -349,7 +358,7 @@ The plain pass here is 2.2 s against the plan's 3.0 s — the decoder fast path 
 - **Cache memory never exceeds the budget: met**, asserted in bytes, and the Statistics panel figure
   is the cache's own sum.
 - **Small files do not regress: met as far as measured.** On 10 MB every filter finished within the
-  harness's own ~60 ms floor plus about 100 ms, with no long task, and progress never showed. There
+  harness's own ~60 ms floor plus about 100 ms, with no long task, and "Filtering…" never showed. There
   is no 10 MB before-figure to compare with; the unit and browser suites cover behaviour unchanged.
 
 ### What the review and the tests found
@@ -369,8 +378,41 @@ The plain pass here is 2.2 s against the plan's 3.0 s — the decoder fast path 
   on 633K rows, and a 727 ms sort with no long task. It raced the debounce and dispatched events from
   script. Rewritten with real input events; the numbers above are from that version.
 - **`PreparedFilters.quickRaw` was carried and never read.** Removed.
+- **Hiding "Filtering…" with `visibility` would have moved the toolbar.** The simplified indicator's
+  150 ms delay is CSS; a hidden element still takes its space, so every pass between 8 and 150 ms
+  would have pushed the buttons right and back with nothing visible. Caught in the rendering, not by a
+  test: the delay animates `display` instead, and the Filters button was measured at the same x until
+  the label appears.
 - **Mutation checks** on the grid wiring: removing cancellation, the export queue, the mid-pass cache
   guard or narrowing each fails exactly its own test.
+
+### Simplified after an architecture review
+
+The project lead asked, after the round was built, whether it was more complex than it needed to be.
+Reviewed part by part against what each measurably bought: the decoder fast path, the sliced pass,
+the core prefilter, the result cache and the Statistics panel row were required; narrowing was
+borderline and kept. **Three pieces were not required and were removed** (−596 / +157 lines, the
+benchmark included):
+
+- **The document-wide scan for U+0130 and U+212A.** To avoid its 211 ms freeze it had grown chunking,
+  per-buffer state and a plan/resolve split running through the pass. **A per-row check is exactly as
+  safe** — a row can only show a lowered `i` or `k` that its own values hold — and sits inside the
+  byte scan the prefilter already does.
+- **`mayShowGeneratedCount`**, a second description in `gridCell.ts` of when a cell shows `3 items`
+  or `1 field`, kept only so digit needles could be prefiltered. Two descriptions of one thing drift;
+  `FINDINGS.md` has recorded that since R210. Digit runs and substrings of `items`/`fields` are now
+  simply not prefiltered. **The one measured cost of the simplification**: `2016` on 200 MB went from
+  1,181 to 2,226 ms, still without freezing.
+- **The progress percentage.** It needed progress published from the pass, a throttle, a timer in a
+  component and a bar, for a figure nobody acts on. "Filtering…" with a CSS delay does the job.
+
+**The benchmark's two prototypes of the prefilter rules** were removed with them: once the benchmark
+measured the shipped code, they were a third copy of the rules. Its narrowing section now uses the
+shipped `within` option instead of its own.
+
+Checked the same way as the first build: the differential test still fails when any remaining rule is
+removed, the full suite and lint pass, and the application was re-measured and re-rendered in both
+themes.
 
 ### Owed
 

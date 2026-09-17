@@ -398,30 +398,30 @@
    notification (`notifications/Notifications.css`) — no local styling left
    to own here. */
 
-/* R214 (`docs/plans/R214-filter-pass.md` § 2): shown while a filter pass runs
- * past its delay, next to the box that started it. Chosen from three renderings
- * in both themes — inline text with a bar, a bar along the toolbar's bottom
- * edge, a bar inside the filter box. The edge bar read as the header's border
- * and the in-field bar as a stray underline; this one says in words that the
- * rows on screen are not yet filtered. */
+/* R214 (`docs/plans/R214-filter-pass.md` § 2): shown while a filter pass runs,
+ * next to the box that started it — the grid is still showing the previous
+ * filter's rows. Chosen from three renderings in both themes; a bar along the
+ * toolbar's edge read as the header's border and a bar inside the box as a stray
+ * underline. A percentage was dropped in R214's own review: it needed progress
+ * published from the pass for a figure nobody acts on.
+ *
+ * Mounted as soon as a pass goes to slices and revealed only after the delay, so
+ * a pass that finishes within a moment never shows it. `display`, not
+ * `visibility`: a hidden element still takes its space, and the toolbar's buttons
+ * would jump right and back on every short pass. (Animating `display` needs
+ * Chromium 116; Electron 39 ships well past it.) */
 .grid-filter-progress {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
   color: var(--surface-fg-secondary);
   font-size: var(--font-size-ui);
   white-space: nowrap;
+  animation: grid-filter-progress-reveal 0s linear 150ms both;
 }
-.grid-filter-progress-track {
-  display: block;
-  width: 64px;
-  height: 3px;
-  border-radius: var(--radius-sm);
-  background: var(--surface-border);
-  overflow: hidden;
-}
-.grid-filter-progress-fill {
-  display: block;
-  height: 100%;
-  background: var(--accent);
+
+@keyframes grid-filter-progress-reveal {
+  from {
+    display: none;
+  }
+  to {
+    display: block;
+  }
 }

@@ -30,7 +30,7 @@ import {
   type FilterOutcome,
   type GridFilters
 } from '../src/renderer/components/Detail/gridFilter'
-import { prefilterTokenFor, scanLowering } from '../src/renderer/components/Detail/gridPrefilter'
+import { prefilterTokenFor, rowMayMatch } from '../src/renderer/components/Detail/gridPrefilter'
 
 const OPTIONS: ParseOptions = { maxDepth: 1000, encoding: 'utf-8' }
 
@@ -325,7 +325,6 @@ describe('R214 — the byte prefilter never removes a matching row', () => {
     // resumed rather than finishing in its first step.
     expect(table.members.length).toBeGreaterThan(1000)
     expect(slices).toBeGreaterThan(1)
-    expect(pass.visited).toBe(pass.total)
     expectSame(
       outcome,
       filterIndices(store, source, table.members, columns, quick('o'), { prefilter: false }),
@@ -335,37 +334,36 @@ describe('R214 — the byte prefilter never removes a matching row', () => {
 
   it('the documented hazards are not prefiltered, and ordinary needles are', () => {
     const plain = parse(xmlFormatModule, '<a><b><c>x</c></b><b><c>y</c></b></a>').source
-    const kelvin = parse(xmlFormatModule, '<a><b><c>\u212A</c></b><b><c>y</c></b></a>').source
-    const dotted = parse(xmlFormatModule, '<a><b><c>\u0130</c></b><b><c>y</c></b></a>').source
     expect(prefilterTokenFor('golf', plain)).not.toBeNull()
     expect(prefilterTokenFor('kilo', plain)).not.toBeNull()
-    expect(prefilterTokenFor('kilo', kelvin)).toBeNull()
-    expect(prefilterTokenFor('golf', kelvin)).not.toBeNull()
-    expect(prefilterTokenFor('istanbul', dotted)).toBeNull()
-    expect(prefilterTokenFor('caf\u00e9', plain)).toBeNull()
-    expect(prefilterTokenFor('item', plain)?.generated).toBe(true)
-    expect(prefilterTokenFor('2016', plain)?.generated).toBe(true)
-    expect(prefilterTokenFor('golf', plain)?.generated).toBe(false)
+    expect(prefilterTokenFor(`caf${String.fromCodePoint(0xe9)}`, plain)).toBeNull()
+    // A run that could come from a generated count is not prefiltered at all.
+    expect(prefilterTokenFor('item', plain)).toBeNull()
+    expect(prefilterTokenFor('fields', plain)).toBeNull()
+    expect(prefilterTokenFor('2016', plain)).toBeNull()
+    expect(prefilterTokenFor('2016x', plain)).not.toBeNull()
     // The longest run between separators is what gets searched for.
     expect(new TextDecoder().decode(prefilterTokenFor('ab, golfer', plain)!.bytes)).toBe('golfer')
     expect(prefilterTokenFor(', ', plain)).toBeNull()
   })
 
-  it('the document scan resumes across calls and finds a character split between chunks', () => {
-    // The scan reads 8 MiB per chunk; put U+0130 (C4 B0) across the first boundary.
-    const chunk = 8 * 1024 * 1024
-    const bytes = new Uint8Array(chunk * 2 + 16).fill(0x61)
-    bytes[chunk - 1] = 0xc4
-    bytes[chunk] = 0xb0
-    const source = new SourceBuffer(bytes, 'utf-8', 0)
-    let lowering = scanLowering(source, 0)
-    let calls = 1
-    while (lowering === null) {
-      lowering = scanLowering(source, 0)
-      calls++
-    }
-    expect(calls).toBeGreaterThan(1)
-    expect(lowering.dottedCapitalI).toBe(true)
-    expect(lowering.kelvinSign).toBe(false)
+  it('a row whose values hold a character that lower-cases to i or k stays a candidate', () => {
+    const kelvin = String.fromCodePoint(0x212a)
+    const dotted = String.fromCodePoint(0x130)
+    const { store, source } = parse(
+      xmlFormatModule,
+      `<a><b><c>${kelvin}ilo</c></b><b><c>${dotted}stanbul</c></b><b><c>plain</c></b></a>`
+    )
+    const [kilo, istanbul, other] = [...store.childrenOf(store.firstChildOf(0))]
+    const kiloToken = prefilterTokenFor('kilo', source)!
+    const istanbulToken = prefilterTokenFor('istanbul', source)!
+    expect(rowMayMatch(store, source, kilo!, kiloToken)).toBe(true)
+    expect(rowMayMatch(store, source, other!, kiloToken)).toBe(false)
+    expect(rowMayMatch(store, source, istanbul!, istanbulToken)).toBe(true)
+    expect(rowMayMatch(store, source, other!, istanbulToken)).toBe(false)
+    // Only the character the run needs: `kelp` has no `i`, so U+0130 does not keep a row.
+    const kelpToken = prefilterTokenFor('kelp', source)!
+    expect(rowMayMatch(store, source, istanbul!, kelpToken)).toBe(false)
+    expect(rowMayMatch(store, source, kilo!, kelpToken)).toBe(true)
   })
 })

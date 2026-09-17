@@ -17,13 +17,7 @@ import { isAsciiOnly } from '../../../core/textFind'
 import type { NodeRef } from '../../../core/types'
 import { cellOf, rowFields } from './gridCell'
 import type { GridColumn } from './gridColumns'
-import {
-  prefilterPlanFor,
-  resolvePrefilter,
-  rowMayMatch,
-  scanLowering,
-  type PrefilterToken
-} from './gridPrefilter'
+import { prefilterTokenFor, rowMayMatch } from './gridPrefilter'
 
 export interface GridFilters {
   readonly quick: string
@@ -181,8 +175,7 @@ export interface FilterPassOptions {
  */
 export interface FilterPass {
   step(deadline: number): FilterOutcome | null
-  /** Rows visited so far, of `total`. */
-  readonly visited: number
+  /** Rows this pass visits: all members, or fewer when it narrowed. */
   readonly total: number
 }
 
@@ -220,16 +213,11 @@ export function createFilterPass(
       hiddenMatchColumns: NO_HIDDEN_MATCHES,
       anywhere: null
     }
-    return { step: () => outcome, visited: total, total }
+    return { step: () => outcome, total }
   }
 
-  // A token with `i` or `k` needs the document scanned for two characters first
-  // — done in slices like the rows, since on a large document it is not free
-  // (`scanLowering`).
-  const plan =
-    options.prefilter === false || quick.length === 0 ? null : prefilterPlanFor(quick, source)
-  let tokenResolved = plan === null || !plan.needsLowering
-  let token: PrefilterToken | null = plan === null ? null : resolvePrefilter(plan, null)
+  const token =
+    options.prefilter === false || quick.length === 0 ? null : prefilterTokenFor(quick, source)
   const visible = new Set(columns.map((c) => c.nameId))
   const hiddenMatchColumns = new Set<number>()
   const indices: number[] = []
@@ -271,18 +259,9 @@ export function createFilterPass(
   }
 
   const pass: FilterPass = {
-    get visited() {
-      return position
-    },
     total,
     step(deadline: number): FilterOutcome | null {
       if (outcome !== null) return outcome
-      if (!tokenResolved) {
-        const lowering = scanLowering(source, deadline)
-        if (lowering === null) return null
-        token = resolvePrefilter(plan!, lowering)
-        tokenResolved = true
-      }
       while (position < total) {
         const stop = Math.min(total, position + ROWS_PER_CLOCK_CHECK)
         for (; position < stop; position++) visit(within === null ? position : within[position]!)

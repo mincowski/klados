@@ -22,8 +22,8 @@ lines — read in full at the start of every session, and never once pruned.
 
 **Typing `Golf` into a 633,000-row table froze Klados for almost seven seconds**, and a slow typist
 paid that again after every pause. Now the same filter takes about half a second and the window never
-stops responding: a long filter runs in slices, keeps the old rows on screen with "Filtering… 42%"
-beside the box, and gives way to a newer filter the moment one is typed.
+stops responding: a long filter runs in slices, keeps the old rows on screen with "Filtering…" beside
+the box, and gives way to a newer filter the moment one is typed.
 
 **The biggest win was the question the plan asked first, not any of its four parts.** The pass took
 twice as long in the application as in Node. The answer was `TextDecoder`: millions of tiny decode
@@ -41,6 +41,12 @@ for that rule also disproved a sentence R202 had written into four records.
 of 2.2 s); R213's result cache now keeps every table within 64 MB for the whole app, shown in the
 Statistics panel; and the first version of the sliced pass, which passed its tests, was rebuilt
 because the project's React rules rejected work done during render.
+
+**Then it was made smaller.** An architecture review asked where the round was more complex than it
+needed to be, and found three places: a sliced document scan that a per-row check replaces exactly, a
+second copy of the rules for generated counts that would have drifted from the first, and a progress
+percentage nobody needed. Removing them took out about 600 lines, benchmark included, for one
+measured cost: a numeric filter like `2016` takes 2.2 s instead of 1.2 s, still without freezing.
 
 **Owed**: sorting a large table is still one step (715 ms), and a filter's second character on a
 large group still takes 867 ms.
