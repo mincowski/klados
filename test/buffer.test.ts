@@ -72,3 +72,65 @@ describe('SourceBuffer', () => {
     expect(buf.snapToCharBoundary(1)).toBe(snapToCharBoundary(bytes, 1))
   })
 })
+
+// R214 (`docs/plans/R214-filter-pass.md` § 0): short all-ASCII slices are built
+// without `TextDecoder`. The fast path must be invisible — same string as the
+// decoder for every encoding, every range, including the ones it declines.
+describe('SourceBuffer.slice — the ASCII fast path', () => {
+  function mulberry32(seed: number): () => number {
+    let a = seed
+    return () => {
+      a |= 0
+      a = (a + 0x6d2b79f5) | 0
+      let t = Math.imul(a ^ (a >>> 15), 1 | a)
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+    }
+  }
+
+  const ENCODINGS = ['utf-8', 'windows-1252', 'iso-8859-2', 'shift_jis', 'iso-2022-jp', 'utf-16le']
+
+  for (const encoding of ENCODINGS) {
+    it(`${encoding}: every slice equals TextDecoder's`, () => {
+      const rand = mulberry32(encoding.length * 7919)
+      for (let doc = 0; doc < 40; doc++) {
+        // Mostly ASCII, with escape bytes and high bytes mixed in, so both
+        // paths and the switch between them are exercised.
+        const bytes = new Uint8Array(300)
+        for (let i = 0; i < bytes.length; i++) {
+          const r = rand()
+          bytes[i] =
+            r < 0.8 ? 0x20 + Math.floor(rand() * 0x5f) : r < 0.85 ? 0x1b : Math.floor(rand() * 256)
+        }
+        const buffer = new SourceBuffer(bytes, encoding, 0)
+        for (let k = 0; k < 200; k++) {
+          const start = Math.floor(rand() * 320) - 10
+          const end = start + Math.floor(rand() * 200) - 20
+          const expected = new TextDecoder(encoding).decode(bytes.subarray(start, end))
+          expect(buffer.slice(start, end), `${encoding} [${start}, ${end})`).toBe(expected)
+        }
+      }
+    })
+  }
+
+  it('a range past the end is clamped, as `subarray` clamps it', () => {
+    const buffer = new SourceBuffer(utf8('abc'), 'utf-8', 0)
+    expect(buffer.slice(1, 99)).toBe('bc')
+    expect(buffer.slice(2, 1)).toBe('')
+  })
+})
+
+describe('SourceBuffer.slice — ranges the fast path declines', () => {
+  it('negative and fractional bounds decode exactly as `subarray` reads them', () => {
+    const bytes = utf8('hello world')
+    const buffer = new SourceBuffer(bytes, 'utf-8', 0)
+    for (const [start, end] of [
+      [0, -1],
+      [-5, 11],
+      [1.5, 4.7],
+      [0, 2.2]
+    ] as const) {
+      expect(buffer.slice(start, end)).toBe(new TextDecoder().decode(bytes.subarray(start, end)))
+    }
+  })
+})

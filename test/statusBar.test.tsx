@@ -20,7 +20,12 @@ import { jsonFormatModule } from '../src/formats/json/index'
 import { ReadyStatus } from '../src/renderer/components/StatusBar/StatusBar'
 import { resetStatisticsPanelStoreForTests } from '../src/renderer/components/StatusBar/statisticsPanelStore'
 import { getAllCommands } from '../src/renderer/commands/registry'
-import type { OpenDocument } from '../src/renderer/session/documentSession'
+import { formatBytes, type OpenDocument } from '../src/renderer/session/documentSession'
+import {
+  leaveCachedResult,
+  resetGridResultCacheForTests
+} from '../src/renderer/components/Detail/gridResultCache'
+import { EMPTY_GRID_FILTERS } from '../src/renderer/components/Detail/gridFilter'
 // Static, once per file — registered commands are a process-wide
 // singleton in production too (`main.tsx` imports `builtins` once); an
 // ES module only actually executes once per realm regardless of how many
@@ -200,6 +205,42 @@ describe('StatusBar (M5f-PLAN.md)', () => {
     expect(panel!.textContent).toContain('C:/docs/data.json')
     expect(panel!.textContent).toContain('Undo history')
     expect(panel!.textContent).toContain('3 entries')
+  })
+
+  it('R214: shows the grid view cache when it holds anything, and follows it live', async () => {
+    const doc = openDocumentFor()
+    await paint(<ReadyStatus document={doc} caretOffset={0} />)
+    container.querySelector<HTMLButtonElement>('#status-bar-info-button')!.click()
+    await paint(<ReadyStatus document={doc} caretOffset={0} />)
+    const row = (): HTMLElement | null => container.querySelector('.statistics-panel-grid-cache')
+    expect(row()).toBeNull()
+
+    try {
+      leaveCachedResult(
+        {
+          viewKey: { tabId: null, filePath: doc.filePath },
+          store: doc.store,
+          sourceBuffer: doc.sourceBuffer,
+          node: 1,
+          groupKey: 'n:car',
+          sort: { nameId: 1, direction: 'asc' },
+          extraColumns: new Set(),
+          filters: EMPTY_GRID_FILTERS
+        },
+        Array.from({ length: 1024 }, (_, i) => i),
+        0,
+        []
+      )
+      await paint(<ReadyStatus document={doc} caretOffset={0} />)
+      // 1,024 rows × 4 bytes, against the 64 MB budget.
+      expect(row()!.textContent).toBe(
+        `Grid view cache (all tabs)${formatBytes(4096)} of ${formatBytes(64 * 1024 * 1024)}`
+      )
+    } finally {
+      resetGridResultCacheForTests()
+    }
+    await paint(<ReadyStatus document={doc} caretOffset={0} />)
+    expect(row()).toBeNull()
   })
 
   it('Escape closes the panel and returns focus to the ⓘ button', async () => {

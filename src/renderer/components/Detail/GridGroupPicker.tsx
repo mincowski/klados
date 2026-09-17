@@ -38,36 +38,6 @@ export function groupLabelOf(store: NodeStore, group: GridGroup): string {
 }
 
 /**
- * The last group the user picked, **by name**, per document. Stepping between
- * sibling nodes of the same shape — one `<shelf>` after another, each with
- * `book` and `magazine` — keeps `magazine` selected instead of snapping back
- * to the first tab on every node. A node without that group shows its first.
- *
- * Keyed by `NodeStore` so it is scoped to one open document and dropped with
- * it. A reparse replaces the store, which forgets the choice; that is the
- * cheap failure (back to the first tab), not a wrong one.
- */
-const rememberedGroup = new WeakMap<NodeStore, number>()
-
-export function rememberGroup(store: NodeStore, nameId: number): void {
-  rememberedGroup.set(store, nameId)
-}
-
-/** Which of `tables` to show: the remembered group if this node has it, else
- * the first in document order. Pure apart from the lookup, so the rule is
- * testable without mounting anything. */
-export function selectedGroupIndex(store: NodeStore, tables: readonly GridGroup[]): number {
-  const remembered = rememberedGroup.get(store)
-  if (remembered === undefined) return 0
-  const index = tables.findIndex((t) => t.nameId === remembered)
-  return index === -1 ? 0 : index
-}
-
-export function resetRememberedGroupsForTests(store: NodeStore): void {
-  rememberedGroup.delete(store)
-}
-
-/**
  * How many tabs fit in `available` pixels, given each tab's width and the
  * width the "more" button would need. The more button's label depends on the
  * answer — it names the selected group when that group is among the hidden

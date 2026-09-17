@@ -397,3 +397,31 @@
    shape, applied to copy rather than open) moved to a pushed choice
    notification (`notifications/Notifications.css`) — no local styling left
    to own here. */
+
+/* R214 (`docs/plans/R214-filter-pass.md` § 2): shown while a filter pass runs,
+ * next to the box that started it — the grid is still showing the previous
+ * filter's rows. Chosen from three renderings in both themes; a bar along the
+ * toolbar's edge read as the header's border and a bar inside the box as a stray
+ * underline. A percentage was dropped in R214's own review: it needed progress
+ * published from the pass for a figure nobody acts on.
+ *
+ * Mounted as soon as a pass goes to slices and revealed only after the delay, so
+ * a pass that finishes within a moment never shows it. `display`, not
+ * `visibility`: a hidden element still takes its space, and the toolbar's buttons
+ * would jump right and back on every short pass. (Animating `display` needs
+ * Chromium 116; Electron 39 ships well past it.) */
+.grid-filter-progress {
+  color: var(--surface-fg-secondary);
+  font-size: var(--font-size-ui);
+  white-space: nowrap;
+  animation: grid-filter-progress-reveal 0s linear 150ms both;
+}
+
+@keyframes grid-filter-progress-reveal {
+  from {
+    display: none;
+  }
+  to {
+    display: block;
+  }
+}

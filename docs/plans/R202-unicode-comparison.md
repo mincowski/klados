@@ -327,7 +327,11 @@ the round's one cross-cutting rule: **normalize only when the needle is not pure
 NFC *composes*. Normalizing the haystack for an ASCII needle can only **remove** matches — `cafe`
 matches a decomposed `cafe` + U+0301 character for character today, and stops once the text is
 composed — and nothing in NFC produces an ASCII character that was not already there, so there is no
-match it could add back (that is NFK\*'s compatibility mappings, which § 10 rejects). For a regex it
+match it could add back (that is NFK\*'s compatibility mappings, which § 10 rejects). *Corrected by
+R214, which checked every code point: three canonical singletons do — U+212A KELVIN SIGN to `K`,
+U+037E GREEK QUESTION MARK to `;`, U+1FEF GREEK VARIA to a backtick — so for those an unnormalized
+ASCII needle misses a match normalization would find. The rule stands on the rest of the argument.*
+For a regex it
 is worse than neutral: `.` counts one character against a composed `é` and two against a decomposed
 one, so normalizing would silently change what an existing ASCII pattern matches.
 

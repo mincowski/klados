@@ -261,7 +261,9 @@ What it does:
 - **A fresh grid per group.** Sort, filters and pinned columns are keyed by one group's column
   name ids and do not carry to another group's table. **Switching back also resets them** — a
   known limitation, not an oversight; keeping every group's grid mounted to preserve it would
-  reintroduce the cost the tabs removed.
+  reintroduce the cost the tabs removed. *Lifted by R213* (`docs/plans/R213-grid-view-state.md`,
+  D-105): the state is kept outside the grid and restored by name. R213 also found that the
+  remembered tab below was keyed by a store every edit replaces.
 
 The plural controller registry from the first attempt is reverted to `main`'s single slot, since
 one grid mounts. Each grid keeps its group's name as its accessible name.

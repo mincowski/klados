@@ -51,6 +51,7 @@ import '../src/renderer/components/Tree/Tree.css'
 import '../src/renderer/components/Raw/Raw.css'
 import '../src/renderer/components/Detail/Detail.css'
 import '../src/renderer/components/Detail/Grid.css'
+import { resetGridViewStateForTests } from '../src/renderer/components/Detail/gridViewState'
 
 type FakeApi = {
   document: KladosApi['document'] & { read: (path: string) => Promise<ArrayBuffer> }
@@ -126,6 +127,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  resetGridViewStateForTests()
   root.unmount()
   container.remove()
   resetTabsForTests()

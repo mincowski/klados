@@ -16,6 +16,73 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R214 — the grid filter pass stops freezing the window · built ⚠
+
+**Plan:** `docs/plans/R214-filter-pass.md` · **Decision:** D-106
+
+**Typing `Golf` into a 633,000-row table froze Klados for almost seven seconds**, and a slow typist
+paid that again after every pause. Now the same filter takes about half a second and the window never
+stops responding: a long filter runs in slices, keeps the old rows on screen with "Filtering…" beside
+the box, and gives way to a newer filter the moment one is typed.
+
+**The biggest win was the question the plan asked first, not any of its four parts.** The pass took
+twice as long in the application as in Node. The answer was `TextDecoder`: millions of tiny decode
+calls cost several times more in the renderer, and building a short ASCII string by hand avoids
+them. That one change took the pass from 6.9 s to 2.0 s before anything else was built.
+
+**The byte prefilter was built on a condition, and the condition earned its keep.** Skipping rows
+whose bytes cannot contain the search text is only safe if nothing on screen comes from somewhere
+else — and separators, generated labels like `3 items`, and two Unicode characters that lower-case to
+ASCII all do. A differential test over generated XML, JSON, TOML and CSV compared every result with
+the plain pass, and removing any one of the safety rules made it fail. Enumerating every code point
+for that rule also disproved a sentence R202 had written into four records.
+
+**Also landed**: typing forward only re-checks the previous matches (`Gol` → `Golf` in 158 ms instead
+of 2.2 s); R213's result cache now keeps every table within 64 MB for the whole app, shown in the
+Statistics panel; and the first version of the sliced pass, which passed its tests, was rebuilt
+because the project's React rules rejected work done during render.
+
+**Then it was made smaller.** An architecture review asked where the round was more complex than it
+needed to be, and found three places: a sliced document scan that a per-row check replaces exactly, a
+second copy of the rules for generated counts that would have drifted from the first, and a progress
+percentage nobody needed. Removing them took out about 600 lines, benchmark included, for one
+measured cost: a numeric filter like `2016` takes 2.2 s instead of 1.2 s, still without freezing.
+
+**Owed**: sorting a large table is still one step (715 ms), and a filter's second character on a
+large group still takes 867 ms.
+
+## R213 — a table keeps its sort and filters when you switch away · built
+
+**Plan:** `docs/plans/R213-grid-view-state.md` · **Decision:** D-105
+
+**Switching group tabs used to reset the table**, and so did selecting another node and coming
+back: the grid is unmounted, and its sort, pins, widths and filters lived inside it. They now live
+outside it. How a table *looks* — sort, extra columns, pins, widths — is kept per group name for the
+document, so sorting `book` on one shelf sorts every `book` table. What a table *contains* — filters,
+the active cell, the scroll offset — is kept per node, because a filter carried to a sibling shelf
+would show an empty table with no explanation.
+
+**The plan asked whether name ids survive an edit. The answer was worse than the question**: every
+edit replaces the node store and the source buffer, not only a full reparse. R211 had keyed the
+remembered group tab by the store, so typing one character in Raw had been snapping the tabs back to
+the first group ever since. A full reparse also builds a new interner whose ids can differ for the
+same names. So the state is keyed by tab and path, and names are stored as text.
+
+**The plan's measurement step changed the design.** Restoring re-runs the filter pass and the sort,
+and on the 200 MB fixture that meant a seven-second frozen window after clicking a tab back to a
+sorted, filtered group — the filter pass alone being what typing it had cost. The project lead chose
+a cache the plan had rejected in unbounded form: display order only, 4 bytes per visible row, at most
+one group off screen once a grid is showing. It needed two entries rather than the one proposed,
+because a single slot always holds the grid just left and never the one being returned to. Switching
+back is now half a second, most of which is mounting.
+
+**Found on the way**: resized widths were being reset by every edit too; a restored horizontal scroll
+was undone by an effect re-running once pinned columns settled; a pending export prompt outlived its
+grid as a button that did nothing; and reading the active tab inside `DetailContent` gave its first two
+renders different keys, because the first tab is created lazily by whatever reads the session first.
+That last one surfaced only because an R211 test failed when run on its own. Also, twice, a `\u0000`
+written through an editing tool landed as a literal NUL byte and turned a file binary.
+
 ## R210–R211 — one table per group, and the CSV table that never had rows · built
 
 **Plan:** `docs/plans/R210-grid-grouping.md` · **Decisions:** D-103, D-104
@@ -366,7 +433,8 @@ are canonical singletons only normalization resolves.
 Normalization is gated on the needle at all three sites. NFC *composes*, so normalizing the haystack
 for an ASCII needle can only **remove** matches — `cafe` matches a decomposed `cafe` + U+0301
 character for character today — and nothing in NFC can produce an ASCII character that was not
-already there. For a regex it is worse: `.` counts one character against a composed `é` and two
+already there. *(Corrected by R214, which checked every code point: three canonical singletons do —
+U+212A KELVIN SIGN to `K`, U+037E to `;`, U+1FEF to a backtick.)* For a regex it is worse: `.` counts one character against a composed `é` and two
 against a decomposed one, so an existing ASCII pattern would silently change meaning. The gate is
 also what makes the round free for almost every search: an all-ASCII find window costs 0.05 ms, and
 an ASCII quick filter over 200,000 rows is unchanged.
