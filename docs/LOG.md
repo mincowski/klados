@@ -16,9 +16,9 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
-## R215–R216 — Raw's node band as a guide, and a leaf glyph for XML elements · built
+## R215–R217 — Raw's node band as a guide, a stronger text selection, and a leaf glyph for XML elements · built
 
-**Plan:** `docs/plans/R215-raw-band-and-leaf-glyph.md` · **Decisions:** D-107, D-108
+**Plan:** `docs/plans/R215-raw-band-and-leaf-glyph.md` · **Decisions:** D-107, D-108, D-109
 
 **Two pieces of user feedback, both about how a selected or listed node looks.** Neither changes
 behaviour, and both were settled by the project lead from renderings in the built application.
@@ -35,6 +35,13 @@ candidates were drawn at the Tree's real 11px in both themes — several failed 
 rendering shows: `‹›` collapsed into a blob, `<…>` overflowed the column, `›` looked like a
 disclosure triangle. Dropping the brackets also made `<>` mean exactly "has element children".
 Two older font tests had used a lone `<a/>` as their example of `<>`, which is now correctly a leaf.
+
+**R217 — the band was fine; the selection was the problem.** Looking at R215's result, the project
+lead found a text selection still barely visible on the band, and suspected the selection colour.
+Measured, that was exactly it: Raw borrowed the Tree's selected-row blue, and in light that blue has
+the band's brightness to within 2%. Three stronger blues per theme were rendered with four lines
+selected inside a band; the project lead chose `--blue-200` and `--blue-700`, two existing palette
+entries. Text under a selection loses some contrast in exchange, and the plan says how much.
 
 ---
 

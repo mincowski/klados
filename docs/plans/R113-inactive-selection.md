@@ -49,7 +49,9 @@ The two carry different information, which is why both earn their place.
 
 *Superseded for the span by R215 (D-107):* the selected node's span in Raw is now its own grey,
 `--raw-node-band-bg`, in both states — sharing the text selection's blue made a selection inside it
-invisible. See `docs/plans/R215-raw-band-and-leaf-glyph.md` §1.
+invisible. See `docs/plans/R215-raw-band-and-leaf-glyph.md` §1. *And for the text selection by R217
+(D-109):* focused, it is `--text-selection-bg` (`--blue-200` / `--blue-700`), a stronger blue than
+the row band's, so it stands out from that span. See the same plan, §3.
 
 **Detail in list mode is a deliberate blank, not an omission.** Its `.detail-child-row` has a hover
 background but no selection, no keyboard traversal and no active descendant — checked in

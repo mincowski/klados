@@ -36,6 +36,12 @@
    * (4.10 / 4.27 off it). */
   --raw-node-band-bg: color-mix(in srgb, var(--row-selected-inactive-bg) 40%, var(--surface-bg));
 
+  /* R217 — Raw's text selection while the pane is focused: a stronger blue
+   * than the row band's `--blue-100`, so it stands out from
+   * `--raw-node-band-bg` (1.32:1 against it, was 1.02:1). Weakest text on it: string 2.56:1,
+   * comment 2.66:1 — the price of a selection that shows. */
+  --text-selection-bg: var(--blue-200);
+
   /* R33/D-051 §1b: control tokens, not elevation surface tokens.
    * `--elev-2-bg` is the lightest surface in this theme, which made the
    * thumb near-invisible against a near-white pane. Minimum contrast:

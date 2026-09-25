@@ -95,8 +95,8 @@ function relativeLuminance([r, g, b]: [number, number, number]): number {
 }
 
 function contrastRatio(a: string, b: string): number {
-  const l1 = relativeLuminance(parseRgb(a))
-  const l2 = relativeLuminance(parseRgb(b))
+  const l1 = relativeLuminance(srgb255(a))
+  const l2 = relativeLuminance(srgb255(b))
   const hi = Math.max(l1, l2)
   const lo = Math.min(l1, l2)
   return (hi + 0.05) / (lo + 0.05)
@@ -388,7 +388,10 @@ describe('R115 — Raw', () => {
       await paint()
       expect(band()).toBe(unfocused)
       expect(srgb255(band())).not.toEqual(srgb255(selection()))
-      expect(selection()).toBe(resolvedToken('--row-selected-bg'))
+      expect(selection()).toBe(resolvedToken('--text-selection-bg'))
+      // R217: the selection must stand out from the band it sits on. It was
+      // 1.02:1 in light with the row band's blue; 1.32:1 and 1.29:1 now.
+      expect(contrastRatio(band(), selection())).toBeGreaterThan(1.25)
     }
   })
 
@@ -423,8 +426,10 @@ describe('R115 — Raw', () => {
 
     const focusedContent = getComputedStyle(contentOf(), '::selection').backgroundColor
     const focusedLine = getComputedStyle(lineOf(), '::selection').backgroundColor
-    expect(focusedContent).toBe(resolvedToken('--row-selected-bg'))
-    expect(focusedLine).toBe(resolvedToken('--row-selected-bg'))
+    // R217: Raw's own selection blue, not the row band's (`--blue-200` in light).
+    expect(focusedContent).toBe(resolvedToken('--text-selection-bg'))
+    expect(focusedLine).toBe(resolvedToken('--text-selection-bg'))
+    expect(parseRgb(focusedLine)).toEqual([179, 205, 255])
     expect(focusedContent).not.toBe(unfocusedContent)
   })
 

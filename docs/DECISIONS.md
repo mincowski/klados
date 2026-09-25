@@ -128,6 +128,7 @@ Search for the id to jump to one.
 | **D-106** | The grid filter pass runs in slices, narrows, and skips rows by their bytes; its results are cached within a byte budget |  |
 | **D-107** | Raw's node span is a guide in its own grey, never a selection colour |  |
 | **D-108** | An XML element without element children is marked `•`; `<>` means it has element children |  |
+| **D-109** | Raw's text selection has its own blue, stronger than a row band's |  |
 
 ---
 
@@ -3989,3 +3990,27 @@ exactly "has element children".
 
 **Cost:** one walk to the first element child, cached per store like `childCountOf`. `•` draws in
 `--font-mono` under D-084's rule.
+
+---
+
+### D-109 — Raw's text selection has its own blue, stronger than a row band's (R217) · `settled`
+
+**Amends R113's table row for Raw's text selection** (`docs/plans/R113-inactive-selection.md` §2), which
+gave it `--row-selected-bg` when focused, like the Tree's and grid's selected rows. Plan:
+`docs/plans/R215-raw-band-and-leaf-glyph.md` §3.
+
+**A row band and a text selection have different jobs.** A selected row carries a whole row of text,
+so its blue is pale. A selection in Raw sits on D-107's node band, and it has to stand out *from
+that band*: with the row blue it did not — 1.02:1 in light, the same brightness, and darker than the
+band in dark.
+
+**Chosen:** `--text-selection-bg`, `--blue-200` in light and `--blue-700` in dark — 1.32:1 and 1.29:1 against
+the band — the project lead's choice from three rendered per theme. Read by Raw only; the unfocused
+selection stays `--row-selected-inactive-bg`.
+
+**The cost, accepted:** text under a selection drops to 2.56:1 (light, string) and 2.34:1 (dark,
+comment). A selection is transient; one that cannot be seen is the worse failure.
+
+**Rejected:** stronger mixes (`--blue-300` at 75%, `--blue-500` at 60%), which stood out more and began
+washing out amber and comment text; changing `--row-selected-bg` itself, which would darken every
+selected row in the Tree and grid, where nothing was wrong.

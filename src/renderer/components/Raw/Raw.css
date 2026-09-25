@@ -12,8 +12,13 @@
   --selection-bg: var(--row-selected-inactive-bg);
 }
 
+/* R217 (`R215-raw-band-and-leaf-glyph.md` §3): not `--row-selected-bg`. That blue is
+ * a row band's, pale enough to carry text in the Tree and grid; in Raw a text
+ * selection sits on the node band, and the band and that blue were the same
+ * brightness (1.02:1 in light), so a selection inside the selected node barely
+ * showed. */
 .raw-pane:focus-within {
-  --selection-bg: var(--row-selected-bg);
+  --selection-bg: var(--text-selection-bg);
 }
 
 .raw-container {

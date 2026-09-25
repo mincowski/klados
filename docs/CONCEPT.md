@@ -647,7 +647,8 @@ Beyond that:
   viewport-driven provider is still the right shape and still has to be built this way from
   the start.
 - The selected node's span is highlighted — as a guide in its own soft grey, never in a selection
-  colour, so a text selection inside it stays visible (R215, D-107)
+  colour, so a text selection inside it stays visible; the text selection uses a stronger blue
+  than a selected row (R215, R217, D-107, D-109)
 - Moving the caret resolves offset → node → selection (debounced). **Scrolling does not** —
   see §4.5
 - The only place where editing happens (§5)
