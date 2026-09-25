@@ -78,6 +78,14 @@ function parseRgb(color: string): [number, number, number] {
   return [Number(match[1]), Number(match[2]), Number(match[3])]
 }
 
+/** A computed colour as 0–255 channels. `color-mix()` computes to
+ * `color(srgb r g b)` with 0–1 channels rather than `rgb()`, so both forms. */
+function srgb255(color: string): [number, number, number] {
+  const mixed = /^color\(srgb ([\d.]+) ([\d.]+) ([\d.]+)/.exec(color)
+  if (mixed === null) return parseRgb(color)
+  return [1, 2, 3].map((i) => Math.round(Number(mixed[i]) * 255)) as [number, number, number]
+}
+
 function relativeLuminance([r, g, b]: [number, number, number]): number {
   const lin = (c: number): number => {
     const v = c / 255
@@ -345,24 +353,43 @@ describe('R115 — Raw', () => {
     resetContextForTests()
   })
 
-  it(".cm-np-selected — the selected node's span — switches between focused and unfocused", async () => {
+  // R215 (`R215-raw-band-and-leaf-glyph.md` §1) replaced R115's rule here:
+  // the span used to follow `--selection-bg` like the text selection does,
+  // which made a text selection inside it invisible with the pane focused.
+  // It is now its own soft grey, the same in both states, and never either
+  // selection colour. Exact values per theme, not just "differs".
+  it(".cm-np-selected — the selected node's span — is its own grey in both focus states, never a selection colour", async () => {
     await openTab('{"a":"hello world"}')
     await paint()
 
-    const span = container.querySelector<HTMLElement>('.cm-np-selected')
-    expect(span).not.toBeNull()
-    const unfocusedColor = getComputedStyle(span!).backgroundColor
-    expect(unfocusedColor).toBe(resolvedToken('--row-selected-inactive-bg'))
-
+    const band = (): string =>
+      getComputedStyle(container.querySelector<HTMLElement>('.cm-np-selected')!).backgroundColor
+    const selection = (): string =>
+      getComputedStyle(container.querySelector<HTMLElement>('.cm-line')!, '::selection')
+        .backgroundColor
     const view = editorViewIn(container)
-    view.focus()
-    await paint()
 
-    const focusedColor = getComputedStyle(
-      container.querySelector<HTMLElement>('.cm-np-selected')!
-    ).backgroundColor
-    expect(focusedColor).toBe(resolvedToken('--row-selected-bg'))
-    expect(focusedColor).not.toBe(unfocusedColor)
+    for (const [theme, expected] of [
+      // 40% of --gray-300 over --gray-0; 60% of --gray-700 over --gray-900.
+      ['light', [231, 233, 237]],
+      ['dark', [45, 50, 62]]
+    ] as const) {
+      document.documentElement.dataset.theme = theme
+      view.contentDOM.blur()
+      await paint()
+      const unfocused = band()
+      expect(unfocused).toBe(resolvedToken('--raw-node-band-bg'))
+      expect(srgb255(unfocused)).toEqual(expected)
+      // Compared as channels: the band computes to `color(srgb …)` and the
+      // selection to `rgb(…)`, so comparing the strings could never fail.
+      expect(srgb255(unfocused)).not.toEqual(srgb255(selection()))
+
+      view.focus()
+      await paint()
+      expect(band()).toBe(unfocused)
+      expect(srgb255(band())).not.toEqual(srgb255(selection()))
+      expect(selection()).toBe(resolvedToken('--row-selected-bg'))
+    }
   })
 
   // R117 (`R113-inactive-selection.md` §12) — the text selection, through

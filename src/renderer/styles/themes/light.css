@@ -29,6 +29,13 @@
   --row-selected-inactive-bg: var(--gray-300);
   --focus-ring-inactive: var(--gray-600);
 
+  /* R215 (`R215-raw-band-and-leaf-glyph.md` §1) — the selected node's span
+   * in Raw: a guide to the eye, not a selection. The inactive selection's grey
+   * at 40% over the surface, in both focus states, so blue stays the text
+   * selection's alone. Weakest text on it: string 3.37:1, comment 3.52:1
+   * (4.10 / 4.27 off it). */
+  --raw-node-band-bg: color-mix(in srgb, var(--row-selected-inactive-bg) 40%, var(--surface-bg));
+
   /* R33/D-051 §1b: control tokens, not elevation surface tokens.
    * `--elev-2-bg` is the lightest surface in this theme, which made the
    * thumb near-invisible against a near-white pane. Minimum contrast:

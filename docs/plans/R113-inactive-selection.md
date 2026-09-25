@@ -47,6 +47,10 @@ The two carry different information, which is why both earn their place.
 | **Raw** | caret | visible, blinking | hidden — **already correct, no change** |
 | **all three** | pane border | `--pane-focus-ring` | transparent |
 
+*Superseded for the span by R215 (D-107):* the selected node's span in Raw is now its own grey,
+`--raw-node-band-bg`, in both states — sharing the text selection's blue made a selection inside it
+invisible. See `docs/plans/R215-raw-band-and-leaf-glyph.md` §1.
+
 **Detail in list mode is a deliberate blank, not an omission.** Its `.detail-child-row` has a hover
 background but no selection, no keyboard traversal and no active descendant — checked in
 `Detail.tsx`, where the row is a plain `role="row"`. There is no state to reflect. This is precisely
