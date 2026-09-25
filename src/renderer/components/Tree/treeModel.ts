@@ -21,6 +21,7 @@ import { hasChildren, labelOf } from '../../nodeDisplay'
 export {
   childCountOf,
   glyphOf,
+  glyphOfNode,
   hasChildren,
   kindLabelOf,
   labelOf,

@@ -116,6 +116,56 @@ export function glyphOf(kind: NodeKind): string {
   return KIND_GLYPHS[kind]
 }
 
+/**
+ * R216 (`docs/plans/R215-raw-band-and-leaf-glyph.md` §2): an element with no
+ * element children — `<title>The Odyssey</title>`, `<reviewed/>` — is a leaf
+ * of the document's structure, and every element used to wear the same `<>`
+ * regardless. A leaf now shows a bullet, so `<>` marks exactly the elements
+ * that have element children. Attributes, text, CDATA, comments and processing
+ * instructions do not count: they are not structure the Tree descends into.
+ *
+ * No brackets on purpose. Fourteen candidates were rendered at the glyph
+ * column's 11px in both themes (the plan's §2 lists them): the bullet is legible,
+ * collides with no other kind's glyph, and makes no claim an empty element would
+ * contradict (`=` and `ab` both promise a value).
+ */
+export const LEAF_ELEMENT_GLYPH = '•'
+
+/** Whether an element has any element child. Cached per store, like
+ * `childCountOf`: the walk stops at the first element child, which in mixed
+ * content is a step or two in, but an element holding only text, comments or
+ * processing instructions is walked to the end — and a visible row repeats the
+ * call on every render. */
+const elementChildCaches = new WeakMap<NodeStore, Map<NodeRef, boolean>>()
+
+function hasElementChild(store: NodeStore, node: NodeRef): boolean {
+  let cache = elementChildCaches.get(store)
+  if (cache === undefined) {
+    cache = new Map()
+    elementChildCaches.set(store, cache)
+  }
+  const cached = cache.get(node)
+  if (cached !== undefined) return cached
+
+  let found = false
+  for (let child = store.firstChildOf(node); child !== -1; child = store.nextSiblingOf(child)) {
+    if (store.kindOf(child) === NodeKind.Element) {
+      found = true
+      break
+    }
+  }
+  cache.set(node, found)
+  return found
+}
+
+/** The glyph for one node: its kind's, except that an element without element
+ * children is marked as a leaf (R216). */
+export function glyphOfNode(store: NodeStore, node: NodeRef): string {
+  const kind = store.kindOf(node)
+  if (kind === NodeKind.Element && !hasElementChild(store, node)) return LEAF_ELEMENT_GLYPH
+  return KIND_GLYPHS[kind]
+}
+
 /** Falls back to the kind label for an unnamed node (an array element, a
  * text node, the document root) — never renders an empty row label. */
 export function labelOf(store: NodeStore, node: NodeRef): string {

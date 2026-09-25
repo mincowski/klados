@@ -16,6 +16,28 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R215–R216 — Raw's node band as a guide, and a leaf glyph for XML elements · built
+
+**Plan:** `docs/plans/R215-raw-band-and-leaf-glyph.md` · **Decisions:** D-107, D-108
+
+**Two pieces of user feedback, both about how a selected or listed node looks.** Neither changes
+behaviour, and both were settled by the project lead from renderings in the built application.
+
+**R215 — the grey band in Raw made the selected node's own text hard to read.** At full grey, string
+and comment text fell below 2.6:1. The proposed fix was 50% in light and 80% in dark. Rendered, dark
+at 80% could not be told from the full grey, so 60% went next to it; the project lead took 60% for
+dark and 40% for light. **Rendering turned up the worse half**: with Raw focused the band was the same
+blue as the text selection, so a word selected inside the node simply did not show. The band is now
+its own grey in both focus states, and blue belongs to the text selection alone.
+
+**R216 — every XML element wore `<>`.** An element with no element children now shows `•`. Fourteen
+candidates were drawn at the Tree's real 11px in both themes — several failed in ways only a
+rendering shows: `‹›` collapsed into a blob, `<…>` overflowed the column, `›` looked like a
+disclosure triangle. Dropping the brackets also made `<>` mean exactly "has element children".
+Two older font tests had used a lone `<a/>` as their example of `<>`, which is now correctly a leaf.
+
+---
+
 ## R214 — the grid filter pass stops freezing the window · built ⚠
 
 **Plan:** `docs/plans/R214-filter-pass.md` · **Decision:** D-106

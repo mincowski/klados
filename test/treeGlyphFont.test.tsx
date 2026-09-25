@@ -77,8 +77,9 @@ describe('R83 — .tree-row-glyph resolves a monospace font-family, matching .ta
 })
 
 describe('R98 — .tree-row-glyph draws the XML marker in --font-ui, not --font-mono', () => {
-  it('the element glyph (<>) draws in --font-ui', async () => {
-    const source = new TextEncoder().encode('<a/>')
+  // R216: `<a>` needs an element child to wear `<>`; a lone `<a/>` is a leaf (`•`).
+  it('the element glyph (<>) draws in --font-ui, the leaf glyph (•) in --font-mono', async () => {
+    const source = new TextEncoder().encode('<a><b/></a>')
     const store = new NodeStore(source, new Interner())
     xmlFormatModule.parse(source, store, options)
     const doc = {
@@ -86,14 +87,16 @@ describe('R98 — .tree-row-glyph draws the XML marker in --font-ui, not --font-
       sourceBuffer: new SourceBuffer(source, 'utf-8', 0),
       filePath: 'C:/docs/a.xml'
     }
-    // node 0 is Document (glyph 'D'); node 1 is the <a/> element itself —
-    // select it directly rather than relying on which row the virtualizer
-    // happens to render first.
-    await paint(<TreeContent document={doc} selectedNode={1} />)
+    // node 0 is Document (glyph 'D'); node 1 is <a>, node 2 its child <b/> —
+    // selecting <b/> expands <a>, so both rows render regardless of which row
+    // the virtualizer happens to render first.
+    await paint(<TreeContent document={doc} selectedNode={2} />)
 
     const glyphs = Array.from(container.querySelectorAll<HTMLElement>('.tree-row-glyph'))
     const glyph = glyphs.find((g) => g.textContent === '<>')!
     const style = getComputedStyle(glyph)
     expect(style.fontFamily).not.toContain('mono')
+    const leaf = glyphs.find((g) => g.textContent === '•')!
+    expect(getComputedStyle(leaf).fontFamily).toContain('mono')
   })
 })
