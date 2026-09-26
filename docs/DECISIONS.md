@@ -130,6 +130,7 @@ Search for the id to jump to one.
 | **D-108** | An XML element without element children is marked `•`; `<>` means it has element children |  |
 | **D-109** | Raw's text selection has its own blue, stronger than a row band's |  |
 | **D-110** | A Raw range selection resolves to the smallest node containing it, once the mouse is released |  |
+| **D-111** | Klados registers for "Open with" by platform, never writing a default; on Windows through its own installer script |  |
 
 ---
 
@@ -4040,3 +4041,35 @@ under the pointer rather than on anything describing the selected text.
 mouse, set aside because it takes Shift+arrow's resolution with it, and keyboard and mouse should
 agree. Under the chosen rule the reported case keeps its node anyway: a drag across the children
 of the selected node is contained by it.
+
+---
+
+### D-111 — Klados registers for "Open with" by platform, never writing a default; on Windows through its own installer script (R219) · `settled`
+
+**Revises R164 §1's "no OS-shell entry point".** Plan: `docs/plans/R219-open-with.md`.
+
+**Chosen:**
+- **Windows:** `assets/build/installer.nsh` writes a class `Klados.<ext>` and its name in the
+  extension's `OpenWithProgids` — what VS Code's per-user install writes — and never the extension's
+  default value or `UserChoice`. Uninstall removes exactly that value and class, and no key.
+- **macOS:** `mac.fileAssociations` at rank `Alternate`. **Linux:** `linux.mimeTypes`, the
+  `.desktop` line only.
+- **One list, three declarations**, held to the format modules' extensions by
+  `test/fileAssociations.test.ts`.
+- **A document icon** (a page with the mark) for registered types on Windows, not the app tile.
+- **Launch handling** in main: arguments read defensively (`core/launchPaths.ts`), a single-instance
+  lock outside the dev server, `open-file` on macOS; the renderer opens each path in a new tab or
+  focuses the tab already holding it.
+
+**Rejected: electron-builder's top-level `fileAssociations`**, the cross-platform form the project
+lead first asked about. On Windows its `APP_ASSOCIATE` writes each extension's default value, which
+outranks a no-choice fallback — measured, it would have moved `.json`, `.toml` and `.csv` from VS
+Code to Klados — and its uninstall leaves that value naming a deleted class. On Linux, `mimeType` on
+an association installs a MIME definition that redefines the type system-wide.
+
+**Rejected: `Applications\Klados.exe\SupportedTypes` alone**, measured as the one registration that
+never changes double-click. It keeps Klados out of the "Open with" submenu until the user has picked it
+once through "Choose another app", and the project lead chose the submenu. **The accepted cost,
+measured:** where nobody ever chose a default, Windows may hand double-click to Klados (`.json` here,
+confirmed by `ShellExecute`). An explicit choice survived, and uninstalling restored every
+extension's handler.

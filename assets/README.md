@@ -43,6 +43,8 @@ gets handed to the OS.
 | `icon-macos.svg` | Padded to the macOS safe area (824 of 1024) for `.icns`. |
 | `mark.svg` | Bare mark, `currentColor`, no tile. Docs, READMEs, large in-app use. |
 | `mark-16.svg` | Small-size variant on a 16 grid: 2px strokes on integer coordinates. Source for `icon.ico`'s and `icons/*.png`'s sizes below 48px (M5c-PLAN.md J7 / D-054). |
+| `document.svg` | R219. The file-type icon: a white page with a folded corner and the mark in `#A9701E` (the one amber that holds on a white page, per the reference table above). `document.ico`'s 48px frame and up. |
+| `document-16.svg` | R219. The same on a 16 grid — a 1px outline on half-pixel coordinates and a 2px stem, the mark drawn larger than a straight scale-down would give. `document.ico`'s 16, 24 and 32px frames: sharp at 16, and at 32 by doubling. |
 
 **Why two mark files.** Scaling the 64px master to 16 gives 1.25px strokes that land between
 pixels and blur. `mark-16.svg` is redrawn so strokes fall on whole pixels. Use it anywhere the
@@ -81,6 +83,8 @@ frames.
 | `icon.icns` | macOS. |
 | `Klados.iconset/` | macOS iconset, 10 files with @2x variants — `icon-macos.svg` at **every** size. |
 | `icons/*.png` | 16 … 1024 for Linux and in-app use — `icon.svg` at every size, same as `icon.ico`. |
+| `document.ico` | R219. Windows file-type icon — what Explorer shows on a file whose default app is Klados. 16, 24, 32 from `document-16.svg`, 48 … 256 from `document.svg`; frame list asserted like `icon.ico`'s. Shipped by `win.extraResources`, registered by `installer.nsh`. |
+| `installer.nsh` | R219. Not an icon: the NSIS script electron-builder includes from this directory, registering Klados for "Open with" (see its own header). |
 
 ### Regenerating
 
@@ -155,6 +159,4 @@ amber marks everything it marks nothing, the same discipline as the elevation bu
 
 - **Wordmark lockup.** Needs a real typeface decision and the letterforms converted to outlines;
   live text in an SVG renders differently on every machine.
-- **File-type association icons**, if Klados registers for `.xml` / `.json`. Convention is the
-  app mark on a document silhouette, tinted per format.
 - **Installer and DMG background art.**

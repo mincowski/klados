@@ -1,6 +1,7 @@
 import { app, shell, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { pathToFileURL } from 'url'
+import { statSync } from 'fs'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { titleBarOverlayColorsFor, type TitleBarTheme } from '../shared/titleBar'
@@ -14,7 +15,94 @@ import iconIco from '../../assets/build/icon.ico?asset'
 import { registerReadTokenProtocol } from './documents'
 import { handleWindowClose, confirmQuit as confirmQuitFlow } from '../core/mainQuitFlow'
 import { isAllowedExternalUrl, isAppUrl } from '../core/mainSecurity'
+import { launchPathsFrom } from '../core/launchPaths'
 import { getAppUrl, secureHandle, secureOn, setAppUrl } from './trustedRenderer'
+
+// R219 (`docs/plans/R219-open-with.md` §3) — files the operating system asks
+// Klados to open: "Open with" on Windows and Linux passes the path on the
+// command line, macOS sends `open-file`. Revises R164 §1's "no OS-shell entry
+// point" on purpose; R219 §6 records why it stays acceptable.
+//
+// **One instance.** A second "Open with" must land as a tab in the running
+// window, not as a second process sharing this one's `userData` — including
+// the `localStorage` session restore reads. The lock is per `userData`
+// directory, so test harnesses with their own `--user-data-dir` are separate
+// instances. **Not taken under the development server**: `npm run dev` shares
+// `userData` with an installed Klados, and would otherwise hand its launch to
+// that one and quit.
+const underDevServer = is.dev && process.env['ELECTRON_RENDERER_URL'] !== undefined
+const isPrimaryInstance = underDevServer || app.requestSingleInstanceLock()
+if (!isPrimaryInstance) app.quit()
+
+function isFile(path: string): boolean {
+  try {
+    return statSync(path).isFile()
+  } catch {
+    return false
+  }
+}
+
+function launchPathsIn(argv: readonly string[], workingDirectory: string): string[] {
+  return launchPathsFrom(argv, {
+    defaultApp: process.defaultApp === true,
+    workingDirectory,
+    isFile
+  })
+}
+
+/**
+ * Paths waiting for a window's renderer to take them at startup
+ * (`app:takeLaunchPaths`), which it does once, before its first render — so a
+ * launched file does not leave an empty tab beside it. `null` once taken:
+ * from then on paths are pushed (`app:openPaths`). Back to a list whenever
+ * paths arrive with no window to take them (macOS, all windows closed).
+ */
+let pendingLaunchPaths: string[] | null = isPrimaryInstance
+  ? launchPathsIn(process.argv, process.cwd())
+  : []
+
+function bringForward(win: BrowserWindow): void {
+  if (win.isMinimized()) win.restore()
+  win.show()
+  win.focus()
+}
+
+function openPaths(paths: readonly string[]): void {
+  if (paths.length === 0) return
+  if (pendingLaunchPaths !== null) {
+    for (const path of paths) if (!pendingLaunchPaths.includes(path)) pendingLaunchPaths.push(path)
+    return
+  }
+  const win = BrowserWindow.getAllWindows()[0]
+  if (win === undefined) {
+    pendingLaunchPaths = [...paths]
+    if (app.isReady()) void createWindow()
+    return
+  }
+  win.webContents.send('app:openPaths', paths)
+  bringForward(win)
+}
+
+secureHandle('app:takeLaunchPaths', (): string[] => {
+  const paths = pendingLaunchPaths ?? []
+  pendingLaunchPaths = null
+  return paths
+})
+
+// The second instance's own `argv` and working directory — a relative path
+// there is relative to where *it* was started, not to this process.
+app.on('second-instance', (_event, argv, workingDirectory) => {
+  openPaths(launchPathsIn(argv, workingDirectory))
+  const win = BrowserWindow.getAllWindows()[0]
+  if (win !== undefined) bringForward(win)
+})
+
+// macOS. Registered at module load, since it fires before `ready` when a file
+// launches Klados. `preventDefault` tells macOS the file was handled.
+app.on('open-file', (event, path) => {
+  event.preventDefault()
+  if (isFile(path)) openPaths([path])
+})
 
 // R26 (`R24-tabs.md` §4) — the consolidated quit flow. Windows whose
 // close has actually been confirmed by the renderer (every dirty tab
@@ -254,6 +342,9 @@ async function createWindow(): Promise<void> {
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
+  // R219: a second instance has handed its paths to the first and is quitting.
+  if (!isPrimaryInstance) return
+
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.klados.app')
 

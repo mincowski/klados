@@ -153,7 +153,9 @@ describe.skipIf(!builtAppAvailable)('the built app via _electron (R51, R58)', ()
       app: {
         cancelQuit: 'function',
         confirmQuit: 'function',
-        onQuitRequested: 'function'
+        onOpenPaths: 'function',
+        onQuitRequested: 'function',
+        takeLaunchPaths: 'function'
       },
       document: {
         getPathForFile: 'function',
