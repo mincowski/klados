@@ -70,6 +70,23 @@ describe.skipIf(!builtAppAvailable)('launched with a file, as "Open with" does (
     rmSync(dir, { recursive: true, force: true })
   })
 
+  /** A second launch, as a second "Open with" makes: its exit, and everything
+   * it printed, so a failure says why rather than only that it failed. */
+  async function launchSecond(
+    file: string
+  ): Promise<{ code: number | null; signal: string | null; output: string }> {
+    const second = spawn(electronBinary, [mainEntry, `--user-data-dir=${userDataDir}`, file], {
+      stdio: ['ignore', 'pipe', 'pipe']
+    })
+    let output = ''
+    second.stdout.on('data', (chunk) => (output += String(chunk)))
+    second.stderr.on('data', (chunk) => (output += String(chunk)))
+    const [code, signal] = await new Promise<[number | null, string | null]>((resolve) =>
+      second.on('exit', (c, s) => resolve([c, s]))
+    )
+    return { code, signal, output }
+  }
+
   async function launch(...files: string[]): Promise<Page> {
     app = await electron.launch({ args: [mainEntry, `--user-data-dir=${userDataDir}`, ...files] })
     const page = await app.firstWindow()
@@ -87,11 +104,12 @@ describe.skipIf(!builtAppAvailable)('launched with a file, as "Open with" does (
 
   it('a second launch hands its file to the running window and exits', async () => {
     const page = (await app!.firstWindow())!
-    const second = spawn(electronBinary, [mainEntry, `--user-data-dir=${userDataDir}`, json], {
-      stdio: 'ignore'
-    })
-    const exitCode = await new Promise<number | null>((resolve) => second.on('exit', resolve))
-    expect(exitCode).toBe(0)
+    const second = await launchSecond(json)
+    expect(
+      second.code,
+      `signal ${second.signal}; output:
+${second.output}`
+    ).toBe(0)
     await expect
       .poll(() => tabNames(page), { timeout: 30_000 })
       .toEqual(['shelf.xml', 'config.json'])
@@ -100,10 +118,12 @@ describe.skipIf(!builtAppAvailable)('launched with a file, as "Open with" does (
 
   it('a second launch with a file already open focuses its tab instead of opening it twice', async () => {
     const page = (await app!.firstWindow())!
-    const second = spawn(electronBinary, [mainEntry, `--user-data-dir=${userDataDir}`, xml], {
-      stdio: 'ignore'
-    })
-    expect(await new Promise<number | null>((resolve) => second.on('exit', resolve))).toBe(0)
+    const second = await launchSecond(xml)
+    expect(
+      second.code,
+      `signal ${second.signal}; output:
+${second.output}`
+    ).toBe(0)
     await expect
       .poll(() => page.$eval('.tab-strip .tab-active .tab-label', (n) => n.textContent), {
         timeout: 30_000
