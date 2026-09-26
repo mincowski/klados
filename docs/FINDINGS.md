@@ -297,6 +297,14 @@ primitive** — widening that CSP for an unrelated reason would remove it silent
 `webContents` across a navigation, which is why R164's navigation guard is the primary control and
 this is only a secondary one.
 
+**An error thrown across IPC arrives as its message only.** An `ipcMain.handle` rejection reaches
+the renderer as a plain `Error`: no `code`, no `errno`, no own properties, and the message
+behind `Error invoking remote method '<channel>': ` (R220, measured; Electron documents it). A
+renderer that branches on `err.code` from `invoke` is branching on `undefined`. Classify in
+main and put what matters in the message, as `core/fileErrors.ts` does. **Related, on Windows:** a
+file another program holds `stat`s fine and fails `EBUSY` only on open, and a folder *opens* fine
+and fails only on read, so neither `stat` nor `open` alone proves a path is a readable file.
+
 **Predicting a consequence is not evaluating it.** D-054's icon split named the exact side effect
 that broke it and dismissed it in the same sentence. If a plan says "this might mean X," that is a
 thing to test, not a thing already handled.

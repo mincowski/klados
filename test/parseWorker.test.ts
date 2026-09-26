@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Interner } from '../src/core/interner'
 import { NodeStore } from '../src/core/nodeStore'
 import type { ParseOptions } from '../src/core/types'
+import { fileErrorFrom, fileErrorMessage } from '../src/core/fileErrors'
 import { jsonFormatModule } from '../src/formats/json/index'
 import {
   runParseFromUrlJob,
@@ -419,6 +420,26 @@ describe('runParseFromUrlJob', () => {
       () => {}
     )
     expect(response.type).toBe('error')
+    if (response.type === 'error') {
+      expect(response.message).toBe('Could not read the document (HTTP 404)')
+    }
+  })
+
+  it('passes on the kind the protocol handler tagged into the body (R220)', async () => {
+    const body = fileErrorMessage('locked', 'EBUSY: resource busy or locked')
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(new Response(body, { status: 423 })) as unknown as typeof fetch
+
+    const response = await runParseFromUrlJob(
+      { type: 'parseFromUrl', requestId: 1, url: 'klados-file://held/', filename: 'x.csv' },
+      () => {}
+    )
+    if (response.type !== 'error') throw new Error(`expected error, got ${response.type}`)
+    expect(fileErrorFrom(new Error(response.message))).toEqual({
+      kind: 'locked',
+      detail: 'EBUSY: resource busy or locked'
+    })
   })
 
   it('errors cleanly when fetch itself rejects', async () => {

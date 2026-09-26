@@ -87,7 +87,7 @@ registerCommand({
       if (!outcome.ok) {
         notify({
           severity: 'error',
-          message: `Couldn't save: ${outcome.message}`,
+          message: outcome.message,
           documentId: id
         })
       }

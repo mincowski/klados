@@ -13,6 +13,7 @@ import { Interner } from '../core/interner'
 import { buildNameIndex, type NameIndex } from '../core/nameIndex'
 import { NodeStore, type NodeStoreBuffers } from '../core/nodeStore'
 import { DEFAULT_MAX_DEPTH } from '../core/parseDefaults'
+import { fileErrorFrom } from '../core/fileErrors'
 import {
   buildLineIndex,
   buildRowIndex,
@@ -373,10 +374,18 @@ export async function runParseFromUrlJob(
   try {
     const response = await fetch(request.url)
     if (!response.ok) {
+      // R220: a file the protocol handler could not open answers with its
+      // kind tagged in the body (`readTokenProtocol.ts`); passed on as the
+      // message, the renderer finds it there. A refused token is not a file
+      // error and keeps the status.
+      const body = await response.text().catch(() => '')
       return {
         type: 'error',
         requestId: request.requestId,
-        message: `Could not read the document (HTTP ${response.status})`
+        message:
+          fileErrorFrom(body) === null
+            ? `Could not read the document (HTTP ${response.status})`
+            : body
       }
     }
     bytes = await response.arrayBuffer()
