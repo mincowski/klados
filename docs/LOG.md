@@ -16,6 +16,28 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R218 — a text selection in Raw resolves to the node that contains it · built
+
+**Plan:** `docs/plans/R218-range-selection-sync.md` · **Decision:** D-110
+
+**Dragging a selection in Raw moved the node selection to wherever the pointer was — mid-drag
+included.** The project lead asked whether that was intentional. It was not: the rule had only
+ever been written for a caret, and a range went through it resolving whichever end was moving.
+
+**Now a range stands for the smallest node containing it, and a drag resolves once, on release.**
+Dragging across several children of the selected node keeps that node — the case in the report.
+Shift+arrow follows the same rule, which is why the project lead chose it over "a range never
+changes the node": that would have taken away the keyboard behaviour that already felt right.
+
+**Two things turned up while building it rather than in the report.** Shift+Down over one line
+selects that line's indentation and line break, which belong to the parent — so ranges are trimmed
+of layout whitespace first. And a mouse release that never arrives would have left caret sync
+switched off; a keyboard selection now ends a stale hold. The tests caught themselves twice: two
+passed only because the document opens with the expected node selected, and a synthetic "click"
+was a triple-click.
+
+---
+
 ## R215–R217 — Raw's node band as a guide, a stronger text selection, and a leaf glyph for XML elements · built
 
 **Plan:** `docs/plans/R215-raw-band-and-leaf-glyph.md` · **Decisions:** D-107, D-108, D-109

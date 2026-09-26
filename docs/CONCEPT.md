@@ -650,7 +650,8 @@ Beyond that:
   colour, so a text selection inside it stays visible; the text selection uses a stronger blue
   than a selected row (R215, R217, D-107, D-109)
 - Moving the caret resolves offset → node → selection (debounced). **Scrolling does not** —
-  see §4.5
+  see §4.5. A range selection resolves to the smallest node containing all of it, layout
+  whitespace at its ends aside, and nothing resolves while the mouse button is held (R218, D-110)
 - The only place where editing happens (§5)
 
 ### 4.5 Synchronization

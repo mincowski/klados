@@ -129,6 +129,7 @@ Search for the id to jump to one.
 | **D-107** | Raw's node span is a guide in its own grey, never a selection colour |  |
 | **D-108** | An XML element without element children is marked `•`; `<>` means it has element children |  |
 | **D-109** | Raw's text selection has its own blue, stronger than a row band's |  |
+| **D-110** | A Raw range selection resolves to the smallest node containing it, once the mouse is released |  |
 
 ---
 
@@ -4014,3 +4015,28 @@ comment). A selection is transient; one that cannot be seen is the worse failure
 **Rejected:** stronger mixes (`--blue-300` at 75%, `--blue-500` at 60%), which stood out more and began
 washing out amber and comment text; changing `--row-selected-bg` itself, which would darken every
 selected row in the Tree and grid, where nothing was wrong.
+
+---
+
+### D-110 — A Raw range selection resolves to the smallest node containing it, once the mouse is released (R218) · `settled`
+
+**Extends M1-PLAN.md D14's caret rule to ranges**, which it never covered. Plan:
+`docs/plans/R218-range-selection-sync.md`.
+
+**Before:** every selection change resolved the selection's head after 200 ms, so a drag moved the
+node selection to the pointer — mid-drag whenever it paused — and a finished drag landed on the node
+under the pointer rather than on anything describing the selected text.
+
+**Chosen:**
+- **A range resolves to the smallest node containing all of it** (`nodeContainingRange`), after
+  trimming space, tab, CR and LF from its ends; a caret, or a range of only whitespace, resolves as
+  before. Without the trim, one whole selected line resolves to its parent, which owns the line's
+  indentation and break.
+- **Nothing resolves while the primary button is held on the content**; a release resolves once.
+- **A hold ends on any selection that is not CodeMirror's `select.pointer`**, so a missed release
+  cannot leave caret sync switched off.
+
+**Rejected: a range never changes the node selection.** The project lead's first instinct for the
+mouse, set aside because it takes Shift+arrow's resolution with it, and keyboard and mouse should
+agree. Under the chosen rule the reported case keeps its node anyway: a drag across the children
+of the selected node is contained by it.
