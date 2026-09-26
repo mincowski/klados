@@ -56,6 +56,13 @@ Two structural facts back this up and are worth stating so they are not re-litig
   The shell never launches Klados with an attacker-controlled path; a malicious file enters *only*
   via the Open dialog or drag-drop.
 
+  *Revised by R219 (`docs/plans/R219-open-with.md` §6), on purpose:* Klados now registers for
+  "Open with" and reads files from its command line (`core/launchPaths.ts`), `second-instance` and
+  macOS's `open-file`. A double-click is a third way in. What keeps it acceptable is recorded
+  there: user-initiated, only existing regular files are taken and never a switch, and the path
+  goes through the same `stat`, size caps, read token and parsers as the Open dialog. No
+  `protocols` are registered, and nothing on the command line reaches Chromium through Klados.
+
 The parser layer needs no change. The exposure is entirely in the window/IPC layer, below.
 
 **Re-verified in review, by running rather than reading**, since "no task" is the highest-leverage

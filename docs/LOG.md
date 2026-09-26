@@ -16,6 +16,34 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R219 — Klados in "Open with" · built ⚠
+
+**Plan:** `docs/plans/R219-open-with.md` · **Decision:** D-111
+
+**Right-click a JSON file in Explorer, choose "Open with", and Klados is there now** — and choosing it
+opens the file in a tab, or brings forward the tab that already has it. Before this round Klados did
+not register anywhere and ignored anything it was launched with, which R164 had recorded as a
+deliberate security property; that property is revised on purpose.
+
+**The Windows installer took two corrections, both from measuring rather than reading.** The
+cross-platform `fileAssociations` setting would have made Klados the default for JSON, TOML and CSV on
+this machine, where VS Code only opened them because nothing else was registered — so Klados
+registers itself, for "Open with" only, the way VS Code does. Installing that showed Windows still
+hands double-click to a newly registered app where nobody ever chose one. Both options were measured
+and put to the project lead, who chose having Klados in the menu. An explicit choice is never
+touched, and uninstalling puts everything back.
+
+**Files Klados owns get a page icon, not the app tile**, which down a long file list looked like a
+column of program shortcuts. Three designs were rendered in a mock Explorer and the small size
+redrawn sharper at the project lead's request.
+
+**The tests caught two real bugs before any user could.** A second launch's command line arrives
+with Chromium's switches moved to the front, so Klados opened its own entry script as a document;
+and a file that was open last time opened twice, because its restored tab had not yet reported a
+path. macOS and Linux could not be built here and are owed.
+
+---
+
 ## R218 — a text selection in Raw resolves to the node that contains it · built
 
 **Plan:** `docs/plans/R218-range-selection-sync.md` · **Decision:** D-110

@@ -150,6 +150,14 @@ export interface KladosApi {
      * only so the renderer has an explicit signal to send, symmetric with
      * `confirmQuit`. */
     cancelQuit(): void
+    /** R219 (`docs/plans/R219-open-with.md` §3): files the operating system
+     * launched Klados with — "Open with" — held by main until taken. Taken once,
+     * before the first render; later calls resolve to `[]`. */
+    takeLaunchPaths(): Promise<string[]>
+    /** R219: files the operating system asks the running Klados to open — a
+     * second "Open with", or macOS's `open-file` — after launch. Returns an
+     * unsubscribe function. */
+    onOpenPaths(callback: (paths: string[]) => void): () => void
   }
   /** R59 (`R58-zoom.md` §4) — content zoom's own IPC seam. Chromium's
    * zoom lives on `webContents`, a main-process-only object; `settings.ts`

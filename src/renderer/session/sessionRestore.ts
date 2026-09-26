@@ -136,15 +136,22 @@ type TabDeps = Omit<DocumentSessionDeps, 'isActive' | 'estimateOtherTabsBytes'>
  * (real `parseInWorker`/`window.api` by default) — tests inject a fake
  * parse/api per path, the same reason every other factory in this codebase
  * (`createTab` itself, `createDocumentSession`) takes one.
+ *
+ * R219: returns the tabs it created and the path each is opening, so a file
+ * the operating system launched Klados with can be matched against them while
+ * they are still opening — before their `stat` has even returned
+ * (`openFromSystem.ts`). Empty when nothing was restored.
  */
-export function beginSessionRestore(createDeps: (path: string) => TabDeps = () => ({})): void {
-  if (restoreStarted) return
+export function beginSessionRestore(
+  createDeps: (path: string) => TabDeps = () => ({})
+): readonly { readonly id: string; readonly path: string }[] {
+  if (restoreStarted) return []
   restoreStarted = true
 
   const persisted = readPersisted()
   if (persisted === null || persisted.paths.length === 0) {
     startSessionPersistence()
-    return
+    return []
   }
 
   const entries = persisted.paths.map((path) => ({ id: createTab(createDeps(path)), path }))
@@ -171,6 +178,7 @@ export function beginSessionRestore(createDeps: (path: string) => TabDeps = () =
     }
     startSessionPersistence()
   })
+  return entries
 }
 
 /** Test-only: undoes `beginSessionRestore`'s one-shot guard and drops every

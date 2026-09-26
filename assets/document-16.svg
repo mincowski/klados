@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16" role="img" aria-label="Klados document">
+  <path d="M2.5 0.5H9.5L13.5 4.5V15.5H2.5Z" fill="#FFFFFF" stroke="#7A8292" stroke-width="1" stroke-linejoin="miter"/>
+  <path d="M9.5 0.5V4.5H13.5" fill="#E6E9EE" stroke="#7A8292" stroke-width="1" stroke-linejoin="miter"/>
+  <path d="M6 5V13" fill="none" stroke="#A9701E" stroke-width="2" stroke-linecap="butt"/>
+  <path d="M11.2 5.4L6.6 9.4M8.6 8L11.4 13" fill="none" stroke="#A9701E" stroke-width="1.8" stroke-linecap="butt" stroke-linejoin="miter"/>
+</svg>

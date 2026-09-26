@@ -103,6 +103,14 @@ electronLanguages:
   - en-US
 win:
   executableName: Klados
+  # R219 (`docs/plans/R219-open-with.md` §2): the icon Explorer shows on a file
+  # whose default app is Klados, which `assets/build/installer.nsh` points each
+  # registered type at (`$INSTDIR\resources\document.ico`). Windows only: macOS
+  # registers at rank Alternate and never becomes a default, so a document icon
+  # there would never be shown.
+  extraResources:
+    - from: assets/build/document.ico
+      to: document.ico
 nsis:
   # Pinned rather than derived. electron-builder computes this as UUID v5 of
   # `appId` under its own namespace (`com.klados.app` yields exactly this
@@ -144,6 +152,36 @@ mac:
     - NSDocumentsFolderUsageDescription: Klados opens files from your Documents folder.
     - NSDownloadsFolderUsageDescription: Klados opens files from your Downloads folder.
   notarize: false
+  # R219 (`docs/plans/R219-open-with.md` §2): Finder's "Open With" for the
+  # formats Klados reads. `mac.` rather than top-level `fileAssociations`, which
+  # would also drive the Windows installer (see `assets/build/installer.nsh` for
+  # why Windows registers itself instead).
+  #
+  # **`rank: Alternate` is the point**: offered in "Open With", never a
+  # candidate for the default. At `Default`, where nobody chose, LaunchServices
+  # picks among the apps claiming a type unpredictably — a fresh Mac's `.json`
+  # could flip to Klados without anyone deciding it. `Editor`, since Klados
+  # saves.
+  #
+  # The extensions are exactly the format modules' own (`src/formats/*/index.ts`);
+  # `test/fileAssociations.test.ts` holds the two together.
+  fileAssociations:
+    - ext: xml
+      name: XML document
+      role: Editor
+      rank: Alternate
+    - ext: json
+      name: JSON document
+      role: Editor
+      rank: Alternate
+    - ext: toml
+      name: TOML document
+      role: Editor
+      rank: Alternate
+    - ext: [csv, tsv, tab]
+      name: Delimited text
+      role: Editor
+      rank: Alternate
 dmg:
   # R198: no blockmap. A blockmap is a content-chunk index letting
   # `electron-updater` fetch only the changed blocks between versions, and this
@@ -194,6 +232,23 @@ linux:
   # *absent*, which was correct while `author.name` was still a person.
   maintainer: mincowski <8300485+mincowski@users.noreply.github.com>
   category: Utility
+  # R219 (`docs/plans/R219-open-with.md` §2): the .desktop file's `MimeType=`,
+  # which puts Klados in a file manager's "Open with" and never sets a default
+  # (those live in `mimeapps.list`). Here and not as `mimeType` on a file
+  # association: that form also installs a MIME definition file redefining
+  # these types system-wide, with its own icon and comment
+  # (`LinuxTargetHelper.js` `computeMimeTypeFiles`).
+  #
+  # `.tab` has no registered MIME type, so it has no line; a `.tab` file is
+  # usually detected as plain text. Effective for the .deb. The AppImage has no
+  # install step and integrates only through a tool such as AppImageLauncher.
+  mimeTypes:
+    - application/xml
+    - text/xml
+    - application/json
+    - application/toml
+    - text/csv
+    - text/tab-separated-values
 # R198: publish the artifacts, not the update metadata.
 #
 # Left implicit, electron-builder infers a GitHub provider and uploads

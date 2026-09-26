@@ -108,6 +108,37 @@ if written != sorted(ICO_SIZES):
     raise SystemExit(f"icon.ico has frames {written}, expected {sorted(ICO_SIZES)}")
 print(f"  icon.ico ({', '.join(map(str, ICO_SIZES))}; every frame rendered at its own size)")
 
+# R219 (`docs/plans/R219-open-with.md` §2): the icon Explorer shows on a file
+# whose default app is Klados — a page with the mark, not the app tile. The
+# tile repeated down a file list reads as a column of program shortcuts; a
+# document icon says "file" first, as Windows' own file icons do. Chosen by
+# the project lead from renderings (tile, bare mark, page).
+#
+# Two sources, split by size and chosen by rendering both at every frame:
+# `document-16.svg` is drawn on a 16px grid — a 1px outline on half-pixel
+# coordinates and a 2px stem, so it is sharp at 16 and, doubled, at 32; 24 is
+# the one soft frame, and still clearer than the large drawing scaled down.
+# From 48 up its outline turns heavy and `document.svg` takes over.
+#
+# The mark is `#A9701E`, not the brand amber: an OS raster has no theme, and
+# on a white page the brand amber is 2.15:1 against the 4.18:1 this reaches
+# (assets/README.md's reference table).
+DOCUMENT_SMALL_BELOW = 48
+doc_frames = {
+    s: render(f"{SRC}/document-16.svg" if s < DOCUMENT_SMALL_BELOW else f"{SRC}/document.svg", s)
+    for s in ICO_SIZES
+}
+doc_frames[max(ICO_SIZES)].save(
+    f"{OUT}/document.ico",
+    format="ICO",
+    sizes=[(s, s) for s in ICO_SIZES],
+    append_images=[doc_frames[s] for s in ICO_SIZES if s != max(ICO_SIZES)],
+)
+written = sorted(s for s, _ in Image.open(f"{OUT}/document.ico").ico.sizes())
+if written != sorted(ICO_SIZES):
+    raise SystemExit(f"document.ico has frames {written}, expected {sorted(ICO_SIZES)}")
+print(f"  document.ico ({', '.join(map(str, ICO_SIZES))}; 16-grid below {DOCUMENT_SMALL_BELOW}px)")
+
 # macOS: padded artwork, standard iconset sizes. The tile at EVERY size —
 # this loop deliberately does not use the bare mark, because macOS has no
 # app icon in a title bar to begin with (a macOS window shows a *document*

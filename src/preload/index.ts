@@ -57,7 +57,14 @@ const api: KladosApi = {
       return () => ipcRenderer.removeListener('app:quitRequested', listener)
     },
     confirmQuit: (): void => ipcRenderer.send('app:confirmQuit'),
-    cancelQuit: (): void => ipcRenderer.send('app:cancelQuit')
+    cancelQuit: (): void => ipcRenderer.send('app:cancelQuit'),
+    // R219 (`docs/plans/R219-open-with.md` §3).
+    takeLaunchPaths: (): Promise<string[]> => ipcRenderer.invoke('app:takeLaunchPaths'),
+    onOpenPaths: (callback: (paths: string[]) => void): (() => void) => {
+      const listener = (_event: unknown, paths: string[]): void => callback(paths)
+      ipcRenderer.on('app:openPaths', listener)
+      return () => ipcRenderer.removeListener('app:openPaths', listener)
+    }
   },
   // R59 (`R58-zoom.md` §4).
   view: {
