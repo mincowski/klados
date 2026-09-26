@@ -46,7 +46,7 @@ import {
   collapseSubtree,
   EXPAND_ALL_LIMIT,
   expandAll,
-  glyphOf,
+  glyphOfNode,
   hasChildren,
   indexOfNode,
   labelOf,
@@ -599,11 +599,11 @@ function TreeRowView({
   onSelect,
   onToggle
 }: TreeRowViewProps): JSX.Element {
-  const kind = store.kindOf(row.node)
   const expandable = hasChildren(store, row.node)
   const preview = expandable ? null : previewOf(store, sourceBuffer, row.node, deltas)
   const childCount = expandable ? childCountOf(store, row.node) : null
   const label = labelOf(store, row.node)
+  const glyph = glyphOfNode(store, row.node)
 
   return (
     <div
@@ -668,8 +668,8 @@ function TreeRowView({
       ) : (
         <span className="tree-row-disclosure tree-row-disclosure-empty" aria-hidden="true" />
       )}
-      <span className={`tree-row-glyph ${glyphFontClass(glyphOf(kind))}`} aria-hidden="true">
-        {glyphOf(kind)}
+      <span className={`tree-row-glyph ${glyphFontClass(glyph)}`} aria-hidden="true">
+        {glyph}
       </span>
       <span className="tree-row-label">{label}</span>
       {childCount !== null && childCount > 0 && (

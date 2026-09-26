@@ -386,7 +386,8 @@ This keeps the elevation budget intact while still giving each pane its own cont
 ### 4.2 Tree View
 
 - Virtualized (only visible rows rendered), lazy child expansion
-- Icon per node kind; inline value preview on leaves
+- Icon per node kind; inline value preview on leaves. An XML element without element children is
+  marked as a leaf (`•`), so `<>` means it has element children (R216, D-108)
 - Full keyboard navigation: arrows, `Home`/`End`, type-ahead jump, expand/collapse all
 - YAML alias nodes render as references and jump to their anchor on activation
 
@@ -645,9 +646,12 @@ Beyond that:
   because spans are stored in document order. Windowing bounds the worst case, but the
   viewport-driven provider is still the right shape and still has to be built this way from
   the start.
-- The selected node's span is highlighted
+- The selected node's span is highlighted — as a guide in its own soft grey, never in a selection
+  colour, so a text selection inside it stays visible; the text selection uses a stronger blue
+  than a selected row (R215, R217, D-107, D-109)
 - Moving the caret resolves offset → node → selection (debounced). **Scrolling does not** —
-  see §4.5
+  see §4.5. A range selection resolves to the smallest node containing all of it, layout
+  whitespace at its ends aside, and nothing resolves while the mouse button is held (R218, D-110)
 - The only place where editing happens (§5)
 
 ### 4.5 Synchronization

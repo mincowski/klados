@@ -57,6 +57,16 @@
   --row-selected-inactive-bg: var(--gray-700);
   --focus-ring-inactive: var(--gray-400);
 
+  /* R215 — see light.css's own comment on this token. Weakest text on it:
+   * comment 3.00:1, number 3.99:1 (4.20 / 5.58 off it); 80% measured 2.63 /
+   * 3.49 and read as unchanged from the full grey. */
+  --raw-node-band-bg: color-mix(in srgb, var(--row-selected-inactive-bg) 60%, var(--surface-bg));
+
+  /* R217 — see light.css's own comment on this token. `--blue-900` was darker
+   * than the node band; this is 1.29:1 lighter. Weakest text on it: comment
+   * 2.34:1, tag names 3.16:1 (blue on blue). */
+  --text-selection-bg: var(--blue-700);
+
   /* R33/D-051 §1b — see light.css's own comment on these tokens. Minimum
    * contrast: thumb-vs-track >= 3:1 in both themes — gray-500-on-gray-800
    * is 3.32:1. Check both when changing either

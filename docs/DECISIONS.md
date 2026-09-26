@@ -126,6 +126,10 @@ Search for the id to jump to one.
 | **D-104** | One table at a time, a tab per group — not a capped stack |  |
 | **D-105** | A table's view state outlives the table: shape per group name, contents per node, and one bounded cache of results |  |
 | **D-106** | The grid filter pass runs in slices, narrows, and skips rows by their bytes; its results are cached within a byte budget |  |
+| **D-107** | Raw's node span is a guide in its own grey, never a selection colour |  |
+| **D-108** | An XML element without element children is marked `•`; `<>` means it has element children |  |
+| **D-109** | Raw's text selection has its own blue, stronger than a row band's |  |
+| **D-110** | A Raw range selection resolves to the smallest node containing it, once the mouse is released |  |
 
 ---
 
@@ -3939,3 +3943,100 @@ code, they were a third copy of the rules.
 **Not done, and owed:** the **sort** is still one synchronous step — 715 ms on 200 MB. A comparison
 sort cannot be paused as simply as a scan. And **typing forward is under half a second only from the
 third character**: a one-letter filter matches so much that narrowing from it saves little.
+
+---
+
+### D-107 — Raw's node span is a guide in its own grey, never a selection colour (R215) · `settled`
+
+**Amends R113's table row for the span** (`docs/plans/R113-inactive-selection.md` §2), which made it
+follow `--selection-bg` — blue while Raw has focus, grey while it does not — like every other pane's
+selection. Plan: `docs/plans/R215-raw-band-and-leaf-glyph.md` §1.
+
+**The span is not a selection.** In the Tree and the grid the band *is* the selection, and its colour
+saying where the keyboard is was R113's point. In Raw the selection is the caret and the text
+selection; the span only shows which bytes the selected node covers. Sharing a token made the two
+look alike, and with Raw focused they were the same blue — a word selected inside the selected node
+was invisible, in both themes. `CONCEPT.md` §4.4 already said *highlight and selection are different
+things*; this makes them look different too.
+
+**Chosen:** `--raw-node-band-bg`, the inactive grey mixed over the surface — **40% in light, 60% in
+dark**, the project lead's choice from renderings in the running application — in both focus
+states. The weakest text on it is 3.37:1 in light and 3.00:1 in dark, up from 2.46:1 and 2.29:1 at
+the full grey. Built with `color-mix()` from the semantic tokens rather than as a palette entry, so
+it follows them if they are ever retuned.
+
+**Rejected:** a focus-aware pair at reduced strength — the band and the selection stay the same hue,
+so the focused case is not fixed, only dimmed. **80% in dark**, as first proposed — rendered, it
+could not be told from the full grey.
+
+---
+
+### D-108 — An XML element without element children is marked `•`; `<>` means it has element children (R216) · `settled`
+
+**Amends `KIND_GLYPHS`'s one-glyph-per-kind rule for elements.** Plan:
+`docs/plans/R215-raw-band-and-leaf-glyph.md` §2. Raised as feedback: every XML node wore `<>`, which
+said nothing about structure.
+
+**The rule is structural and format-agnostic**: an element is a leaf when none of its children is an
+element — attributes, text, CDATA, comments and processing instructions do not count. Keyed on
+`NodeKind.Element`, never on a format id (invariant 8). JSON already shows structure through `{}` and
+`[]` rows of their own; XML has no such rows, so the element's own glyph has to carry it.
+
+**Why `•`**: fourteen candidates were rendered at the Tree's real 11px in both themes. `‹›` collapsed
+into a blob; `<…>` did not fit the 20px column; colour alone was too subtle; `=` and `ab` promise a
+value an empty element lacks; `:` and `◦` were too faint; `›` looked like a disclosure triangle;
+`</>` was legible but reads as a generic "code" mark. The bullet was legible, collided with no other
+glyph and claimed nothing an element could contradict — and dropping the brackets made `<>` mean
+exactly "has element children".
+
+**Cost:** one walk to the first element child, cached per store like `childCountOf`. `•` draws in
+`--font-mono` under D-084's rule.
+
+---
+
+### D-109 — Raw's text selection has its own blue, stronger than a row band's (R217) · `settled`
+
+**Amends R113's table row for Raw's text selection** (`docs/plans/R113-inactive-selection.md` §2), which
+gave it `--row-selected-bg` when focused, like the Tree's and grid's selected rows. Plan:
+`docs/plans/R215-raw-band-and-leaf-glyph.md` §3.
+
+**A row band and a text selection have different jobs.** A selected row carries a whole row of text,
+so its blue is pale. A selection in Raw sits on D-107's node band, and it has to stand out *from
+that band*: with the row blue it did not — 1.02:1 in light, the same brightness, and darker than the
+band in dark.
+
+**Chosen:** `--text-selection-bg`, `--blue-200` in light and `--blue-700` in dark — 1.32:1 and 1.29:1 against
+the band — the project lead's choice from three rendered per theme. Read by Raw only; the unfocused
+selection stays `--row-selected-inactive-bg`.
+
+**The cost, accepted:** text under a selection drops to 2.56:1 (light, string) and 2.34:1 (dark,
+comment). A selection is transient; one that cannot be seen is the worse failure.
+
+**Rejected:** stronger mixes (`--blue-300` at 75%, `--blue-500` at 60%), which stood out more and began
+washing out amber and comment text; changing `--row-selected-bg` itself, which would darken every
+selected row in the Tree and grid, where nothing was wrong.
+
+---
+
+### D-110 — A Raw range selection resolves to the smallest node containing it, once the mouse is released (R218) · `settled`
+
+**Extends M1-PLAN.md D14's caret rule to ranges**, which it never covered. Plan:
+`docs/plans/R218-range-selection-sync.md`.
+
+**Before:** every selection change resolved the selection's head after 200 ms, so a drag moved the
+node selection to the pointer — mid-drag whenever it paused — and a finished drag landed on the node
+under the pointer rather than on anything describing the selected text.
+
+**Chosen:**
+- **A range resolves to the smallest node containing all of it** (`nodeContainingRange`), after
+  trimming space, tab, CR and LF from its ends; a caret, or a range of only whitespace, resolves as
+  before. Without the trim, one whole selected line resolves to its parent, which owns the line's
+  indentation and break.
+- **Nothing resolves while the primary button is held on the content**; a release resolves once.
+- **A hold ends on any selection that is not CodeMirror's `select.pointer`**, so a missed release
+  cannot leave caret sync switched off.
+
+**Rejected: a range never changes the node selection.** The project lead's first instinct for the
+mouse, set aside because it takes Shift+arrow's resolution with it, and keyboard and mouse should
+agree. Under the chosen rule the reported case keeps its node anyway: a drag across the children
+of the selected node is contained by it.

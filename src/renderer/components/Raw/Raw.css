@@ -12,8 +12,13 @@
   --selection-bg: var(--row-selected-inactive-bg);
 }
 
+/* R217 (`R215-raw-band-and-leaf-glyph.md` §3): not `--row-selected-bg`. That blue is
+ * a row band's, pale enough to carry text in the Tree and grid; in Raw a text
+ * selection sits on the node band, and the band and that blue were the same
+ * brightness (1.02:1 in light), so a selection inside the selected node barely
+ * showed. */
 .raw-pane:focus-within {
-  --selection-bg: var(--row-selected-bg);
+  --selection-bg: var(--text-selection-bg);
 }
 
 .raw-container {
@@ -145,7 +150,7 @@
  *
  * Custom properties resolve inside `::selection` (they inherit from the
  * originating element), so this follows `--selection-bg` from `.raw-pane`
- * exactly like `.cm-np-selected` below — and an ancestor `:focus-within`
+ * (as `.cm-np-selected` below did until R215) — and an ancestor `:focus-within`
  * change repaints it, verified on screen rather than only in
  * `getComputedStyle`.
  *
@@ -186,9 +191,15 @@
 
 /* The selected node's span (§4.4) — a highlight, not a syntax class, so it
  * layers underneath text color via background rather than competing with
- * it. */
+ * it.
+ *
+ * R215 (`R215-raw-band-and-leaf-glyph.md` §1): its own soft grey, the same in
+ * both focus states — no longer `--selection-bg`. Sharing that made the span
+ * and a text selection inside it the same colour, so with the pane focused a
+ * selected word inside the selected node could not be seen at all; and
+ * unfocused, the full grey pulled string and comment text below 2.6:1. */
 .raw .cm-np-selected {
-  background: var(--selection-bg);
+  background: var(--raw-node-band-bg);
 }
 
 /* Find (M4-PLAN.md G5) — a background, not a syntax class, same layering

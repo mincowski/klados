@@ -97,7 +97,8 @@ function openDocumentOver(
 }
 
 function xmlDocument(): OpenDocument {
-  const source = new TextEncoder().encode('<a><b/><c/></a>')
+  // R216: `<b>` has an element child, so it keeps `<>`; `<c/>` is a leaf.
+  const source = new TextEncoder().encode('<a><b><x/></b><c/></a>')
   const store = new NodeStore(source, new Interner())
   xmlFormatModule.parse(source, store, options)
   return openDocumentOver(source, store, 'C:/docs/a.xml', 'xml')
@@ -133,13 +134,17 @@ describe('R99 — Detail glyphs follow glyphFontClass, same as the tab strip and
     expect(getComputedStyle(glyph).fontFamily).toContain('mono')
   })
 
-  it('a child row glyph (<>, an XML element) stays --font-ui', async () => {
+  it('a child row glyph (<>, an XML element) stays --font-ui; a leaf (•) is --font-mono', async () => {
     const document = xmlDocument()
     await paint(<DetailContent document={document} selectedNode={1} />)
 
     const glyphs = Array.from(container.querySelectorAll<HTMLElement>('.detail-child-glyph'))
+    // The first is the header row's empty glyph column.
+    expect(glyphs.map((g) => g.textContent)).toEqual(['', '<>', '•'])
     const glyph = glyphs.find((g) => g.textContent === '<>')!
     expect(getComputedStyle(glyph).fontFamily).not.toContain('mono')
+    const leaf = glyphs.find((g) => g.textContent === '•')!
+    expect(getComputedStyle(leaf).fontFamily).toContain('mono')
   })
 
   it('a child row glyph ({}, a JSON object) switches to --font-mono', async () => {

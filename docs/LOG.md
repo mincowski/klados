@@ -16,6 +16,57 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R218 — a text selection in Raw resolves to the node that contains it · built
+
+**Plan:** `docs/plans/R218-range-selection-sync.md` · **Decision:** D-110
+
+**Dragging a selection in Raw moved the node selection to wherever the pointer was — mid-drag
+included.** The project lead asked whether that was intentional. It was not: the rule had only
+ever been written for a caret, and a range went through it resolving whichever end was moving.
+
+**Now a range stands for the smallest node containing it, and a drag resolves once, on release.**
+Dragging across several children of the selected node keeps that node — the case in the report.
+Shift+arrow follows the same rule, which is why the project lead chose it over "a range never
+changes the node": that would have taken away the keyboard behaviour that already felt right.
+
+**Two things turned up while building it rather than in the report.** Shift+Down over one line
+selects that line's indentation and line break, which belong to the parent — so ranges are trimmed
+of layout whitespace first. And a mouse release that never arrives would have left caret sync
+switched off; a keyboard selection now ends a stale hold. The tests caught themselves twice: two
+passed only because the document opens with the expected node selected, and a synthetic "click"
+was a triple-click.
+
+---
+
+## R215–R217 — Raw's node band as a guide, a stronger text selection, and a leaf glyph for XML elements · built
+
+**Plan:** `docs/plans/R215-raw-band-and-leaf-glyph.md` · **Decisions:** D-107, D-108, D-109
+
+**Two pieces of user feedback, both about how a selected or listed node looks.** Neither changes
+behaviour, and both were settled by the project lead from renderings in the built application.
+
+**R215 — the grey band in Raw made the selected node's own text hard to read.** At full grey, string
+and comment text fell below 2.6:1. The proposed fix was 50% in light and 80% in dark. Rendered, dark
+at 80% could not be told from the full grey, so 60% went next to it; the project lead took 60% for
+dark and 40% for light. **Rendering turned up the worse half**: with Raw focused the band was the same
+blue as the text selection, so a word selected inside the node simply did not show. The band is now
+its own grey in both focus states, and blue belongs to the text selection alone.
+
+**R216 — every XML element wore `<>`.** An element with no element children now shows `•`. Fourteen
+candidates were drawn at the Tree's real 11px in both themes — several failed in ways only a
+rendering shows: `‹›` collapsed into a blob, `<…>` overflowed the column, `›` looked like a
+disclosure triangle. Dropping the brackets also made `<>` mean exactly "has element children".
+Two older font tests had used a lone `<a/>` as their example of `<>`, which is now correctly a leaf.
+
+**R217 — the band was fine; the selection was the problem.** Looking at R215's result, the project
+lead found a text selection still barely visible on the band, and suspected the selection colour.
+Measured, that was exactly it: Raw borrowed the Tree's selected-row blue, and in light that blue has
+the band's brightness to within 2%. Three stronger blues per theme were rendered with four lines
+selected inside a band; the project lead chose `--blue-200` and `--blue-700`, two existing palette
+entries. Text under a selection loses some contrast in exchange, and the plan says how much.
+
+---
+
 ## R214 — the grid filter pass stops freezing the window · built ⚠
 
 **Plan:** `docs/plans/R214-filter-pass.md` · **Decision:** D-106

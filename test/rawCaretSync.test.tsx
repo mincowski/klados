@@ -140,9 +140,9 @@ async function paint(): Promise<void> {
   })
 }
 
-async function openTab(text: string): Promise<void> {
+async function openTab(text: string, path = 'C:/docs/caret.json'): Promise<void> {
   const tabId = createTab(depsFor(text))
-  await getSessionFor(tabId)!.openPath('C:/docs/caret.json')
+  await getSessionFor(tabId)!.openPath(path)
   await paint()
   await vi.waitFor(
     () => {
@@ -251,5 +251,162 @@ describe('R162 — moving the caret in Raw resolves to the node containing it (D
 
     await new Promise((resolve) => setTimeout(resolve, WELL_PAST_MS))
     expect(selectedNode()).toBe(before)
+  })
+})
+
+// R218 (`docs/plans/R218-range-selection-sync.md`). All ASCII in one window,
+// so a CodeMirror position is a byte offset here too.
+const SHELF = [
+  '<shelf>',
+  '  <book>',
+  '    <title>Odyssey</title>',
+  '    <author>Homer</author>',
+  '  </book>',
+  '  <book>',
+  '    <title>Faust</title>',
+  '  </book>',
+  '</shelf>'
+].join('\n')
+
+/** Offset of the `nth` occurrence of `needle`, plus `plus`. */
+function at(needle: string, plus = 0, nth = 0): number {
+  let index = -1
+  for (let i = 0; i <= nth; i++) index = SHELF.indexOf(needle, index + 1)
+  if (index === -1) throw new Error(`${needle} not in SHELF`)
+  return index + plus
+}
+
+async function selectRange(anchor: number, head: number): Promise<void> {
+  editorView().dispatch({ selection: { anchor, head } })
+}
+
+async function resolvesTo(name: string, occurrence: number | null = null): Promise<void> {
+  await vi.waitFor(
+    () => {
+      if (nameOfSelected() !== name) throw new Error(`selected ${nameOfSelected()}, not ${name}`)
+    },
+    { interval: POLL_MS, timeout: TIMEOUT_MS }
+  )
+  if (occurrence !== null) {
+    const snapshot = getActiveSession().getSnapshot()
+    if (snapshot.phase !== 'ready') throw new Error('unreachable')
+    expect(snapshot.document.store.spanOf(selectedNode()).start).toBe(occurrence)
+  }
+}
+
+describe('R218 — a range selection resolves to the smallest node containing it', () => {
+  it('across two children: their parent', async () => {
+    await openTab(SHELF, 'C:/docs/shelf.xml')
+    await selectRange(at('Odyssey'), at('Homer', 2))
+    await resolvesTo('book', at('<book>'))
+  })
+
+  it('inside one element: that element', async () => {
+    await openTab(SHELF, 'C:/docs/shelf.xml')
+    await selectRange(at('Odyssey', 1), at('Odyssey', 5))
+    await resolvesTo('title', at('<title>'))
+  })
+
+  it('backwards, head before anchor: the same node', async () => {
+    await openTab(SHELF, 'C:/docs/shelf.xml')
+    await selectRange(at('Homer', 2), at('Odyssey'))
+    await resolvesTo('book', at('<book>'))
+  })
+
+  it('a whole line, indentation and line break included: the element on it', async () => {
+    await openTab(SHELF, 'C:/docs/shelf.xml')
+    // What Shift+Down from a line's start selects. The indentation and the
+    // line break belong to <book>; without trimming this resolved to <book>.
+    await selectRange(at('    <title>Odyssey'), at('    <author>'))
+    await resolvesTo('title', at('<title>'))
+  })
+
+  it('across two siblings of the node: the shelf', async () => {
+    await openTab(SHELF, 'C:/docs/shelf.xml')
+    // The document opens with <shelf> selected, so move off it first — else
+    // this passes whether or not anything resolves.
+    await selectRange(at('Faust', 1), at('Faust', 1))
+    await resolvesTo('title', at('<title>', 0, 1))
+    await selectRange(at('Homer'), at('Faust'))
+    await resolvesTo('shelf', at('<shelf>'))
+  })
+
+  it('whitespace only: the node at the head, as a caret would', async () => {
+    await openTab(SHELF, 'C:/docs/shelf.xml')
+    // From <title>'s start back over the indentation to the line break after
+    // <book>: nothing but whitespace, head inside <book>. (Not <shelf>, which
+    // the document opens with selected.)
+    await selectRange(at('<title>'), at('\n    <title>'))
+    await resolvesTo('book', at('<book>'))
+  })
+})
+
+describe('R218 — nothing resolves while the mouse button is held', () => {
+  function mouse(type: 'mousedown' | 'mouseup', target: EventTarget, pos: number): void {
+    const coords = editorView().coordsAtPos(pos)
+    if (coords === null) throw new Error(`no coordinates for ${pos}`)
+    target.dispatchEvent(
+      new MouseEvent(type, {
+        button: 0,
+        detail: 1,
+        buttons: type === 'mousedown' ? 1 : 0,
+        clientX: coords.left + 1,
+        clientY: (coords.top + coords.bottom) / 2,
+        bubbles: true,
+        cancelable: true
+      })
+    )
+  }
+
+  it('a drag resolves once, on release, to the node containing what it selected', async () => {
+    await openTab(SHELF, 'C:/docs/shelf.xml')
+    const before = selectedNode()
+    const view = editorView()
+
+    // Press inside <title>, then the selection a drag to <author> produces —
+    // tagged the way CodeMirror tags every selection its drag makes. Before
+    // R218 either would resolve after the debounce, button still down.
+    mouse('mousedown', view.contentDOM, at('Odyssey'))
+    view.dispatch({
+      selection: { anchor: at('Odyssey'), head: at('Homer', 2) },
+      userEvent: 'select.pointer'
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, WELL_PAST_MS))
+    expect(selectedNode()).toBe(before)
+
+    mouse('mouseup', document, at('Homer', 2))
+    await resolvesTo('book', at('<book>'))
+  })
+
+  it('a missed release does not switch caret sync off: a keyboard move resolves anyway', async () => {
+    await openTab(SHELF, 'C:/docs/shelf.xml')
+    const view = editorView()
+    mouse('mousedown', view.contentDOM, at('Odyssey'))
+    // No mouseup. A selection that is not the pointer's — what the keyboard
+    // dispatches — must still resolve.
+    await selectRange(at('Faust', 1), at('Faust', 1))
+    await resolvesTo('title', at('<title>', 0, 1))
+  })
+
+  it('a click still resolves to the node under it', async () => {
+    await openTab(SHELF, 'C:/docs/shelf.xml')
+    const view = editorView()
+    mouse('mousedown', view.contentDOM, at('Faust', 2))
+    mouse('mouseup', document, at('Faust', 2))
+    await resolvesTo('title', at('<title>', 0, 1))
+  })
+})
+
+describe('R218 — trimLayoutWhitespace', () => {
+  it('trims spaces, tabs and both line breaks from both ends, and nothing else', async () => {
+    const { Text } = await import('@codemirror/state')
+    const { trimLayoutWhitespace } = await import('../src/renderer/components/Raw/rawCaretSync')
+    const doc = Text.of([' \t<a>x</a>\r', '  ', '\u00a0b '])
+    const whole = { from: 0, to: doc.length }
+    expect(trimLayoutWhitespace(doc, whole.from, whole.to)).toEqual({ from: 2, to: doc.length - 1 })
+    expect(trimLayoutWhitespace(Text.of(['  ', ' ']), 0, 4)).toBeNull()
+    // A no-break space at an edge was selected on purpose, and stays.
+    expect(trimLayoutWhitespace(Text.of([' x ']), 0, 3)).toEqual({ from: 0, to: 3 })
   })
 })

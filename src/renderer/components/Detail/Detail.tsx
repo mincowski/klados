@@ -14,7 +14,7 @@ import { registerPaneContent, wasLastFocusedPane } from '../../focus'
 import { glyphFontClass } from '../../glyphFont'
 import {
   childCountOf,
-  glyphOf,
+  glyphOfNode,
   hasChildren,
   kindLabelOf,
   labelOf,
@@ -112,6 +112,7 @@ export function DetailContent({
 
   const segments = useMemo(() => pathSegmentsOf(store, node), [store, node])
   const kind = store.kindOf(node)
+  const glyph = glyphOfNode(store, node)
   const name = store.nameOf(node)
   const childCount = hasChildren(store, node) ? childCountOf(store, node) : 0
   const commentNode = adjacentCommentOf(store, node)
@@ -245,11 +246,11 @@ export function DetailContent({
         <section className="detail-section detail-header">
           <h2 className="detail-node-title">
             <span
-              className={`detail-node-glyph ${glyphFontClass(glyphOf(kind))}`}
+              className={`detail-node-glyph ${glyphFontClass(glyph)}`}
               aria-hidden="true"
               title={kindLabelOf(kind)}
             >
-              {glyphOf(kind)}
+              {glyph}
             </span>
             <span
               className="detail-node-name"
@@ -538,6 +539,7 @@ function ChildrenList({
             const childKind = store.kindOf(child)
             const childHasChildren = hasChildren(store, child)
             const kindLabel = kindLabelOf(childKind)
+            const childGlyph = glyphOfNode(store, child)
             return (
               <div
                 key={child}
@@ -557,11 +559,11 @@ function ChildrenList({
                  * column itself is hidden (`Layout.tsx`'s `tooltipFor` follows
                  * the same "moved, not lost" rule for icon-only buttons). */}
                 <span
-                  className={`detail-child-glyph ${glyphFontClass(glyphOf(childKind))}`}
+                  className={`detail-child-glyph ${glyphFontClass(childGlyph)}`}
                   aria-hidden="true"
                   title={kindLabel}
                 >
-                  {glyphOf(childKind)}
+                  {childGlyph}
                 </span>
                 <span className="detail-child-name">{labelOf(store, child)}</span>
                 {layout.showKind && <span className="detail-child-kind">{kindLabel}</span>}
