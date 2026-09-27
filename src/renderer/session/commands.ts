@@ -8,6 +8,24 @@ import { registerCommand } from '../commands/registry'
 import { clearRecentFiles } from './recentFiles'
 import { getFormatMinifiedOnOpen, toggleFormatMinifiedOnOpen } from '../settings'
 import { openNewTab } from './tabs'
+import { activeDocumentId } from '../notifications/documentId'
+import { notify } from '../notifications/notificationStore'
+
+/** R220 (`docs/plans/R220-file-error-messages.md`): a failed save is told.
+ * Save and Save As discarded their outcome, so a save that failed — a full
+ * disk, a file another program holds — looked exactly like one that worked,
+ * apart from the dirty mark staying. The document is taken when the command
+ * runs, not when the write settles, so a tab switch in between cannot attach
+ * the failure to a different document. */
+function reportSaveFailure(
+  save: () => Promise<{ readonly ok: boolean; readonly message?: string }>
+): void {
+  const documentId = activeDocumentId()
+  void save().then((outcome) => {
+    if (outcome.ok || outcome.message === undefined) return
+    notify({ severity: 'error', message: outcome.message, documentId })
+  })
+}
 
 registerCommand({
   id: 'klados.document.open',
@@ -92,7 +110,7 @@ registerCommand({
   // Save renders enabled with nothing to save.
   enabledWhen: 'isDirty && !isReadOnly',
   surfaces: ['palette', 'titleBar'],
-  run: (ctx) => void ctx.session.save()
+  run: (ctx) => reportSaveFailure(() => ctx.session.save())
 })
 
 registerCommand({
@@ -102,7 +120,7 @@ registerCommand({
   // No `when` — F7's own `saveAs` doc comment: allowed even on a
   // read-only document, since it never overwrites the original file.
   surfaces: ['palette'],
-  run: (ctx) => void ctx.session.saveAs()
+  run: (ctx) => reportSaveFailure(() => ctx.session.saveAs())
 })
 
 registerCommand({

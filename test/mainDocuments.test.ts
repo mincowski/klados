@@ -16,6 +16,21 @@ import { join } from 'path'
 import { statDocument, writeDocument } from '../src/core/mainDocumentIO'
 import { handleReadTokenRequest } from '../src/core/readTokenProtocol'
 import { createReadTokenRegistry } from '../src/core/readTokenRegistry'
+import { fileErrorFrom } from '../src/core/fileErrors'
+import { holdWithoutSharing } from './support/holdWithoutSharing'
+
+/** The kind a rejection carries across IPC (R220), or null if untagged. */
+async function kindOfRejection(promise: Promise<unknown>): Promise<string | null> {
+  try {
+    await promise
+  } catch (err) {
+    return fileErrorFrom(err)?.kind ?? null
+  }
+  throw new Error('expected a rejection')
+}
+
+/** POSIX permission bits deny nothing to root, which some CI containers run as. */
+const canDenyByMode = process.platform !== 'win32' && process.getuid?.() !== 0
 
 const tempDirs: string[] = []
 
@@ -62,6 +77,17 @@ describe('statDocument', () => {
     const dir = await makeTempDir()
     await expect(statDocument(join(dir, 'missing.xml'))).rejects.toThrow()
   })
+
+  // R220: IPC delivers only the message, so the kind has to be in it.
+  it('tags a missing file as missing', async () => {
+    const dir = await makeTempDir()
+    expect(await kindOfRejection(statDocument(join(dir, 'missing.xml')))).toBe('missing')
+  })
+
+  it('refuses a folder, which stat alone would report as a file of some size', async () => {
+    const dir = await makeTempDir()
+    expect(await kindOfRejection(statDocument(dir))).toBe('folder')
+  })
 })
 
 describe('writeDocument', () => {
@@ -93,6 +119,30 @@ describe('writeDocument', () => {
       writeDocument(path, new TextEncoder().encode('<a/>').buffer as ArrayBuffer)
     ).rejects.toThrow()
   })
+
+  it('tags a vanished folder as missing (R220)', async () => {
+    const dir = await makeTempDir()
+    const path = join(dir, 'nonexistent-subdir', 'doc.xml')
+    const write = writeDocument(path, new TextEncoder().encode('<a/>').buffer as ArrayBuffer)
+    expect(await kindOfRejection(write)).toBe('missing')
+  })
+
+  it.runIf(process.platform === 'win32')(
+    'tags a file another program holds as locked, and leaves it untouched (R220)',
+    async () => {
+      const dir = await makeTempDir()
+      const path = join(dir, 'held.csv')
+      await writeDocument(path, new TextEncoder().encode('a,b').buffer as ArrayBuffer)
+      const release = await holdWithoutSharing(path)
+      try {
+        const write = writeDocument(path, new TextEncoder().encode('x').buffer as ArrayBuffer)
+        expect(await kindOfRejection(write)).toBe('locked')
+      } finally {
+        await release()
+      }
+      expect(await readFile(path, 'utf-8')).toBe('a,b')
+    }
+  )
 })
 
 describe('handleReadTokenRequest', () => {
@@ -147,7 +197,50 @@ describe('handleReadTokenRequest', () => {
 
     const response = await handleReadTokenRequest(new Request(`klados-file://${token}/`), registry)
     expect(response.status).toBe(404)
+    // R220: and says so, in the body the worker reads.
+    expect(fileErrorFrom(await response.text())?.kind).toBe('missing')
   })
+
+  /** R220: a request for path, answered — status and the kind in the body. */
+  async function answer(path: string): Promise<{ status: number; kind: string | null }> {
+    const registry = createReadTokenRegistry(1000)
+    const token = registry.mint(path)
+    const response = await handleReadTokenRequest(new Request(`klados-file://${token}/`), registry)
+    const body = await response.text()
+    return { status: response.status, kind: fileErrorFrom(body)?.kind ?? null }
+  }
+
+  it('refuses a folder as one — Windows opens a folder without complaint (R220)', async () => {
+    const dir = await makeTempDir()
+    expect(await answer(dir)).toEqual({ status: 409, kind: 'folder' })
+  })
+
+  it.runIf(canDenyByMode)('refuses a file it may not read as denied (R220)', async () => {
+    const dir = await makeTempDir()
+    const path = join(dir, 'secret.xml')
+    await writeDocument(path, new TextEncoder().encode('<a/>').buffer as ArrayBuffer)
+    await chmod(path, 0o000)
+    try {
+      expect(await answer(path)).toEqual({ status: 403, kind: 'denied' })
+    } finally {
+      await chmod(path, 0o644)
+    }
+  })
+
+  it.runIf(process.platform === 'win32')(
+    'refuses a file another program holds as locked, before any byte is sent (R220)',
+    async () => {
+      const dir = await makeTempDir()
+      const path = join(dir, 'held.csv')
+      await writeDocument(path, new TextEncoder().encode('a,b').buffer as ArrayBuffer)
+      const release = await holdWithoutSharing(path)
+      try {
+        expect(await answer(path)).toEqual({ status: 423, kind: 'locked' })
+      } finally {
+        await release()
+      }
+    }
+  )
 
   it('a URL naming a path directly rather than a token still resolves through the registry only — no path fallback', async () => {
     const dir = await makeTempDir()

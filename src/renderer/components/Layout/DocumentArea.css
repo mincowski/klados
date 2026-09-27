@@ -97,6 +97,22 @@
   background: var(--diagnostic-error-bg);
 }
 
+/* R220: a file error's sentence leads, and its path follows on its own line,
+ * broken anywhere so a long path wraps inside the banner rather than widening
+ * it. The sentence leads by weight, not the path by fading: the banner's
+ * colours give 5.2:1, and fading the path to 75% took it to 3.5:1 (85%: 4.1)
+ * — under 4.5:1 for text this size. The UI font, not the monospace one:
+ * rendered both ways, a monospace path read louder than the sentence. */
+.document-area-banner-message {
+  font-weight: 600;
+}
+
+.document-area-banner-path {
+  display: block;
+  margin-top: var(--space-1);
+  overflow-wrap: anywhere;
+}
+
 /* R96 (`R95-recent-files.md` §4): the two-column start layout — `empty`
  * and `error` both render it (R97). `.document-area` itself sets
  * `text-align: center` and `max-width: 480px` on every phase; both are

@@ -31,6 +31,7 @@ import {
 } from '../../core/rowIndex'
 import { getFormatModule, openDialogFilters, saveAsDialogFilters } from '../../formats/registry'
 import { DEFAULT_MAX_DEPTH } from '../../core/parseDefaults'
+import { describeFileError, fileErrorFrom, fileNameOf } from '../../core/fileErrors'
 import type { DocumentStat, KladosApi } from '../../preload/api'
 import { clearPendingReveal, requestReveal } from '../components/Tree/treeController'
 import { pathSegmentsOf } from '../components/Detail/detailModel'
@@ -364,7 +365,13 @@ export type DocumentSessionState =
       readonly bytesConsumed: number
       readonly totalBytes: number
     }
-  | { readonly phase: 'error'; readonly message: string }
+  | {
+      readonly phase: 'error'
+      readonly message: string
+      /** R220: the file the message is about, shown on a second line
+       * of its own — the message itself names only the file, not its folder. */
+      readonly path?: string
+    }
   | { readonly phase: 'ready'; readonly document: OpenDocument; readonly selection: SelectionState }
 
 export interface DocumentSession {
@@ -603,8 +610,18 @@ function describeError(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
-function fileNameOf(path: string): string {
-  return path.replace(/^.*[\\/]/, '')
+/** R220 (`docs/plans/R220-file-error-messages.md`): a failure to open `path`
+ * as the error phase shows it — in words when it is a file system error
+ * (tagged by the main process, `core/fileErrors.ts`), in its own words
+ * otherwise, such as a format no module recognizes. */
+function openFailure(
+  err: unknown,
+  path: string
+): { readonly phase: 'error'; readonly message: string; readonly path?: string } {
+  const fileError = fileErrorFrom(err)
+  return fileError === null
+    ? { phase: 'error', message: describeError(err) }
+    : { phase: 'error', message: describeFileError(fileError, 'open', path), path }
 }
 
 // R52: fallback `watchKey` source for every `createDocumentSession()` call
@@ -789,7 +806,7 @@ export function createDocumentSession(deps: DocumentSessionDeps = {}): DocumentS
     } catch (err) {
       if (activeAbort !== controller) return // superseded by a newer open
       activeAbort = null
-      setState({ phase: 'error', message: describeError(err) })
+      setState(openFailure(err, path))
       resetContextForNoDocument()
       return
     }
@@ -899,7 +916,7 @@ export function createDocumentSession(deps: DocumentSessionDeps = {}): DocumentS
       if (err instanceof DOMException && err.name === 'AbortError') {
         setState({ phase: 'empty' })
       } else {
-        setState({ phase: 'error', message: describeError(err) })
+        setState(openFailure(err, path))
       }
       resetContextForNoDocument()
     }
@@ -1338,7 +1355,7 @@ export function createDocumentSession(deps: DocumentSessionDeps = {}): DocumentS
     try {
       info = await api.document.stat(path)
     } catch (err) {
-      setState({ phase: 'error', message: describeError(err) })
+      setState(openFailure(err, path))
       return
     }
 
@@ -2278,7 +2295,7 @@ export function createDocumentSession(deps: DocumentSessionDeps = {}): DocumentS
         filename: fileName,
         signal: controller.signal
       })
-    } catch {
+    } catch (err) {
       // An abort lands here too — `parseFromUrl` rejects on `controller.signal`
       // — so a cancellation must not be reported as a failure. The controller
       // identity is what tells them apart: a supersession replaced it.
@@ -2287,12 +2304,17 @@ export function createDocumentSession(deps: DocumentSessionDeps = {}): DocumentS
         reloadAbort = null
         clearReloadPending()
       }
-      return superseded
-        ? { ok: true, cancelled: true }
-        : {
-            ok: false,
-            message: `Could not reload ${fileName}. The file may be invalid or unreadable.`
-          }
+      if (superseded) return { ok: true, cancelled: true }
+      // R220: a file that could not be read says why; anything else (a
+      // parse that failed outright) keeps the general sentence.
+      const fileError = fileErrorFrom(err)
+      return {
+        ok: false,
+        message:
+          fileError === null
+            ? `Could not reload ${fileName}. The file may be invalid or unreadable.`
+            : describeFileError(fileError, 'reload', filePath)
+      }
     }
     if (reloadAbort !== controller) return { ok: true, cancelled: true }
     reloadAbort = null

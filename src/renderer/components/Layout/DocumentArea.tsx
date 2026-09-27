@@ -234,7 +234,17 @@ function renderPhase(state: DocumentSessionState): JSX.Element {
         <StartColumns
           heading={
             <p className="document-area-banner document-area-banner-error" role="alert">
-              {state.message}
+              {/* R220: the file's name leads the message; its folder is here,
+                  on a line of its own, rather than a long path in the
+                  sentence. */}
+              {state.path === undefined ? (
+                state.message
+              ) : (
+                <>
+                  <span className="document-area-banner-message">{state.message}</span>
+                  <span className="document-area-banner-path">{state.path}</span>
+                </>
+              )}
             </p>
           }
         />

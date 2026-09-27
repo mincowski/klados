@@ -23,16 +23,26 @@
  * writing a file inherently is.
  */
 import type { KladosApi } from '../../preload/api'
+import { describeFileError, fileErrorFrom } from '../../core/fileErrors'
 
 export interface SaveContext {
   readonly path: string
   readonly bytes: Uint8Array
 }
 
+/** `message` is a whole sentence that names the file — shown as it is. */
 export type SaveOutcome = { readonly ok: true } | { readonly ok: false; readonly message: string }
 
-function describeError(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
+/** R220 (`docs/plans/R220-file-error-messages.md`): the main process tags a
+ * failed write with its kind (`core/fileErrors.ts`); an untagged error gets
+ * the same sentence shape, in its own words. */
+function describeError(err: unknown, path: string): string {
+  const fileError = fileErrorFrom(err)
+  return describeFileError(
+    fileError ?? { kind: 'other', detail: err instanceof Error ? err.message : String(err) },
+    'save',
+    path
+  )
 }
 
 /**
@@ -53,6 +63,6 @@ export async function saveDocument(
     await api.document.write(context.path, context.bytes.slice().buffer as ArrayBuffer)
     return { ok: true }
   } catch (err) {
-    return { ok: false, message: describeError(err) }
+    return { ok: false, message: describeError(err, context.path) }
   }
 }

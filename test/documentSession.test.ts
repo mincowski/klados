@@ -28,6 +28,7 @@ import { consumePendingReveal } from '../src/renderer/components/Tree/treeContro
 import { previewOf } from '../src/renderer/nodeDisplay'
 import type { KladosApi } from '../src/preload/api'
 import { createDocumentWatcherRegistry } from '../src/core/documentWatchers'
+import { encodeFileError, fileErrorMessage } from '../src/core/fileErrors'
 import {
   createDocumentSession,
   NO_SELECTION,
@@ -184,6 +185,58 @@ describe('createDocumentSession (D6)', () => {
   it('starts empty', () => {
     const session = createDocumentSession()
     expect(session.getSnapshot()).toEqual({ phase: 'empty' })
+  })
+
+  // R220 (`docs/plans/R220-file-error-messages.md`): the probe that raised
+  // the round — a restored file that no longer exists. What arrives is what
+  // IPC delivers: the main process's tagged message behind Electron's prefix.
+  describe('a file that cannot be opened is told in words (R220)', () => {
+    const path = 'C:\\Users\\someone\\AppData\\Local\\Temp\\r219-probe\\probe.json'
+    const overIpc = (code: string, message: string): Error =>
+      new Error(
+        `Error invoking remote method 'document:stat': Error: ${
+          encodeFileError(Object.assign(new Error(message), { code })).message
+        }`
+      )
+
+    it('a missing file: its name in the sentence, its path on its own', async () => {
+      const api = fakeApi({
+        stat: vi.fn().mockRejectedValue(overIpc('ENOENT', `ENOENT: no such file, stat '${path}'`))
+      })
+      const session = createSession({ api })
+      await session.openPath(path)
+      expect(session.getSnapshot()).toEqual({
+        phase: 'error',
+        message: "probe.json can't be opened: it no longer exists.",
+        path
+      })
+    })
+
+    it('a file the read found locked, after stat succeeded', async () => {
+      // Windows `stat`s a locked file fine (measured); the protocol handler's
+      // open is what fails, and the worker passes its tagged answer on.
+      const session = createSession({
+        parseFromUrl: () =>
+          Promise.reject(new Error(fileErrorMessage('locked', 'EBUSY: resource busy or locked')))
+      })
+      await session.openPath(path)
+      expect(session.getSnapshot()).toEqual({
+        phase: 'error',
+        message: "probe.json can't be opened: another program is using it.",
+        path
+      })
+    })
+
+    it('an error that is not a file error keeps its own words, and no path line', async () => {
+      const session = createSession({
+        parseFromUrl: () => Promise.reject(new Error('No format recognizes probe.json.'))
+      })
+      await session.openPath(path)
+      expect(session.getSnapshot()).toEqual({
+        phase: 'error',
+        message: 'No format recognizes probe.json.'
+      })
+    })
   })
 
   it('opens a well-formed document end to end: parsing -> ready', async () => {
@@ -3081,6 +3134,36 @@ describe('createDocumentSession (D6)', () => {
         expect(after.reloadPending).toBe(false)
         // And the banner stays up: the decision is still outstanding.
         expect(after.externalChangeDetected).toBe(true)
+      })
+
+      it('a reload whose read failed says why, in words (R220)', async () => {
+        const { api, triggerChange } = fakeApiWithChangeCapture()
+        // The open reads; the reload's read finds the file gone, tagged as the
+        // worker passes the protocol handler's answer on.
+        let reads = 0
+        const parseFromUrl: typeof fakeParseFromUrl = (url, options) =>
+          reads++ === 0
+            ? fakeParseFromUrl(url, options)
+            : Promise.reject(new Error(fileErrorMessage('missing', 'ENOENT: no such file')))
+        const session = createDocumentSession({
+          parse: fakeParse,
+          parseFromUrl,
+          api,
+          reparseDelayMs: 5,
+          watchKey: TEST_WATCH_KEY
+        })
+        await session.openPath('C:/docs/data.json')
+        session.applyEdit({ start: 5, end: 6, text: '2' })
+        await flush(session)
+        triggerChange()
+        await flush(session)
+
+        const outcome = await session.reloadAndDiscard()
+
+        expect(outcome).toEqual({
+          ok: false,
+          message: "data.json can't be reloaded: it no longer exists."
+        })
       })
 
       it('a clean document reloading in the background also carries the flag', async () => {

@@ -16,6 +16,34 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R220 — file errors in words · built
+
+**Plan:** `docs/plans/R220-file-error-messages.md` · **Decision:** D-112
+
+**A file that cannot be opened now says so in a sentence**, instead of
+*Error invoking remote method 'document:stat': Error: ENOENT: no such file or directory, stat '…'*.
+The project lead saw that raw text as the whole banner after R219's own Windows check left a deleted
+temporary file in the real profile's session. The banner now leads with the file's name and gives
+the path on a second line. Missing, denied, folder, locked, disk full and read-only drive each have
+their own words, for open, reload and save.
+
+**The error's code does not cross IPC**: only its message, behind Electron's prefix. So the main
+process and the read protocol classify the error and tag the kind into the message, and the renderer
+finds the tag wherever it sits. The protocol used to answer 404 for every failure; it now opens the
+file before answering and puts the tagged message in the response body.
+
+**Two things the plan had wrong, found by reading the code and by measuring:**
+- A failed **Save** or **Save As** showed nothing at all. Both commands discarded their outcome, and
+  only the close prompt's save reported. They notify now.
+- On Windows a locked file passes `stat` and fails only when read, and a folder opens without
+  complaint. Both are refused where they can be caught, not where the plan assumed.
+
+**The banner was rendered before it was settled.** A monospace path read louder than the sentence
+above it. Fading the path to look quieter took it under 4.5:1 contrast. It is now full colour in the
+UI font, and the sentence leads by weight instead.
+
+---
+
 ## R219 — Klados in "Open with" · built ⚠
 
 **Plan:** `docs/plans/R219-open-with.md` · **Decision:** D-111

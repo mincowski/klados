@@ -4073,3 +4073,28 @@ once through "Choose another app", and the project lead chose the submenu. **The
 measured:** where nobody ever chose a default, Windows may hand double-click to Klados (`.json` here,
 confirmed by `ShellExecute`). An explicit choice survived, and uninstalling restored every
 extension's handler.
+
+### D-112 — A file error's kind crosses IPC inside its message, tagged where the code still exists (R220) · `settled`
+
+Plan: `docs/plans/R220-file-error-messages.md`.
+
+**The constraint, measured:** an error thrown in an `ipcMain.handle` reaches the renderer with its
+message only, behind `Error invoking remote method '<channel>': `, and no `code`. The worker's
+read sees an HTTP response, not an error.
+
+**Chosen:**
+- **Classify where the code still exists.** `core/mainDocumentIO.ts` and the read protocol classify
+  the error and write `[klados-file-error:<kind>]` in front of the system's message.
+  `core/fileErrors.ts` finds the tag anywhere in a message, so neither Electron's prefix nor Node's
+  wording is ever parsed.
+- **The protocol answers with the tag in the body**, with a status per kind. A header would need
+  `Access-Control-Expose-Headers` to be visible to the worker's cross-origin `fetch`.
+- **Untagged errors keep their own words.** Only the file system's failures are reworded; a format no
+  module recognizes still says so. A save failure is a sentence naming the file either way.
+
+**Rejected: typed results** (`stat` resolving `{ ok: false, kind }`). More explicit, but it
+changes `KladosApi`, and 31 test files fake `stat` and 28 fake `write`: every one would
+change for no behaviour.
+
+**Rejected: parsing Node's messages in the renderer** (`/ENOENT/`). It works today and ties the
+user's text to the wording of two libraries.

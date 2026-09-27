@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { saveDocument } from '../src/renderer/session/save'
+import { encodeFileError } from '../src/core/fileErrors'
 
 function fakeApi(
   write: (path: string, bytes: ArrayBuffer) => Promise<void>
@@ -34,7 +35,19 @@ describe('saveDocument', () => {
       throw new Error('disk full')
     })
     const outcome = await saveDocument(api, { path: 'C:/docs/a.xml', bytes: new Uint8Array() })
-    expect(outcome).toEqual({ ok: false, message: 'disk full' })
+    // R220: a whole sentence naming the file, since the notification shows it as it is.
+    expect(outcome).toEqual({ ok: false, message: "a.xml can't be saved: disk full" })
+  })
+
+  it('words a failure the main process tagged, as it arrives over IPC (R220)', async () => {
+    const tagged = encodeFileError(
+      Object.assign(new Error('ENOSPC: no space left'), { code: 'ENOSPC' })
+    )
+    const api = fakeApi(async () => {
+      throw new Error(`Error invoking remote method 'document:write': Error: ${tagged.message}`)
+    })
+    const outcome = await saveDocument(api, { path: 'D:\\out\\a.xml', bytes: new Uint8Array() })
+    expect(outcome).toEqual({ ok: false, message: "a.xml can't be saved: the disk is full." })
   })
 
   it("copies the bytes rather than handing over the caller's own buffer view", async () => {
