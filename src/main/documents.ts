@@ -34,7 +34,7 @@
  */
 import { dialog, protocol, BrowserWindow, app } from 'electron'
 import type { FileFilter } from 'electron'
-import { basename } from 'path'
+import { basename, join } from 'path'
 import { randomUUID } from 'crypto'
 import type { DocumentStat, OpenDialogResult } from '../preload/api'
 import { createReadTokenRegistry } from '../core/readTokenRegistry'
@@ -46,6 +46,7 @@ import { secureHandle } from './trustedRenderer'
 import { statDocument, writeDocument } from '../core/mainDocumentIO'
 import { createDocumentWatcherRegistry } from '../core/documentWatchers'
 import { createFsWatcherDeps } from './fsWatcherDeps'
+import { createDialogFolder } from '../core/dialogFolder'
 
 /** M5-PLAN.md H12. Must match `core/parseClient.ts`'s own copy of this
  * string exactly — duplicated rather than shared through a module both
@@ -100,6 +101,14 @@ export function registerReadTokenProtocol(): void {
   protocol.handle(READ_TOKEN_SCHEME, (request) => handleReadTokenRequest(request, readTokens))
 }
 
+/** R221 (`docs/plans/R221-electron-44.md` § 3.2): from Electron 43 a dialog
+ * without `defaultPath` starts in Downloads and the OS no longer remembers
+ * where the user last was, so Klados remembers it (`core/dialogFolder.ts`). */
+const dialogFolder = createDialogFolder(
+  () => join(app.getPath('userData'), 'dialog-state.json'),
+  (error) => console.warn(`[dialog] could not remember the folder: ${String(error)}`)
+)
+
 secureHandle(
   'document:openDialog',
   // R194: the filters arrive from the renderer. They used to be a literal
@@ -118,10 +127,14 @@ secureHandle(
   // directory.
   async (event, filters: FileFilter[]): Promise<OpenDialogResult | null> => {
     const window = BrowserWindow.fromWebContents(event.sender)
+    // Only when one is remembered: an absent key, not `undefined`, is what
+    // leaves Electron's own default in place.
+    const folder = await dialogFolder.defaultPath()
     const options: Electron.OpenDialogOptions = {
       title: 'Open Document',
       properties: ['openFile'],
-      filters
+      filters,
+      ...(folder === undefined ? {} : { defaultPath: folder })
     }
     const result =
       window === null
@@ -129,6 +142,7 @@ secureHandle(
         : await dialog.showOpenDialog(window, options)
     if (result.canceled || result.filePaths.length === 0) return null
     const path = result.filePaths[0]!
+    await dialogFolder.remember(path)
     return { path, fileName: basename(path) }
   }
 )
@@ -180,6 +194,7 @@ secureHandle(
         ? await dialog.showSaveDialog(options)
         : await dialog.showSaveDialog(window, options)
     if (result.canceled || result.filePath === undefined) return null
+    await dialogFolder.remember(result.filePath)
     return { path: result.filePath, fileName: basename(result.filePath) }
   }
 )

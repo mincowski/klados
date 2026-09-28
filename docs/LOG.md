@@ -16,6 +16,35 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R221 — Electron 39 to 44 · built ⚠
+
+**Plan:** `docs/plans/R221-electron-44.md` · **Decision:** D-113
+
+**Two Dependabot alerts led to a bigger finding.** Both were about `extract-zip`, which has no
+fixed release, and both turned out harmless. It runs only while `npm install` unpacks Electron,
+against a pinned checksum, and never ships. But the Electron that pulled it in, 39, had reached end
+of life on 5 May 2026, so 1.2.0 went out about five months behind on Chromium security fixes. 44 is
+supported to March 2027 and no longer uses `extract-zip`.
+
+**Three of Electron's breaking changes from 40 to 44 reached Klados:**
+- **The binary no longer downloads at install.** CI now installs it once, explicitly, before parallel
+  test workers would each start the same download.
+- **Dialogs without a `defaultPath` now open in Downloads, and Windows stops remembering the
+  folder.** Klados had been relying on that memory without knowing it; the registry held a
+  `Klados.exe` entry. Klados now remembers the folder itself.
+- **macOS 12 is dropped.** The build now declares 13.0 as its minimum.
+
+**Tested against 39 as a control**, so every difference would be the upgrade's. There were none, and
+44 is faster and lighter throughout: startup −23% and −27% memory, large files 12–15% faster. The
+installer grows 17.5%, all of it Electron's own.
+
+**The control run is also how a defect from 1.0.0 surfaced: copying to the clipboard never worked.**
+R165 refuses every permission, and `navigator.clipboard.writeText` needs one. Its tests run in a
+plain Chromium without the app's handlers, so none of them could see it. It is proposed as its own
+round.
+
+---
+
 ## R220 — file errors in words · built
 
 **Plan:** `docs/plans/R220-file-error-messages.md` · **Decision:** D-112

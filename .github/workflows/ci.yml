@@ -78,6 +78,14 @@ jobs:
 
       - run: npm ci
 
+      # R221 (`docs/plans/R221-electron-44.md` § 3.1): from Electron 42 the
+      # binary is no longer downloaded by `npm ci`. The first
+      # `require('electron')` fetches it instead, and several `_electron`
+      # test files start in parallel workers, each of which would begin the same
+      # download into the same folder. Installed once here, still checked against
+      # the SHA-256s pinned in the `electron` package.
+      - run: npx install-electron
+
       # Everything from here to the test step runs identically on all three,
       # with no `if:`, deliberately: an asymmetric matrix leaves steps that
       # only ever execute on one OS, which is the exact shape of the problem

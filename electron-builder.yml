@@ -147,6 +147,12 @@ mac:
   # serving nobody.
   target:
     - dmg
+  # R221 (`docs/plans/R221-electron-44.md` § 3.3): Electron 44's Chromium dropped
+  # macOS 12. Written as `LSMinimumSystemVersion` (app-builder-lib's
+  # `macPackager.js`), so a Mac on 12 gets the system's own "needs a newer
+  # macOS" refusal instead of an application that fails to start. Without it
+  # the value is whatever Electron's bundle happens to carry.
+  minimumSystemVersion: '13.0'
   entitlementsInherit: assets/build/entitlements.mac.plist
   extendInfo:
     - NSDocumentsFolderUsageDescription: Klados opens files from your Documents folder.

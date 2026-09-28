@@ -305,6 +305,20 @@ main and put what matters in the message, as `core/fileErrors.ts` does. **Relate
 file another program holds `stat`s fine and fails `EBUSY` only on open, and a folder *opens* fine
 and fails only on read, so neither `stat` nor `open` alone proves a path is a readable file.
 
+**From Electron 42, `npm install` does not install Electron's binary.** The first `require('electron')`
+downloads it synchronously (`node_modules/electron/index.js`). On a fresh checkout, then, the
+first test run or `npm run dev` downloads about 100 MB. Several `_electron` test files starting
+in parallel would each begin the same download into the same folder, which is why CI runs
+`npx install-electron` after `npm ci` (R221). `ELECTRON_SKIP_BINARY_DOWNLOAD` no longer
+means anything.
+
+**A copy that works in the browser-project tests can be refused in the application.** R165's
+permission handler refuses every request, and `navigator.clipboard.writeText` needs
+`clipboard-sanitized-write`. So every copy button has failed with *"Write permission denied"*
+since R165, measured on Electron 39 and 44 (R221). Those tests run in a plain Chromium without the
+app's handlers and pass either way. **A feature that depends on a permission has to be tested in the
+built app** (`mainElectron.test.ts`). Open until the proposed fix lands.
+
 **Predicting a consequence is not evaluating it.** D-054's icon split named the exact side effect
 that broke it and dismissed it in the same sentence. If a plan says "this might mean X," that is a
 thing to test, not a thing already handled.
