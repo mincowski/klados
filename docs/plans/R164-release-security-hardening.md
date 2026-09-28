@@ -222,7 +222,10 @@ test.
 `setPermissionRequestHandler` or `setPermissionCheckHandler`, so Chromium's defaults apply and any
 page loaded in the renderer may *ask* for camera, microphone, geolocation, notifications, clipboard
 read, and the rest. **Klados is a local file viewer and editor: the correct answer to every one of
-them is no**, permanently, with no prompt to misread. A blanket deny is smaller than R165's own
+them is no**, permanently, with no prompt to misread. *(Corrected by R222: not every one. The copy
+buttons call `navigator.clipboard.writeText`, which needs `clipboard-sanitized-write`, so this
+deny made every copy fail silently from R165 on. R222 grants that one permission to the app's own
+page; `docs/plans/R222-clipboard-permission.md`.)* A blanket deny is smaller than R165's own
 allowlist, sits in the same file for the same reason, and — like R165 — is unreachable today and
 becomes live the moment R164's premise is ever broken. Acceptance is a test that the registered
 handler denies a representative permission; cost is a two-line handler.

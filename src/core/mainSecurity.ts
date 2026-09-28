@@ -79,3 +79,43 @@ export function isAllowedExternalUrl(target: string): boolean {
     return false
   }
 }
+
+/**
+ * The one web permission Klados grants (R222,
+ * `docs/plans/R222-clipboard-permission.md`): writing to the clipboard, which
+ * every copy button needs (`Grid.tsx`'s export, `Detail.tsx`'s "Copy
+ * path").
+ *
+ * R165 refused every permission on the premise that Klados needs none, and never
+ * considered clipboard *write*. So every copy button failed silently from R165
+ * on, measured on Electron 39 and 44 alike. `clipboard-read` stays refused, as
+ * does everything else: writing reveals nothing. "Sanitized" names Chromium's
+ * write path for the standard formats, on which HTML is sanitized before it
+ * reaches the system clipboard; Klados writes plain text only.
+ */
+const GRANTED_PERMISSIONS: readonly string[] = ['clipboard-sanitized-write']
+
+/**
+ * Whether a permission check or request is granted: a permission on the list,
+ * asked for by the application's own page (`isAppUrl`, the rule R164 applies
+ * to navigation and IPC senders), from the main frame. Chromium checks before it
+ * requests (measured), and `main/index.ts` answers both through this, so
+ * `navigator.permissions.query` reports what the page can actually do.
+ *
+ * A missing `requestingUrl`, which Electron types as optional on a check, is
+ * refused.
+ */
+export function isPermissionGranted(
+  permission: string,
+  requestingUrl: string | undefined,
+  isMainFrame: boolean,
+  appUrl: string | null
+): boolean {
+  return (
+    GRANTED_PERMISSIONS.includes(permission) &&
+    isMainFrame &&
+    requestingUrl !== undefined &&
+    appUrl !== null &&
+    isAppUrl(requestingUrl, appUrl)
+  )
+}

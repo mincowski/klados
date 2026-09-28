@@ -14,7 +14,7 @@ import icon from '../../assets/build/icons/256.png?asset'
 import iconIco from '../../assets/build/icon.ico?asset'
 import { registerReadTokenProtocol } from './documents'
 import { handleWindowClose, confirmQuit as confirmQuitFlow } from '../core/mainQuitFlow'
-import { isAllowedExternalUrl, isAppUrl } from '../core/mainSecurity'
+import { isAllowedExternalUrl, isAppUrl, isPermissionGranted } from '../core/mainSecurity'
 import { launchPathsFrom } from '../core/launchPaths'
 import { getAppUrl, secureHandle, secureOn, setAppUrl } from './trustedRenderer'
 
@@ -388,11 +388,21 @@ app.whenReady().then(() => {
     // somewhere else entirely.
     contents.on('will-redirect', (event, url) => deny(event, url))
 
-    // R165: Klados reads and writes local files and does nothing else. There is
-    // no permission it could legitimately need, so every request is refused
-    // outright rather than surfaced as a prompt the user has to interpret.
-    contents.session.setPermissionRequestHandler((_wc, _permission, callback) => callback(false))
-    contents.session.setPermissionCheckHandler(() => false)
+    // R165: Klados reads and writes local files and does nothing else, so every
+    // permission is refused outright rather than surfaced as a prompt the user
+    // has to interpret — with one exception. R222: writing to the clipboard,
+    // which every copy button needs and R165's "no permission it could
+    // legitimately need" had missed, so copying failed silently from R165 on.
+    // Granted only to the app's own page (`isPermissionGranted`). Chromium checks
+    // before it requests, so both handlers answer the same way.
+    contents.session.setPermissionRequestHandler((_wc, permission, callback, details) =>
+      callback(
+        isPermissionGranted(permission, details.requestingUrl, details.isMainFrame, getAppUrl())
+      )
+    )
+    contents.session.setPermissionCheckHandler((_wc, permission, _origin, details) =>
+      isPermissionGranted(permission, details.requestingUrl, details.isMainFrame, getAppUrl())
+    )
   })
 
   void createWindow()

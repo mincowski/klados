@@ -299,6 +299,66 @@ describe.skipIf(!builtAppAvailable)('the built app via _electron (R51, R58)', ()
   })
 
   /**
+   * R222 (`docs/plans/R222-clipboard-permission.md`) — the one exception to
+   * R165, asserted where it runs, for the reason R165's own test gives. Every
+   * copy button in the application failed silently from R165 on, and the
+   * browser-project tests that cover copying could not see it: they run in a
+   * plain Chromium, with none of the app's handlers.
+   *
+   * Chromium writes only from a focused document, which a window the harness
+   * opened in the background need not be, so the window is focused first, as
+   * a person's click would do.
+   */
+  describe('R222: the clipboard', () => {
+    async function focusWindow(): Promise<void> {
+      await app.evaluate(({ BrowserWindow }) => {
+        const window = BrowserWindow.getAllWindows()[0]!
+        window.show()
+        window.focus()
+      })
+      await page.bringToFront()
+      await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true)
+    }
+
+    it('a write from the page reaches the system clipboard', async () => {
+      await focusWindow()
+      await app.evaluate(({ clipboard }) => clipboard.writeText('before'))
+      const outcome = await page.evaluate(async () =>
+        navigator.clipboard.writeText('written by R222').then(
+          () => 'resolved',
+          (error: Error) => `${error.name}: ${error.message}`
+        )
+      )
+      expect(outcome).toBe('resolved')
+      expect(await app.evaluate(({ clipboard }) => clipboard.readText())).toBe('written by R222')
+    })
+
+    it('reading the clipboard is still refused', async () => {
+      await focusWindow()
+      await app.evaluate(({ clipboard }) => clipboard.writeText('not for the page'))
+      const outcome = await page.evaluate(async () =>
+        navigator.clipboard.readText().then(
+          (text) => `read: ${text}`,
+          (error: Error) => error.name
+        )
+      )
+      expect(outcome).toBe('NotAllowedError')
+    })
+
+    it('the permission API reports what the page can do', async () => {
+      await focusWindow()
+      const state = (name: string): Promise<string> =>
+        page.evaluate(
+          async (permission) =>
+            (await navigator.permissions.query({ name: permission as PermissionName })).state,
+          name
+        )
+      expect(await state('clipboard-write')).toBe('granted')
+      expect(await state('clipboard-read')).toBe('denied')
+    })
+  })
+
+  /**
    * Waits for the renderer to report an external change, **re-applying the
    * change while it waits**.
 

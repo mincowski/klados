@@ -1,9 +1,9 @@
 # R222 — copying to the clipboard, refused since R165
 
-<!-- status: open -->
+<!-- status: built -->
 
-**Open.** Found while testing R221 (`docs/plans/R221-electron-44.md` § 7) and scheduled by the project
-lead for the same release, 1.2.1.
+**Built** (§ 5). Found while testing R221 (`docs/plans/R221-electron-44.md` § 7) and scheduled by
+the project lead for the same release, 1.2.1.
 
 ## 1. The defect
 
@@ -44,8 +44,8 @@ In the built application on Electron 44, with handlers that log every call:
   navigation and to IPC senders. Both handlers use it, so what `permissions.query` reports matches what
   the page can do. Every other permission stays refused, `clipboard-read` included.
 - **Why this is safe enough to be the one exception:**
-  - "Sanitized" is Chromium's own write path, which strips active content from anything but plain
-    text. Klados writes plain text only.
+  - "Sanitized" names Chromium's write path for the standard formats, on which HTML is sanitized
+    before it reaches the system clipboard. Klados writes plain text only.
   - Writing reveals nothing: it cannot read what the user copied elsewhere.
   - The worst a script in the renderer could do with it is overwrite the clipboard, and R164's
     navigation guard and CSP exist to keep any script but the application's out of the renderer.
@@ -57,7 +57,7 @@ In the built application on Electron 44, with handlers that log every call:
   - `permissions.query` agrees with the write.
 - **Not in this round: making a failed copy visible.** The silent `catch` in both call sites is why
   this went unnoticed for months. Whether a failed copy should say so is a UI decision, raised in
-  § 5's results for the project lead rather than decided here.
+  § 5 for the project lead rather than decided here.
 
 ## 4. Verification
 
@@ -68,3 +68,43 @@ In the built application on Electron 44, with handlers that log every call:
   - Revert the grant: the write test must fail.
   - Grant everything: the notifications test must fail.
 - By hand, in the built app: every copy button, with the clipboard read back from main.
+
+## 5. Results
+
+**Built as planned.** Every copy button works in the built application. Only
+`clipboard-sanitized-write` is granted, and only to the application's own page.
+
+- **Unit** (`test/mainSecurity.test.ts`): the permission names come from the installed
+  `electron.d.ts`, not from a copy, and of every one of them only `clipboard-sanitized-write` is
+  granted. It is refused to:
+  - another `file://` page, an `https:` page and an unparseable URL;
+  - a subframe;
+  - a request with no URL, or one made before the app URL is known.
+- **Built app** (`test/mainElectron.test.ts`):
+  - A write from the page reaches the system clipboard.
+  - `readText` is refused with `NotAllowedError`.
+  - `permissions.query` reports `clipboard-write` granted and `clipboard-read` denied.
+  - R165's notification refusal still holds.
+- **Mutation, as R164 § 8c did:**
+
+  | Mutation | Failed | Passed |
+  |---|---|---|
+  | Both handlers answer `false` (R165 as it was) | the write test and the permission-API test | — |
+  | Both handlers answer `true` | R165's notification test, the read test and the permission-API test | the write test |
+
+  The code was restored and rebuilt after each.
+- **By hand, in the built app:**
+  - The grid's CSV button put the displayed rows on the system clipboard as CSV, header first.
+  - Detail's "Copy path" put `/garage/cars/elements` there.
+  - Both had failed in the same session on 39 and 44 before this round.
+- The full suite passes: 189 files, 2,322 tests.
+
+**For the project lead: a failed copy is still silent.** Both call sites swallow a rejection by design,
+which is why R165's regression went unnoticed from 1.0.0 to 1.2.0. Chromium still refuses a write from
+an unfocused document, for example. Whether that should show a notification is a UI decision this
+round leaves open.
+
+**Review:** read as a diff before the commit. One finding, fixed: the comment on the grant said Chromium
+"strips active content from anything but plain text". More exactly, `clipboard-sanitized-write`
+is the standard-formats write path, on which HTML is sanitized, and the comment now says that. No
+defect in the code.

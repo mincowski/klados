@@ -4118,3 +4118,28 @@ from the one users had, and it would change which folder Open starts in whenever
 changes.
 
 **Rejected: accepting Downloads.** It would silently undo a behaviour every user of 1.2.0 had.
+
+### D-114 — One exception to R165's permission deny: writing to the clipboard, from the app's own page (R222) · `settled`
+
+Plan: `docs/plans/R222-clipboard-permission.md`. **Revises R164 § 3's "the correct answer to every one
+of them is no".**
+
+**Chosen:** grant `clipboard-sanitized-write` when the request comes from the application's own page
+(`isAppUrl`) and its main frame. Both the check and the request handler answer through one predicate
+(`core/mainSecurity.ts`'s `isPermissionGranted`), because Chromium checks before it requests
+(measured), and `permissions.query` then reports what the page can do. Every other permission stays
+refused, `clipboard-read` included.
+
+**Why this one is safe to allow:**
+- Writing reveals nothing the user copied elsewhere.
+- The worst a script in the renderer could do with it is overwrite the clipboard. R164's navigation
+  guard and CSP exist to keep any script but the application's out.
+- Chromium still requires a focused document.
+
+**Rejected: granting it to any origin** (a bare `permission === 'clipboard-sanitized-write'`). It
+would be the one grant that does not ask R164's question, "is this still our page?".
+
+**Rejected: routing copies through a preload IPC to Electron's `clipboard` module.** It works
+without any permission, but it adds a channel and a preload method, reached from renderer code, to do
+what the web API already does, and it would leave the permission API reporting "denied" for something
+the page can do.
