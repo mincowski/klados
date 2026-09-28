@@ -4098,3 +4098,23 @@ change for no behaviour.
 
 **Rejected: parsing Node's messages in the renderer** (`/ENOENT/`). It works today and ties the
 user's text to the wording of two libraries.
+
+### D-113 — Electron 44, and Klados remembers the Open dialog's folder itself (R221) · `settled`
+
+Plan: `docs/plans/R221-electron-44.md`.
+
+**Chosen: Electron 44** (supported to 2 Mar 2027) over 42, the smallest supported jump, whose support
+ends on 20 Oct 2026.
+
+**Chosen: Klados remembers the folder of the last file chosen in Open or Save As**, in `userData`'s
+`dialog-state.json`, and passes it as the Open dialog's `defaultPath`. The OS used to do this:
+Windows kept a `Klados.exe` entry under `ComDlg32`'s `LastVisitedPidlMRU` (measured), and
+macOS's open panel remembers per application. From Electron 43, a dialog without `defaultPath`
+opens in Downloads, so this memory would have silently gone. Save As keeps passing the document's own
+path (R194).
+
+**Rejected: the active document's folder** as the Open dialog's start. It is a different behaviour
+from the one users had, and it would change which folder Open starts in whenever the active tab
+changes.
+
+**Rejected: accepting Downloads.** It would silently undo a behaviour every user of 1.2.0 had.

@@ -1,9 +1,12 @@
 # R221 — Electron 39 to 44
 
-<!-- status: open -->
+<!-- status: built-caveat -->
 
-**Open.** Raised by the investigation of the two open Dependabot alerts after 1.2.0 shipped. It is
-meant to ship as **1.2.1**, as decided by the project lead.
+**Built, with checks owed to a person** (§ 7): dragging a file from Explorer, Snap Layouts, the
+installer over an installed 1.2.0, and anything on a real Mac or Linux desktop. Raised by the
+investigation of the two open Dependabot alerts after 1.2.0 shipped. It is meant to ship as **1.2.1**,
+as decided by the project lead. Testing it found a defect that predates it: copying to the clipboard
+has been refused since R165 (§ 7).
 
 ## 1. Why
 
@@ -169,3 +172,122 @@ Windows):
 - Electron 45 or later. 44 is the newest stable today.
 - Moving CI's own Node from 22 to 24. The toolchain runs on 22; only the app's embedded Node changes.
 - Anything the § 2 table marks "not used".
+
+## 7. Results
+
+**Built.** Klados runs on Electron 44.4.5 (Chromium 152.0.7977.130, Node 24.21.0). Every change in § 3
+landed as planned, and nothing else in the code had to move. **Both Dependabot alerts close with it**:
+`extract-zip` and its five helper packages are gone from the lockfile. The lockfile changes are
+exactly Electron's own dependency tree and `@types/node`.
+
+### Automated
+
+- Typecheck, lint (the usual 3 warnings), and both test projects: 189 files, 2,314 tests.
+  `npm run test:large`: 2,356 tests. The one skipped file is `pathPredicateBudget.test.ts`, whose
+  fixture is not generated; it skips identically on 39.
+- The 13 built-app tests all ran against 44, not skipped: sandbox, preload surface, trusted IPC, CSP,
+  permission denial, zoom, file watching, "Open with", file errors.
+- `test/dialogFolder.test.ts` (9) covers § 3.2's memory against a real file system:
+  - nothing remembered;
+  - remembered across a restart;
+  - the latest choice wins;
+  - a deleted folder is forgotten;
+  - four malformed state files;
+  - a failed write that never fails the open.
+
+### § 3.1, measured
+
+`npm install` of 44 left no binary (no `path.txt`, no `dist/`), as § 3.1 read from the source.
+`npx install-electron` installed it with the pinned checksums, and every later `require('electron')`
+found it.
+
+### § 4: performance, 39 against 44
+
+Same machine, same fixtures, built app, median of three launches. **No regression; 44 is faster and
+smaller everywhere:**
+
+| Case | Until ready, 39 → 44 | Total memory, 39 → 44 | Renderer, 39 → 44 |
+|---|---|---|---|
+| Startup, no file | 760 → 584 ms (−23%) | 429 → 314 MB (−27%) | 101 → 86 MB |
+| `cars-100mb.xml` | 4.60 → 3.91 s (−15%) | 837 → 683 MB (−18%) | 470 → 419 MB |
+| `cars-100mb.json` | 4.16 → 3.58 s (−14%) | 847 → 731 MB (−14%) | 483 → 474 MB |
+| `cars-200mb.xml` | 7.68 → 6.74 s (−12%) | 1,081 → 973 MB (−10%) | 724 → 707 MB |
+| `cars-500mb.xml`, after the size prompt | 16.5 → 15.4 s | 1,939 → 1,936 MB | — |
+
+**The installer grows 17.5%** (`klados-1.2.0-setup.exe` 81.3 → 95.6 MB). Compared file by file,
+all of it is Electron's own:
+- `electron.exe` +33.5 MiB, with ANGLE now linked in, while the separate 8 MiB `libGLESv2.dll`
+  is gone.
+- `resources.pak` +5.8 MiB, and Chromium's license file +5.1 MiB.
+
+R195's locale trim still holds (`en-US.pak` only).
+
+### By hand, in the built application
+
+A scripted session drove the built app as a person would: keyboard, clicks, screenshots. **It ran
+identically on 39 as a control**, so a difference between them would be the upgrade's, and a failure on
+both would be something else. Every step gave the same result on both. Passed:
+- The start page in both themes, and the title-bar theme persisted.
+- Zoom in, out and reset.
+- The palette and F1.
+- Opening a file into the Tree, Detail, the grid and Raw.
+- The grid quick filter and Find.
+- Editing in Raw, then undo and redo after a typing pause, as the burst debounce intends. Pressed
+  immediately after typing, undo removes one character, on 39 too.
+- Save to disk, and a clean document reloading after an external change.
+- The unsaved-changes prompt on close.
+- Session restore.
+- `cars-500mb.xml` through the size prompt, then scrolled.
+
+**§ 3.2 in the real Windows dialogs**, driven through UI Automation and window messages:
+- With nothing remembered, Open starts in **Downloads** (Electron 43's new default, confirmed).
+- Picking a file in another folder opens it and remembers the folder.
+- Save As through the real dialog writes a byte-identical copy, and its folder becomes the remembered
+  one.
+- **After a restart, Open starts in that folder.**
+- With the remembered folder deleted, Open starts in Downloads again, without an error.
+- Save As's own dialog starts on the document's file, as before (R194).
+
+**The packaged `Klados.exe`** (`electron-builder --win`, outside Playwright):
+- It opened a file, and a second launch handed over its file and exited with code 0.
+- It closed normally with both files in its saved session. Klados records a tab there only once the
+  file is open.
+
+### Found while testing: copying to the clipboard is refused, since R165
+
+**This predates the round, and 39 fails identically.** The grid's CSV, TSV and Markdown buttons and
+Detail's "Copy path" call `navigator.clipboard.writeText`. It rejects with *"Write permission
+denied"*: R165's handler refuses every permission request, and this one needs
+`clipboard-sanitized-write`. Allowing only that permission at runtime made the write succeed on
+both versions, and it was the only permission Chromium asked for.
+
+- **Why no test saw it:** the browser-project tests that cover copying run in a plain Chromium, without
+  the app's handlers.
+- **Not fixed here:** it relaxes a security decision. The fix is proposed to the project lead as its own
+  round, targeted at the same release.
+
+### Owed
+
+- Dragging a file from Explorer onto the window. `webUtils.getPathForFile` needs a real OS drag.
+- Snap Layouts on hovering the maximize button.
+- Installing the new build over an installed 1.2.0, then "Open with" and uninstall. Not done: the
+  project lead's own installation is the only 1.2.0 on this machine.
+- A real Mac, including macOS 12's refusal, and a real Linux desktop. CI and the release rehearsal
+  build and test them; nobody has launched them.
+
+### Review
+
+Read as a diff after the tests passed. **No defect found in the round's own changes.** Checked:
+- The lockfile moves only Electron's tree and the Node types.
+- The CI step's comment claims checksum pinning; it is true of Electron 44's `install.js`.
+- An Open dialog with nothing remembered gets no `defaultPath` key at all, not `undefined`.
+- `remember` writes only a folder the user chose in a native dialog, and never fails an open or a
+  save.
+
+The harness had faults of its own, each found against the Electron 39 control rather than reported as
+a regression:
+- The Raw pane was hidden by default, and the grid's virtualized rows can't be counted.
+- CodeMirror renders only the lines on screen.
+- The undo check didn't allow for the typing debounce.
+- A relaunch collided with R219's single-instance lock while the previous instance was still exiting.
+- The Save dialog's name box ignores `WM_SETTEXT`.

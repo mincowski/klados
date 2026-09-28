@@ -90,6 +90,14 @@ jobs:
 
       - run: npm ci
 
+      # R221 (`docs/plans/R221-electron-44.md` § 3.1): from Electron 42 the
+      # binary is no longer downloaded by `npm ci`. The first
+      # `require('electron')` fetches it instead, and several `_electron`
+      # test files start in parallel workers, each of which would begin the same
+      # download into the same folder. Installed once here, still checked against
+      # the SHA-256s pinned in the `electron` package.
+      - run: npx install-electron
+
       # The tag and `package.json` are *not* connected: electron-builder takes
       # the version from package.json and GitHub takes the release name from the
       # tag. A mismatch produces a release called v1.2.0 containing files named

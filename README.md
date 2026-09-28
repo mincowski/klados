@@ -24,7 +24,8 @@ Three panes, kept in sync:
 ## Download
 
 Builds for Windows, macOS and Linux are on the
-[releases page](https://github.com/mincowski/klados/releases).
+[releases page](https://github.com/mincowski/klados/releases). They run on **Windows 10 or later**,
+**macOS 13 (Ventura) or later** on Apple silicon or Intel, and **64-bit Linux**.
 
 **The builds are not signed**, so your computer will warn you the first time you open one. This is
 normal for small free software, and here is how to get past it:
@@ -120,6 +121,9 @@ cd klados
 npm install
 npm run dev
 ```
+
+The first `npm run dev` (or test run) downloads Electron itself, about 100 MB, once. `npm install`
+no longer does: Electron stopped downloading in its install script with version 42.
 
 `npm run dev` starts Electron with hot reload for the renderer. Editing files under
 `src/renderer/` updates the running app; changes to the main process restart it.
