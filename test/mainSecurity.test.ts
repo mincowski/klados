@@ -12,7 +12,8 @@
  * pinning the test to one trigger would test the wrong thing.
  */
 import { describe, expect, it } from 'vitest'
-import { isAllowedExternalUrl, isAppUrl } from '../src/core/mainSecurity'
+import { readFileSync } from 'fs'
+import { isAllowedExternalUrl, isAppUrl, isPermissionGranted } from '../src/core/mainSecurity'
 
 const DEV_URL = 'http://localhost:5173'
 const PROD_URL = 'file:///C:/Program%20Files/Klados/resources/app.asar/out/renderer/index.html'
@@ -100,5 +101,61 @@ describe('R165 — isAllowedExternalUrl', () => {
     // "some scheme the OS knows about" is not a small set.
     expect(isAllowedExternalUrl('ms-msdt:/id')).toBe(false)
     expect(isAllowedExternalUrl('not a url')).toBe(false)
+  })
+})
+
+/**
+ * Every permission name Electron's own types list for the check handler, read
+ * from the installed `electron.d.ts` rather than copied here, so a permission
+ * a later Electron adds is covered without anyone remembering to add it.
+ */
+function electronPermissionNames(): string[] {
+  const types = readFileSync('node_modules/electron/electron.d.ts', 'utf8')
+  const signature =
+    /setPermissionCheckHandler\(handler: \(\(webContents: [^,]+, permission: ([^,]+(?:\|[^,]+)*), requestingOrigin/.exec(
+      types
+    )
+  if (signature === null)
+    throw new Error('setPermissionCheckHandler signature not found in electron.d.ts')
+  return [...signature[1]!.matchAll(/'([^']+)'/g)].map((m) => m[1]!)
+}
+
+describe('R222 — isPermissionGranted', () => {
+  const PAGE = PROD_URL
+
+  it('grants clipboard-sanitized-write to the app page, in the main frame', () => {
+    expect(isPermissionGranted('clipboard-sanitized-write', PAGE, true, PROD_URL)).toBe(true)
+    expect(
+      isPermissionGranted('clipboard-sanitized-write', 'http://localhost:5173/', true, DEV_URL)
+    ).toBe(true)
+  })
+
+  it('refuses every other permission Electron knows, clipboard-read included', () => {
+    const names = electronPermissionNames()
+    expect(names).toContain('clipboard-read')
+    expect(names).toContain('notifications')
+    expect(names.length).toBeGreaterThan(30)
+    const granted = names.filter((name) => isPermissionGranted(name, PAGE, true, PROD_URL))
+    expect(granted).toEqual(['clipboard-sanitized-write'])
+  })
+
+  it('refuses it to anything but the app page', () => {
+    const other = 'file:///C:/Users/someone/Downloads/saved.html'
+    expect(isPermissionGranted('clipboard-sanitized-write', other, true, PROD_URL)).toBe(false)
+    expect(
+      isPermissionGranted('clipboard-sanitized-write', 'https://example.com/', true, PROD_URL)
+    ).toBe(false)
+    expect(isPermissionGranted('clipboard-sanitized-write', 'not a url', true, PROD_URL)).toBe(
+      false
+    )
+  })
+
+  it('refuses it to a subframe, even of the app page', () => {
+    expect(isPermissionGranted('clipboard-sanitized-write', PAGE, false, PROD_URL)).toBe(false)
+  })
+
+  it('refuses it without a requesting URL, or before the app URL is known', () => {
+    expect(isPermissionGranted('clipboard-sanitized-write', undefined, true, PROD_URL)).toBe(false)
+    expect(isPermissionGranted('clipboard-sanitized-write', PAGE, true, null)).toBe(false)
   })
 })

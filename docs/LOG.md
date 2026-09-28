@@ -16,6 +16,23 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R222 — copying to the clipboard, refused since R165 · built
+
+**Plan:** `docs/plans/R222-clipboard-permission.md` · **Decision:** D-114
+
+**Every copy button did nothing from 1.0.0 to 1.2.0.** R165 refused every web permission on the
+premise that a local file viewer needs none. It never considered clipboard *write*, which the grid's
+export buttons and Detail's "Copy path" need. Both call sites swallow the rejection on purpose, and
+the tests that cover copying run in a plain browser without the app's handlers, so nothing showed it.
+R221's hands-on testing found it, by running the same session on Electron 39 as a control.
+
+**The fix grants one permission, to one page.** `clipboard-sanitized-write` is allowed only to the
+application's own main frame, by the same `isAppUrl` rule R164 uses for navigation and IPC, and in
+both handlers, since Chromium checks before it requests. Reading the clipboard stays refused. It is
+mutation-tested both ways.
+
+---
+
 ## R221 — Electron 39 to 44 · built ⚠
 
 **Plan:** `docs/plans/R221-electron-44.md` · **Decision:** D-113

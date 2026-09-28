@@ -317,7 +317,8 @@ permission handler refuses every request, and `navigator.clipboard.writeText` ne
 `clipboard-sanitized-write`. So every copy button has failed with *"Write permission denied"*
 since R165, measured on Electron 39 and 44 (R221). Those tests run in a plain Chromium without the
 app's handlers and pass either way. **A feature that depends on a permission has to be tested in the
-built app** (`mainElectron.test.ts`). Open until the proposed fix lands.
+built app** (`mainElectron.test.ts`). Fixed by R222, which grants that one permission to the app's own page; the
+lesson stands for the next permission-shaped feature.
 
 **Predicting a consequence is not evaluating it.** D-054's icon split named the exact side effect
 that broke it and dismissed it in the same sentence. If a plan says "this might mean X," that is a
