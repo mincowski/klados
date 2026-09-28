@@ -2,8 +2,8 @@
 
 <!-- status: built-caveat -->
 
-**Built, with checks owed to a person** (§ 7): dragging a file from Explorer, Snap Layouts, the
-installer over an installed 1.2.0, and anything on a real Mac or Linux desktop. Raised by the
+**Built, with checks owed to a person** (§ 7): dragging a file from Explorer, Snap Layouts, and
+anything on a real Mac or Linux desktop. The installer upgrade was verified after R222. Raised by the
 investigation of the two open Dependabot alerts after 1.2.0 shipped. It is meant to ship as **1.2.1**,
 as decided by the project lead. Testing it found a defect that predates it: copying to the clipboard
 has been refused since R165 (§ 7).
@@ -270,10 +270,26 @@ both versions, and it was the only permission Chromium asked for.
 
 - Dragging a file from Explorer onto the window. `webUtils.getPathForFile` needs a real OS drag.
 - Snap Layouts on hovering the maximize button.
-- Installing the new build over an installed 1.2.0, then "Open with" and uninstall. Not done: the
-  project lead's own installation is the only 1.2.0 on this machine.
+- ~~Installing the new build over an installed 1.2.0, then "Open with" and uninstall.~~ Done after R222
+  merged, with the project lead's agreement; see "The installer, on the development machine" below.
 - A real Mac, including macOS 12's refusal, and a real Linux desktop. CI and the release rehearsal
   build and test them; nobody has launched them.
+
+### The installer, on the development machine
+
+Done after R222 merged, as the last step before 1.2.1. It was run on the project lead's own
+installation with their agreement. The installer was built from `main` (R221 and R222) with
+`--config.extraMetadata.version=1.2.1`, so it was a real upgrade, and the repository was left
+unchanged. **The installed copy was 1.1.0, not 1.2.0:** the build installed from R219's branch
+before `main` moved to 1.2.0.
+
+| Step | Result |
+|---|---|
+| Baseline, recorded first | `.xml` → Klados (an explicit choice), `.json`/`.tsv`/`.tab` → Klados, `.csv` → VS Code, `.toml` no default; all six list Klados for "Open with", with the document icon |
+| Install 1.2.1 over it (`/S`) | One uninstall entry, at 1.2.1; the Electron 39 `libGLESv2.dll` did not survive. **Every handler, user choice, "Open with" entry and icon identical to the baseline** |
+| The installed `Klados.exe`, run with the registered command plus a temporary profile | A second launch handed over its file and exited with 0; both files were in the session when the app closed normally. The real profile was not touched, which is how R219's own check left its probe file behind |
+| Uninstall (`/currentuser /S`) | Program folder, uninstall entry and all six `Klados.<ext>` classes gone; no "Open with" list names Klados; defaults fell back to VS Code, or to none for `.tsv`/`.tab` |
+| Reinstall | Every extension identical to the baseline again |
 
 ### Review
 
