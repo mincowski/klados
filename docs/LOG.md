@@ -42,6 +42,11 @@ file before answering and puts the tagged message in the response body.
 above it. Fading the path to look quieter took it under 4.5:1 contrast. It is now full colour in the
 UI font, and the sentence leads by weight instead.
 
+Version **1.2.0**, carrying R215–R220. A minor rather than the 1.1.1 first planned for R215–R218's
+fixes, because R219 adds a feature: Klados in the operating system's "Open with". Before tagging, the
+release workflow was rehearsed by dispatch on `main` at 1.1.0: all four packages built and every test
+passed, and electron-builder uploaded nothing, because `v1.1.0` was already published.
+
 ---
 
 ## R219 — Klados in "Open with" · built ⚠
