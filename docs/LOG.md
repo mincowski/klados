@@ -31,6 +31,11 @@ application's own main frame, by the same `isAppUrl` rule R164 uses for navigati
 both handlers, since Chromium checks before it requests. Reading the clipboard stays refused. It is
 mutation-tested both ways.
 
+Version **1.2.1**, carrying R221 and R222: a supported Electron, and working copy buttons. Before
+tagging, the 1.2.1 installer was built from `main` and installed over the development machine's
+Klados. Then "Open with", the file hand-over, uninstall and reinstall were checked against a baseline
+of every extension's handler. Nothing changed that should not have (R221 § 7).
+
 ---
 
 ## R221 — Electron 39 to 44 · built ⚠
