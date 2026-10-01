@@ -1,9 +1,11 @@
 # R226 — GitHub attestations for every release file
 
-<!-- status: open -->
+<!-- status: closed -->
 
-**Open — recorded, not scheduled.** Written at the project lead's request alongside R225, so the
-option is on record. Whether it is built is undecided.
+**Closed without being built.** Dropped by the project lead as more than this project needs: the
+only people it protects are those who run `gh attestation verify`, Windows and macOS ignore it, and
+`SHA256SUMS.txt` already covers the ordinary check. The number stays allocated and visible, as every
+dropped `R` id does. The plan below is kept as written, in case provenance is ever asked for.
 
 ## 1. What it is, and what it buys
 
