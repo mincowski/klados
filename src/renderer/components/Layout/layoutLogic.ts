@@ -22,10 +22,15 @@ export interface PaneVisibility {
   readonly rawVisible: boolean
 }
 
+/** R223 (`docs/plans/R223-raw-pane-default.md`): Raw joined the default.
+ * CONCEPT.md §4.1 originally made Tree + Detail the default pair with Raw
+ * toggled in, but editing happens only in Raw (invariant 6), so a new user
+ * had no visible sign Klados could edit at all. Detail stays dominant
+ * through `layoutStore.ts`'s default `rawHeight`. */
 export const DEFAULT_PANE_VISIBILITY: PaneVisibility = {
   treeVisible: true,
   detailVisible: true,
-  rawVisible: false
+  rawVisible: true
 }
 
 /** Tree + Raw with Detail hidden is the one legal state with two panes and

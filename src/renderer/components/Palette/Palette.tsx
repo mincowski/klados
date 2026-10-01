@@ -37,7 +37,7 @@ import { effectiveChordFor, formatChord } from '../../commands/keybindings'
 import { commandsForSurface, type AppContext } from '../../commands/registry'
 import { focusPaneOrFirstAvailable, type Pane } from '../../focus'
 import { openFindWithQuery } from '../Find/findStore'
-import { scrubRawTo } from '../Raw/rawController'
+import { scrubRawTo, withRawView } from '../Raw/rawController'
 import { locateInTree } from '../Tree/treeController'
 import { parseGoToPosition, type GoToPosition } from '../../navigation/goToPosition'
 import { hasMeaningfulLines } from '../Detail/detailModel'
@@ -365,12 +365,27 @@ function PaletteContent({ context }: { context: ContextKeys }): JSX.Element {
    * tree`/`Locate in source` pair would do separately, done together since
    * this *is* the act of navigating there for the first time. `pane` is
    * where the keyboard ends up: Tree for `@`/`/` (both name *nodes*), Raw
-   * for `:` (which names a *position* — R69 §1's own recommendation). */
-  function navigateToNode(store: NodeStore, node: NodeRef, pane: Pane): void {
+   * for `:` (which names a *position* — R69 §1's own recommendation).
+   *
+   * R223 (`docs/plans/R223-raw-pane-default.md` §2.3): `revealRaw` shows a
+   * hidden Raw first, for `:` alone — a position is a place in the source,
+   * so landing on it with Raw hidden was a jump with no visible end. A
+   * revealed Raw mounts after this returns, so the scrub and the focus wait
+   * for it inside `withRawView` rather than falling back to the Tree. */
+  function navigateToNode(store: NodeStore, node: NodeRef, pane: Pane, revealRaw = false): void {
     selectNode(store, node)
     locateInTree(node)
-    scrubRawTo(store.spanOf(node).start)
-    closeAndFocus(pane)
+    const offset = store.spanOf(node).start
+    if (!revealRaw) {
+      scrubRawTo(offset)
+      closeAndFocus(pane)
+      return
+    }
+    closePalette()
+    withRawView((raw) => {
+      raw.scrubTo(offset)
+      focusPaneOrFirstAvailable(pane)
+    })
   }
 
   function runNodeMatch(match: NodeNameMatch): void {
@@ -383,7 +398,8 @@ function PaletteContent({ context }: { context: ContextKeys }): JSX.Element {
     navigateToNode(
       readyDocument.store,
       nodeContainingOffset(readyDocument.store, result.offset),
-      paneForPaletteJump('goToPosition')
+      paneForPaletteJump('goToPosition'),
+      true
     )
   }
 

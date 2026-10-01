@@ -21,10 +21,16 @@ export interface LayoutState extends PaneVisibility {
   readonly rawHeight: number
 }
 
+/** R223 (`docs/plans/R223-raw-pane-default.md` § Results): `rawHeight` was
+ * 0.4 while Raw was hidden by default, so almost nobody saw it. Chosen by the
+ * project lead from renders: at 0.4 the Detail pane overflows its own height
+ * at 1280×800 (the grid's 230 px floor plus the heading above it no longer
+ * fit) and scrolls around the grid's own scrollbar. At 0.3 it fits at
+ * 1280×800 and larger; at 1024×700 it overflows by 8 px. */
 const DEFAULT_STATE: LayoutState = {
   ...DEFAULT_PANE_VISIBILITY,
   treeWidth: 260,
-  rawHeight: 0.4
+  rawHeight: 0.3
 }
 
 const STORAGE_KEY = 'klados.layout'
@@ -103,6 +109,14 @@ export function toggleDetailPane(): void {
 
 export function toggleRawPane(): void {
   applyVisibility(toggleRaw(state))
+}
+
+/** R223: shows Raw if it is hidden, for a command that needs it (Locate in
+ * Source and the rest — `Raw/rawController.ts`'s `withRawView`). Goes
+ * through `toggleRaw`, so it can only reach a layout §4.1 allows. A no-op
+ * when Raw is already visible; never hides it. */
+export function showRawPane(): void {
+  if (!state.rawVisible) applyVisibility(toggleRaw(state))
 }
 
 export function setTreeWidth(px: number): void {

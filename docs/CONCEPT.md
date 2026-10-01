@@ -355,14 +355,16 @@ both a producer and a consumer of that state.
 
 ### 4.1 Window layout
 
-The Detail view is the primary working surface; Tree and Detail are the default pair.
-Raw is toggled in.
+The Detail view is the primary working surface. All three panes are shown by default,
+with Raw below Detail taking the smaller share of the column (R223, D-115). Raw was once
+toggled in, but it is the only place a document can be edited, and a new user had no way
+to know that.
 
 **Two independent toggles**, one keystroke each: show/hide Tree, show/hide Raw. This is
 preferred over cycling a single key through fixed modes, where reaching a given layout
 sometimes takes two presses and the next state is not predictable from the current one.
 
-Reachable layouts: Tree + Detail (default), Tree + Detail + Raw, Tree + Raw,
+Reachable layouts: Tree + Detail + Raw (default), Tree + Detail, Tree + Raw,
 Detail + Raw, Detail alone.
 
 **Raw stacks below Detail, never beside it.** Both panes are width-hungry for the same

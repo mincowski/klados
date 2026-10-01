@@ -4143,3 +4143,40 @@ would be the one grant that does not ask R164's question, "is this still our pag
 without any permission, but it adds a channel and a preload method, reached from renderer code, to do
 what the web API already does, and it would leave the permission API reporting "denied" for something
 the page can do.
+
+### D-115 — Raw is shown by default, and a command that needs Raw shows it (R223) · `settled`
+
+Plan: `docs/plans/R223-raw-pane-default.md`. **Reverses `CONCEPT.md` § 4.1's "Tree and Detail are the
+default pair. Raw is toggled in."**
+
+**Chosen: Tree + Detail + Raw as the default layout**, with Raw at 30% of the column (`rawHeight`, which
+was 0.4 while Raw was hidden).
+Editing happens only in Raw (invariant 6), and with Raw hidden nothing on screen said Klados could
+edit: Undo, Redo and Save sat disabled without a reason, and the way in was an unlabelled title-bar
+icon or Ctrl+Shift+R. § 4.1's own argument for showing Raw beside Detail, that their synchronization
+"cannot be perceived when only one of the two is visible", applies to the default too.
+
+**Chosen: a saved layout is kept.** `layoutStore.ts` saves a layout only once the user changes it, so
+the new default reaches new installs and anyone who never changed theirs. Someone who only dragged a
+divider saved Raw hidden without choosing it, and keeps it hidden. Accepted by the project lead over
+overwriting layouts people may have chosen.
+
+**Chosen: Locate in Source, Soft Wrap, Focus Raw Source, next/previous diagnostic and the palette's
+`:` jump show a hidden Raw, then act** (`rawController.ts`'s `withRawView`). Before, each did nothing,
+or lost its jump in the text, while still being offered by the palette. The reveal goes through
+`toggleRaw`, so it reaches only a layout § 4.1 allows. The palette's `@` node jump and the scrubber
+still bring only an already visible Raw along: they name a node, not a place in the source.
+
+**Chosen by the project lead from renders: 30%.** At 40% the Detail pane no longer fits its own height
+at 1280×800 (the grid's 230 px floor plus the heading above it), so it scrolls around the grid's own
+scrollbar, by 9 px there and 69 px at 1024×700. At 30% it fits from 1280×800 up and overflows by 8 px
+at 1024×700. 25%, recommended because it fitted every window rendered, was not chosen.
+
+**Accepted: a tab switch into a minified document costs ~2.4 s by default** (96 ms with Raw hidden,
+2,445 ms visible, `cars-10mb.min.xml`). The cost is wrapping Raw's single-line window
+(`FINDINGS.md`), and it is not new: anyone who showed Raw already paid it. R223 makes it the default.
+Recorded rather than fixed first, by the project lead's decision. `FINDINGS.md` names the cheap lever
+if it ever needs fixing: a smaller window for single-line documents.
+
+**Rejected: a hint when someone tries to type into the grid or Detail.** Telling an attempt to edit
+from keyboard browsing is unreliable, and with Raw visible by default the need mostly goes.

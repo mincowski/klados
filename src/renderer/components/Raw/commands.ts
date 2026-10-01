@@ -6,7 +6,7 @@
  */
 import { getContext } from '../../commands/context'
 import { registerCommand } from '../../commands/registry'
-import { toggleRawWrap } from './rawController'
+import { withRawView } from './rawController'
 
 // R68 (`R66-palette-polish.md` §3): `isWrapped` already lives in the
 // context store (`Raw.tsx`'s own `setContext('isWrapped', ...)` calls) —
@@ -19,5 +19,6 @@ registerCommand({
   surfaces: ['palette', 'paneHeader'],
   pane: 'raw',
   state: () => getContext().isWrapped,
-  run: () => toggleRawWrap()
+  // R223: shows Raw first when the palette runs this with Raw hidden.
+  run: () => withRawView((raw) => raw.toggleWrap())
 })
