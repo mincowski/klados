@@ -11,7 +11,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { Layout } from '../src/renderer/components/Layout/Layout'
-import { getLayoutState, resetLayoutForTests } from '../src/renderer/components/Layout/layoutStore'
+import {
+  getLayoutState,
+  resetLayoutForTests,
+  toggleRawPane
+} from '../src/renderer/components/Layout/layoutStore'
 import {
   closeFind,
   openFind,
@@ -64,9 +68,10 @@ describe('R70 §2 — Find is mounted at the layout shell, not inside Raw', () =
   })
 
   it('opening Find renders .find-bar with the Raw pane explicitly hidden', async () => {
-    // rawVisible defaults to false (`layoutLogic.ts`'s own
-    // `DEFAULT_PANE_VISIBILITY`) — asserted rather than assumed, since the
-    // whole point of this test is Raw being hidden.
+    // R223 made Raw visible by default, so it is hidden here explicitly —
+    // and asserted rather than assumed, since the whole point of this test
+    // is Raw being hidden.
+    toggleRawPane()
     expect(getLayoutState().rawVisible).toBe(false)
 
     await paint(<Layout />)

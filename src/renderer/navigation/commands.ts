@@ -5,7 +5,7 @@
  * see what `builtins.ts` has imported.
  */
 import { locateInTree } from '../components/Tree/treeController'
-import { scrubRawTo } from '../components/Raw/rawController'
+import { withRawView } from '../components/Raw/rawController'
 import type { AppContext } from '../commands/registry'
 import { registerCommand } from '../commands/registry'
 import { nodeContainingOffset } from '../nodeSpanLookup'
@@ -103,7 +103,9 @@ registerCommand({
   run: (ctx) => {
     const state = readyState(ctx)
     if (state === null) return
-    scrubRawTo(state.document.store.spanOf(state.selection.selectedNode).start)
+    const offset = state.document.store.spanOf(state.selection.selectedNode).start
+    // R223: shows Raw first if it is hidden — this command has no other effect.
+    withRawView((raw) => raw.scrubTo(offset))
   }
 })
 
@@ -111,7 +113,8 @@ registerCommand({
  * (D14's offset → node primitive) and drives selection, Tree, and Raw the
  * same way `Palette.tsx`'s go-to-position flow does, except scrubbed to
  * the diagnostic's own offset rather than its containing node's span
- * start, which is the more precise of the two here.
+ * start, which is the more precise of the two here. R223: shows Raw first
+ * if it is hidden, as that flow does.
  *
  * Also advances `caretOffset` itself, via `setCaretOffset` — not just a
  * visual scrub. `nextDiagnostic`/`previousDiagnostic` both read
@@ -129,7 +132,7 @@ function gotoDiagnostic(
   selectNode(state.document.store, node)
   ctx.session.setCaretOffset(offset)
   locateInTree(node)
-  scrubRawTo(offset)
+  withRawView((raw) => raw.scrubTo(offset))
 }
 
 registerCommand({

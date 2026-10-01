@@ -15,6 +15,7 @@ import '../navigation/commands'
 import '../notifications/commands'
 import '../session/commands'
 
+import { withRawView } from '../components/Raw/rawController'
 import { focusPane, moveFocus, type Pane } from '../focus'
 import { getTheme, toggleTheme } from '../theme'
 import { zoomIn, zoomOut, resetZoom } from '../zoom'
@@ -72,7 +73,11 @@ function registerFocusPaneCommand(pane: Pane, title: string): void {
     category: 'View',
     surfaces: ['palette'],
     when: 'format',
-    run: () => focusPane(pane)
+    // R223 (`docs/plans/R223-raw-pane-default.md` §2.3): Raw is the editor,
+    // so asking for it shows it rather than doing nothing while it is
+    // hidden. Focus Tree and Focus Detail keep `focusPane`'s no-op on a
+    // hidden pane; they were outside R223's scope.
+    run: pane === 'raw' ? () => withRawView(() => focusPane('raw')) : () => focusPane(pane)
   })
 }
 

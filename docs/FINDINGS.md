@@ -71,6 +71,11 @@ is the same 1 MB either way — what changes is that it is *one* `.cm-line`, so 
 CodeMirror must measure the whole line. It virtualizes across lines, not within one. Toggling wrap
 on an already-open minified document isolates it exactly: **off 165 ms, on 2143 ms**.
 
+**Since R223 this is the default experience**, because Raw is shown by default. Re-measured on
+Electron 44 with the built app, switching into a `cars-10mb.min.xml` tab: **96 ms with Raw hidden,
+2,445 ms with it visible** (median of three). Accepted by the project lead and recorded in D-115,
+rather than fixed first.
+
 **The cost tracks the window, not the file — so it is bounded and never grows.** `cars-mid.min.xml`
 (0.95 MB) costs 2248–2675 ms and `cars-10mb.min.xml` (6.67 MB) costs 2481–2801 ms — the same, because
 both fill the same 1 MB window. `cars-small.min.xml` (0.25 MB, so its whole file *is* the window)

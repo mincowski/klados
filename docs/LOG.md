@@ -16,6 +16,26 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R223 — the Raw pane is shown by default · built
+
+**Plan:** `docs/plans/R223-raw-pane-default.md` · **Decision:** D-115
+
+**A new user could not tell that Klados edits.** Raw, the only place editing happens, was hidden by
+default, and the commands that act on it did nothing while it was hidden: a hidden Raw is not mounted
+at all. The default is now Tree + Detail + Raw, and Locate in Source, Soft Wrap, Focus Raw Source, F8
+and the palette's `:` jump show a hidden Raw before acting. Saved layouts are kept.
+
+**The renders overturned the plan's 40%.** At 40% the Detail pane no longer fits at 1280×800: the
+grid's 230 px floor plus the heading above it overflow, and the pane scrolls around the grid's own
+scrollbar. The plan expected about 12 grid rows; there were 6. The project lead chose 30% from
+renders at 40, 30, 25 and 20%.
+
+**Measured with Raw visible:** large-file opens unchanged, but a tab switch into a minified document
+goes from 96 ms to 2,445 ms, the wrap cost `FINDINGS.md` already recorded. Accepted by the project
+lead rather than fixed first.
+
+---
+
 ## R222 — copying to the clipboard, refused since R165 · built
 
 **Plan:** `docs/plans/R222-clipboard-permission.md` · **Decision:** D-114

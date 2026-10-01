@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   clampRawHeight,
   clampTreeWidth,
@@ -15,9 +15,11 @@ import {
   resetLayoutForTests,
   setRawHeight,
   setTreeWidth,
+  showRawPane,
   subscribeLayout,
   toggleDetailPane,
-  toggleRawPane
+  toggleRawPane,
+  toggleTreePane
 } from '../src/renderer/components/Layout/layoutStore'
 
 function fakeStorage(): Storage {
@@ -44,8 +46,9 @@ function label(v: PaneVisibility): string {
 }
 
 describe('layout toggles (D7): exactly the five CONCEPT.md §4.1 layouts', () => {
-  it('default is Tree+Detail', () => {
-    expect(label(DEFAULT_PANE_VISIBILITY)).toBe('Tree+Detail')
+  // R223 (`docs/plans/R223-raw-pane-default.md`): was Tree+Detail.
+  it('default is Tree+Detail+Raw', () => {
+    expect(label(DEFAULT_PANE_VISIBILITY)).toBe('Tree+Detail+Raw')
   })
 
   it('every reachable layout from the default is one of the five named ones', () => {
@@ -118,7 +121,7 @@ describe('layoutStore (D7)', () => {
 
   it('persists across a reload — a fresh read of localStorage reflects the last state', () => {
     toggleRawPane()
-    expect(localStorage.getItem('klados.layout')).toContain('"rawVisible":true')
+    expect(localStorage.getItem('klados.layout')).toContain('"rawVisible":false')
   })
 
   it('notifies subscribers on a toggle', () => {
@@ -132,7 +135,9 @@ describe('layoutStore (D7)', () => {
   it('toggleDetailPane is a no-op (and does not notify) when it would strand a single non-Detail pane', () => {
     let notifications = 0
     const unsubscribe = subscribeLayout(() => notifications++)
-    toggleDetailPane() // default is Tree+Detail, Raw hidden — guarded no-op
+    toggleRawPane() // Tree+Detail — the default before R223
+    notifications = 0
+    toggleDetailPane() // Raw hidden — guarded no-op
     expect(getLayoutState().detailVisible).toBe(true)
     expect(notifications).toBe(0)
     unsubscribe()
@@ -143,5 +148,78 @@ describe('layoutStore (D7)', () => {
     setRawHeight(0.99)
     expect(getLayoutState().treeWidth).toBe(TREE_WIDTH_RANGE.max)
     expect(getLayoutState().rawHeight).toBe(RAW_HEIGHT_RANGE.max)
+  })
+})
+
+describe('R223: showRawPane', () => {
+  beforeEach(() => resetLayoutForTests())
+
+  it('shows a hidden Raw from Tree+Detail, keeping Tree and Detail', () => {
+    toggleRawPane()
+    showRawPane()
+    expect(getLayoutState()).toMatchObject({
+      treeVisible: true,
+      detailVisible: true,
+      rawVisible: true
+    })
+  })
+
+  it('shows a hidden Raw from Detail alone', () => {
+    toggleRawPane()
+    toggleTreePane()
+    showRawPane()
+    expect(getLayoutState()).toMatchObject({
+      treeVisible: false,
+      detailVisible: true,
+      rawVisible: true
+    })
+  })
+
+  it('is a no-op when Raw is already visible: no notification, no write', () => {
+    let notifications = 0
+    const unsubscribe = subscribeLayout(() => notifications++)
+    showRawPane()
+    expect(getLayoutState().rawVisible).toBe(true)
+    expect(notifications).toBe(0)
+    expect(localStorage.getItem('klados.layout')).toBeNull()
+    unsubscribe()
+  })
+})
+
+describe('R223: who gets the new default', () => {
+  // The store reads `localStorage` once, when the module loads — so each case
+  // loads a fresh copy of it, the way a restart does.
+  async function freshStore(): Promise<
+    typeof import('../src/renderer/components/Layout/layoutStore')
+  > {
+    vi.resetModules()
+    return import('../src/renderer/components/Layout/layoutStore')
+  }
+
+  beforeEach(() => localStorage.removeItem('klados.layout'))
+
+  it('a profile with no saved layout gets Tree+Detail+Raw, Raw at 30%', async () => {
+    const store = await freshStore()
+    expect(store.getLayoutState()).toEqual({
+      treeVisible: true,
+      detailVisible: true,
+      rawVisible: true,
+      treeWidth: 260,
+      rawHeight: 0.3
+    })
+  })
+
+  it('a saved layout with Raw hidden is kept, not migrated', async () => {
+    const saved = {
+      treeVisible: true,
+      detailVisible: true,
+      rawVisible: false,
+      treeWidth: 300,
+      rawHeight: 0.4
+    }
+    localStorage.setItem('klados.layout', JSON.stringify(saved))
+    const store = await freshStore()
+    expect(store.getLayoutState()).toEqual(saved)
+    expect(localStorage.getItem('klados.layout')).toBe(JSON.stringify(saved))
   })
 })

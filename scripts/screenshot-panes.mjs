@@ -87,16 +87,11 @@ async function captureThemes() {
   // Wait for the document to be *on screen* rather than for a duration — R159:
   // wait for the condition, never for a guess at how long it takes.
   await w.waitForSelector('text=31.655 children', { timeout: 120_000 })
-  await w.waitForTimeout(1500)
 
-  // The Raw pane via the command palette, not a button: invariant 10 makes the
-  // palette the one surface every command is reachable from, so this does not
-  // break when the title bar is rearranged.
-  await w.keyboard.press('Control+Shift+P')
-  await w.waitForTimeout(400)
-  await w.keyboard.type('Raw Pane')
-  await w.waitForTimeout(500)
-  await w.keyboard.press('Enter')
+  // R223: Raw is part of the default layout on a fresh profile, so it is no
+  // longer toggled on here — the palette's `Raw Pane` toggle this used would
+  // now hide it. Waited for rather than assumed.
+  await w.waitForSelector('.cm-content', { timeout: 30_000 })
   await w.waitForTimeout(1500)
 
   await w.screenshot({ path: `${tmpDir}/light.png` })
