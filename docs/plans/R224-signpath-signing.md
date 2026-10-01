@@ -1,9 +1,11 @@
 # R224 — Windows releases signed through SignPath Foundation
 
-<!-- status: open -->
+<!-- status: closed -->
 
-**Open, and blocked on SignPath** (§ 3). Chosen by the project lead for 1.2.2 over the Microsoft Store,
-after a comparison of the two routes.
+**Closed without being built** (§ 8). SignPath Foundation asked for the project lead's full name and
+for evidence of the project's standing, such as media coverage, which a new project does not have.
+Chosen at first for 1.2.2 over the Microsoft Store. What this plan measured and found remains the
+record for the routes that followed: R225 (a winget package) and R226 (GitHub attestations).
 
 ## 1. Why, and why SignPath
 
@@ -115,3 +117,29 @@ nothing is signed. With SignPath the order must become:
     publisher;
   - R221's baseline check of every extension's handler, before and after, is unchanged.
 - § 3.4's virtual-machine test, if it has not already settled the question.
+
+## 8. Closed — why, and what replaced it
+
+**SignPath was not viable.** Applying required the project lead's full legal name and a case for the
+project's notability, with links to media coverage. Klados has neither the coverage nor any wish to
+attach a legal name to it (R140, R172).
+
+**The routes looked at next, and what each would buy** (recorded in full in R225 § 1):
+- **A certificate bought once cannot cover future versions.** Since 1 March 2026, every publicly
+  trusted code-signing certificate expires after at most 460 days (CA/Browser Forum ballot CSC-31).
+  Signatures with a timestamp stay valid after that, but each new release needs a current
+  certificate. A certificate for an individual also names them.
+- **Sigstore (Fulcio) is not a Windows option.** Its root is not in Microsoft's Trusted Root Program;
+  checked against the CCADB report of 548 included CA certificates. Windows would treat a
+  Fulcio-signed `Klados.exe` like an unsigned one.
+- **Microsoft's Security Intelligence portal does not build reputation.** It reverses a wrong malware
+  verdict. Microsoft: *"There is no need (or mechanism) to manually submit a file for SmartScreen
+  reputation review for consumer endpoints."* Its 50 MB limit also excludes the installer (96 MB) and
+  `Klados.exe` (235 MB).
+- **The Microsoft Store** is free and covers every future version, but signs only what it delivers.
+  GitHub downloads would stay unsigned.
+- **SourceGit**, a comparable open-source desktop app, signs nothing on Windows. Its installed copy on
+  the development machine showed no SmartScreen prompt, because winget had installed it (R225 § 1).
+
+**Still true and still useful:** § 2's table of unsigned binaries, and § 3.4's question of whether Smart
+App Control accepts Electron's unsigned DLLs. Both matter again if signing is ever revisited.
