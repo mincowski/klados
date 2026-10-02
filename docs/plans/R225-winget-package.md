@@ -1,10 +1,12 @@
 # R225 — what this repository needs for winget
 
-<!-- status: open -->
+<!-- status: built-caveat -->
 
-**Open — scoped, not yet scheduled.** The project lead asked what *this repository* has to change
-for Klados to be in winget. If it was only the README, that would be R225, landing after the package is
-approved. It is not only the README (§ 3). When R225 lands is decided once this plan has been read.
+**Built in part, for 1.2.2: § 3, the installer.** § 6, the README line, is owed until the package is
+approved, and the submission itself (§ 5) happens outside this repository after 1.2.2 is published.
+The project lead asked what *this repository* has to change for Klados to be in winget; it was more
+than the README (§ 3). **Decided:** § 3 lands in 1.2.2, the first submission is 1.2.2, and interactive
+installs also stop killing Klados (§ 3's recommendation, not its alternative). Results: § 9.
 
 The package itself is not part of the repository. It is a set of manifest files in Microsoft's
 `microsoft/winget-pkgs`, submitted by pull request from the project lead's account (§ 5).
@@ -177,3 +179,76 @@ it is approved, with no release needed since the README is read on GitHub.
   1. `winget install klados.Klados` raises no SmartScreen prompt.
   2. `winget show klados.Klados` lists R174's values.
   3. `winget upgrade` with Klados open reports the application as running and changes nothing.
+
+## 9. Results
+
+### What landed
+
+- **`assets/build/installer.nsh` defines `customCheckAppRunning`**, which electron-builder inserts in
+  place of its own check, in the installer and the uninstaller alike.
+  - If Klados is running, a silent run exits with **3** (`KLADOS_RUNNING_EXIT_CODE`).
+  - An interactive run asks the user to close Klados and click Retry; Cancel exits with 3.
+  - It never ends a process. Finding one reuses the stock `FIND_PROCESS`: a process under
+    `$INSTDIR`, or, without PowerShell, a `Klados.exe` of the current user.
+- **The prompt is electron-builder's own translated `appCannotBeClosed`**, not a new sentence.
+  - The first build used an English sentence of our own. On the development machine's German Windows,
+    it appeared in a German dialog, with German title and buttons.
+  - `appCannotBeClosed` exists in 46 languages and ends with the instruction wanted: close it manually,
+    and click Retry. Its opening, "cannot be closed", is looser than the truth, since the installer
+    chooses not to close it. Accepted as the smaller cost.
+- **`test/installerRunningApp.test.ts`** reads electron-builder's template as well as Klados's file, because
+  the override works only while electron-builder still asks for it by name.
+  - It asserts that `CHECK_APP_RUNNING` still inserts `customCheckAppRunning` in place of the stock check.
+  - It asserts that the reused helpers exist, that the replacement never kills or stops a process,
+    and that it uses exit code 3 on both paths.
+  - **Mutation:** renaming the hook in the template turns the first assertion red.
+- **§ 3's open questions, settled:**
+  - The include order works: `installer.nsh` is included in the script's common header
+    (`NsisTarget.js`, `computeCommonInstallerScriptHeader`), ahead of the templates.
+  - Exit code 3 is unused: NSIS itself uses 1, and the templates use 0, 2 and `0x666666`.
+  - With warnings treated as errors, both installer and uninstaller compile.
+
+### Verified on the built installer, on the development machine
+
+With the project lead's go-ahead, against their per-user install of 1.2.1 (no Windows Sandbox is
+available there). Klados ran on temporary profiles, except where noted. Each step was read off the
+process's exit code, the dialogs' text and buttons (read from the windows themselves), the installed
+`Klados.exe`'s hash, and the Add/Remove Programs entry.
+
+| # | Run | Result |
+|---|---|---|
+| 1 | `/S` with Klados open | exit 3 in 5 s; Klados still running; nothing changed |
+| 2 | interactive with Klados open, Cancel | the prompt, in German; exit 3; Klados still running; nothing changed |
+| 3 | interactive with Klados open; Klados then closed normally; Retry | exit 0; installed, an upgrade from 1.2.1; one Add/Remove Programs entry |
+| — | `/S` with Klados open on the project lead's own profile | exit 3 (see below) |
+| 4 | `/S` with Klados closed | exit 0; installed; Klados not launched |
+| 5a | the new uninstaller, `/S`, Klados open | exit 3; Klados still running; still installed |
+| 5b | the new uninstaller, interactive, Klados open: OK, then Cancel | "Are you sure" first, then the prompt; exit 3; still installed |
+| 6 | `/S` uninstall with Klados closed, then a fresh `/S` install | removed: Klados's "Open with" entries gone, others untouched; reinstalled with every extension's associations **identical** to the baseline taken before step 1 |
+
+**A finding along the way, stock behaviour and unchanged:** an *interactive* one-click install starts
+Klados when it finishes (`installSection.nsh`, `RUN_AFTER_FINISH` unless silent). After step 3 that
+started Klados on the project lead's own profile. The first attempt at step 4 therefore ran with Klados
+open and was refused with 3, which is the row marked "—". That copy was closed normally, through its
+window, and step 4 repeated.
+
+**Not verified here:** a Klados with unsaved changes showing its own prompt when closed at step 3. That
+is R26's quit flow, unchanged and tested in its own round. What this round changes is that the
+installer no longer bypasses it.
+
+### Owed
+
+- **§ 6, the README line,** once `winget show klados.Klados` finds the package.
+- **§ 8's post-approval checks:**
+  - `winget install` without SmartScreen;
+  - `winget show` listing R174's values;
+  - `winget upgrade` with Klados open, reporting it as running.
+
+### Review
+
+Read from `git diff` after the work. One finding was fixed before committing: the English-only prompt,
+found by running it on this machine, not by reading. Nothing else:
+
+- No invariant is touched; the change is the Windows installer script.
+- The stock check is replaced only through electron-builder's documented hook, and a test fails if that
+  hook disappears.

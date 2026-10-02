@@ -16,6 +16,30 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R225 — the installer never kills a running Klados · built ⚠
+
+**Plan:** `docs/plans/R225-winget-package.md` · **Decision:** D-116
+
+**Asked: what does this repository need for winget?** More than the README. electron-builder's
+installer, before upgrading, asks "Klados is running. Click OK to close it" and then ends the process
+with `Stop-Process`. Under `/S`, which is how winget runs it, the question answers itself, so
+`winget upgrade` with an edited document open would have lost the edit without a word. Klados's own
+unsaved-changes prompt never got to run.
+
+**Now a running Klados is never killed.** A `customCheckAppRunning` in `installer.nsh` replaces the stock
+check. A silent run exits with 3, which the winget manifest will map to `packageInUse`; an interactive
+one asks the user to close Klados and retry. A test reads electron-builder's own template, so an
+update that dropped the hook would fail CI rather than quietly bring the kill back.
+
+**Running it found what reading had not:** an English prompt of our own sat in a German dialog with
+German buttons. It now uses electron-builder's translated `appCannotBeClosed`. Every path was run
+against the development machine's real install, with the project lead's go-ahead, ending with an
+uninstall and fresh install whose file associations matched the baseline exactly.
+
+Owed: the README line and the winget-side checks, once the 1.2.2 package is approved.
+
+---
+
 ## R223 — the Raw pane is shown by default · built
 
 **Plan:** `docs/plans/R223-raw-pane-default.md` · **Decision:** D-115

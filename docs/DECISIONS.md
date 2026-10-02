@@ -4180,3 +4180,27 @@ if it ever needs fixing: a smaller window for single-line documents.
 
 **Rejected: a hint when someone tries to type into the grid or Detail.** Telling an attempt to edit
 from keyboard browsing is unreliable, and with Raw visible by default the need mostly goes.
+
+### D-116 — The installer never kills a running Klados (R225) · `settled`
+
+Plan: `docs/plans/R225-winget-package.md`.
+
+**Chosen: replace electron-builder's running-app check** with Klados's own `customCheckAppRunning`
+(`assets/build/installer.nsh`), in the installer and the uninstaller. If Klados is running, a silent
+run exits with code 3 without installing, and an interactive run asks the user to close it and retry.
+The stock check ends the process with `Stop-Process` after an OK prompt that answers itself under `/S`,
+so a `winget upgrade` would discard unsaved edits without asking. Closing Klados normally lets its own
+quit flow (R26) ask about them.
+
+**Chosen: interactive installs change too**, not only silent ones. Their OK prompt also discarded edits
+without saying so; the project lead chose this over keeping the stock behaviour there.
+
+**Chosen: electron-builder's translated `appCannotBeClosed` as the prompt.** An English sentence of our
+own was more accurate but, on a German Windows, sat in a German dialog with German buttons. The
+translated string ends with the right instruction, in 46 languages.
+
+**Exit code 3 is part of the winget manifest** (`ExpectedReturnCodes` → `packageInUse`). Changing it means
+changing the manifest in the same release.
+
+**Rejected: automating winget submissions in `release.yml`.** It needs a standing token able to open
+pull requests against Microsoft's repository, for a step that takes minutes per rare release.
