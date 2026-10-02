@@ -38,6 +38,13 @@ uninstall and fresh install whose file associations matched the baseline exactly
 
 Owed: the README line and the winget-side checks, once the 1.2.2 package is approved.
 
+Version **1.2.2**, carrying R223 and R225: the Raw pane shown by default, and an installer that never
+kills a running Klados. Before tagging, the 1.2.2 installer was built from `main` and installed
+silently over the development machine's Klados, as winget will run it: exit 0, a single Add/Remove
+Programs entry at 1.2.2, the installed `Klados.exe` identical to the build, and every extension's
+associations identical to R225's baseline. Launched from the install on a fresh profile, it reports
+1.2.2 and opens a document with Raw at 30%.
+
 ---
 
 ## R223 — the Raw pane is shown by default · built
