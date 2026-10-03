@@ -16,6 +16,16 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R228 — R222's clipboard test raced the macOS pasteboard · built
+
+**Plan:** `docs/plans/R228-clipboard-test-race.md`
+
+A Dependabot pull request went red on macOS in R222's clipboard test, for no reason of its own: the
+page's write resolved, and a read from the main process straight afterwards still returned the old
+text. The read is polled now. Test-only; it passed on macOS in every run before.
+
+---
+
 ## R227 — every fixable development-dependency advisory · built
 
 **Plan:** `docs/plans/R227-dev-dependency-advisories.md`
