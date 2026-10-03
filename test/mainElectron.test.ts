@@ -330,7 +330,14 @@ describe.skipIf(!builtAppAvailable)('the built app via _electron (R51, R58)', ()
         )
       )
       expect(outcome).toBe('resolved')
-      expect(await app.evaluate(({ clipboard }) => clipboard.readText())).toBe('written by R222')
+      // R228 (`docs/plans/R228-clipboard-test-race.md`): polled, not read once.
+      // On macOS in CI the write resolved and an immediate read from the main
+      // process still returned 'before': the page's promise settles before the
+      // system pasteboard shows the new text to another reader. A write that
+      // never lands still fails, at the poll's timeout.
+      await expect
+        .poll(() => app.evaluate(({ clipboard }) => clipboard.readText()))
+        .toBe('written by R222')
     })
 
     it('reading the clipboard is still refused', async () => {

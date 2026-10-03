@@ -144,6 +144,7 @@ so a reader of an old commit message can still find out what `R41` was.
 | **R225** | built ⚠ | `docs/plans/R225-winget-package.md` |
 | **R226** | closed | `docs/plans/R226-build-attestations.md` |
 | **R227** | built | `docs/plans/R227-dev-dependency-advisories.md` |
+| **R228** | built | `docs/plans/R228-clipboard-test-race.md` |
 
 ### Pre-`R` milestones
 
@@ -410,7 +411,9 @@ disclosed in its own document too; this is the list that did not exist before.
 
 | **R227** | `docs/plans/R227-dev-dependency-advisories.md` | — | **Every fixable advisory in the development dependencies, for 1.2.2.** Dependabot's brace-expansion PR (#57) fixed one of three affected lines; `npm audit` reported 16 findings (14 high) where GitHub showed four alerts. All are development tooling (stylelint, eslint, electron-builder's download path, postcss); the production tree is **identical** before and after. Lockfile only: brace-expansion's nine copies onto 1.1.21, 2.1.7 and 5.0.12, then `npm audit fix` without `--force` (colord, fast-uri, nanoid, and stylelint 17.14.1 → 17.16.0 among the rest). **Left open, no fixed release exists**: `braces` ≤ 3.0.3 (npm's only offer is stylelint 7.7.0, a ten-major downgrade) and `http-cache-semantics` ≤ 4.2.0. |
 
-**Next free id: R228.**
+| **R228** | `docs/plans/R228-clipboard-test-race.md` | — | **R222's clipboard test raced the macOS pasteboard.** Red on macOS in Dependabot #57, unrelated to its change: the page's `writeText` resolved, but an immediate read from the main process still returned the previous text. The read is now polled. Test-only; Klados's copy buttons never read back. Mutation-checked: a string never written still fails. |
+
+**Next free id: R229.**
 
 **First entry with no milestone**, and the first under the per-topic document convention
 (`CLAUDE.md` § "Plan documents"). The "Milestone at allocation" column stays for the historical
