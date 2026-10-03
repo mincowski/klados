@@ -33,6 +33,7 @@ import { tmpdir } from 'os'
 import { fileURLToPath } from 'url'
 import path from 'path'
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright'
+import { TIMEOUT_MS } from './support/wait'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.join(__dirname, '..')
@@ -331,12 +332,14 @@ describe.skipIf(!builtAppAvailable)('the built app via _electron (R51, R58)', ()
       )
       expect(outcome).toBe('resolved')
       // R228 (`docs/plans/R228-clipboard-test-race.md`): polled, not read once.
-      // On macOS in CI the write resolved and an immediate read from the main
-      // process still returned 'before': the page's promise settles before the
-      // system pasteboard shows the new text to another reader. A write that
-      // never lands still fails, at the poll's timeout.
+      // The promise resolves before the browser process has written anything:
+      // Blink's `HandleWriteTextWithPermission` calls `CommitWrite()` and
+      // resolves at once, and `CommitWrite` is a one-way mojo message with no
+      // reply (`clipboard.mojom`). An immediate read raced it and lost on macOS
+      // and Linux in CI, once even past the 1 s default poll, so the project's
+      // standard timeout. A write that never lands still fails.
       await expect
-        .poll(() => app.evaluate(({ clipboard }) => clipboard.readText()))
+        .poll(() => app.evaluate(({ clipboard }) => clipboard.readText()), { timeout: TIMEOUT_MS })
         .toBe('written by R222')
     })
 
