@@ -69,6 +69,12 @@ Programs entry at 1.2.2, the installed `Klados.exe` identical to the build, and 
 associations identical to R225's baseline. Launched from the install on a fresh profile, it reports
 1.2.2 and opens a document with Raw at 30%.
 
+*Corrected before publication:* 1.2.2 also carries R227 (every fixable advisory in the development
+dependencies), R228 (the clipboard test race) and Dependabot's undici bump (#56). At the project
+lead's request, so the release leaves out nothing that was ready. The tag and its unpublished draft were
+moved to the commit that includes them. None of the three changes what is packaged: the production
+dependency tree is identical, and R228 is test-only.
+
 ---
 
 ## R223 — the Raw pane is shown by default · built
