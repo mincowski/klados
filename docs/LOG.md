@@ -16,6 +16,30 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R228 — R222's clipboard test raced the macOS pasteboard · built
+
+**Plan:** `docs/plans/R228-clipboard-test-race.md`
+
+A Dependabot pull request went red on macOS in R222's clipboard test, for no reason of its own: the
+page's write resolved, and a read from the main process straight afterwards still returned the old
+text. The read is polled now. Test-only; it passed on macOS in every run before.
+
+---
+
+## R227 — every fixable development-dependency advisory · built
+
+**Plan:** `docs/plans/R227-dev-dependency-advisories.md`
+
+**Asked: leave nothing out of 1.2.2 that could reasonably be in it.** Dependabot's brace-expansion
+bump fixed one of the three affected lines, and `npm audit` turned up five advisories behind 16
+findings, against GitHub's four alerts. Every one is in development tooling; the production
+dependency tree, which is what the app ships, is identical before and after. Lockfile only: every
+brace-expansion copy onto a fixed release, then `npm audit fix` without `--force`. Two advisories stay
+open because nobody has published a fix: `braces` (npm's only offer was a ten-major downgrade of
+stylelint) and `http-cache-semantics`.
+
+---
+
 ## R225 — the installer never kills a running Klados · built ⚠
 
 **Plan:** `docs/plans/R225-winget-package.md` · **Decision:** D-116
@@ -44,6 +68,12 @@ silently over the development machine's Klados, as winget will run it: exit 0, a
 Programs entry at 1.2.2, the installed `Klados.exe` identical to the build, and every extension's
 associations identical to R225's baseline. Launched from the install on a fresh profile, it reports
 1.2.2 and opens a document with Raw at 30%.
+
+*Corrected before publication:* 1.2.2 also carries R227 (every fixable advisory in the development
+dependencies), R228 (the clipboard test race) and Dependabot's undici bump (#56). At the project
+lead's request, so the release leaves out nothing that was ready. The tag and its unpublished draft were
+moved to the commit that includes them. None of the three changes what is packaged: the production
+dependency tree is identical, and R228 is test-only.
 
 ---
 
