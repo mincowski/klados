@@ -139,6 +139,7 @@ Search for the id to jump to one.
 | **D-116** | The installer never kills a running Klados |  |
 | **D-117** | Grid export copies a cell's text unaltered; no formula escaping for spreadsheets |  |
 | **D-118** | A reload commits only onto the buffer it started from, and past the open path's limits it refuses rather than asks |  |
+| **D-119** | Save writes the file in place, after a free-space check, and flushes it; never by rename, never with a backup copy |  |
 
 ---
 
@@ -4290,3 +4291,54 @@ reaches the gate. An in-place confirmation is owed (`docs/TASKS.md`).
   to cancel, which is how per-caller fixes miss the caller added later (R101).
 - **Showing the ordinary Reload / Keep Mine question for a file past the soft cap.** Reload would
   be refused again, and a button that does nothing is R169's dead button.
+
+### D-119 — Save writes the file in place, after a free-space check, and flushes it; never by rename, never with a backup copy (R237) · `settled`
+
+From the security review of 2026-10-16, finding 6, as rescoped by the project lead on 2026-10-17.
+Plan and results: `docs/plans/R236-save-and-watch.md`.
+
+`writeFile` opened the target with `O_TRUNC` (Windows: `CREATE_ALWAYS`), so the original was empty
+before the first byte was written. A full disk, a dropped share or a killed process left a
+truncated or empty file, and the `full` message described a file already destroyed. `CREATE_ALWAYS`
+also refuses an existing **hidden** file on Windows (`EPERM`), so such a file could not be saved at
+all, and it drops the file's **alternate data streams** (both seen red against `writeFile` in R237's
+tests).
+
+**Chosen: `statfs` on the folder, then `r+`, `ftruncate(0)`, write, `fsync`, close.**
+- The free-space check refuses with `ENOSPC`, the `full` kind, **before the file is opened**, when
+  the new bytes exceed the free space plus the file's current size. A failing `statfs` skips the
+  check and never blocks a save. Symlinks are resolved first, so the volume asked is the one the
+  bytes land on.
+- `r+` keeps the file object: owner, ACL, streams, hidden and system attributes, file ID, hard links
+  and symlinks, with nothing restored afterwards. Only `ENOENT` falls back to `w`; any other open
+  failure is reported having touched nothing.
+- Truncate first, then write: a write that stops part-way leaves a file that is visibly short, never
+  the new head on the old tail, which may still parse.
+- `fsync`: success means the bytes reached the disk. A failed flush is a failed save. It costs
+  ~470 ms on a 200 MB file on the development machine's SSD (R237 results), under the 1 s the
+  project lead set as the threshold for review.
+- Writes go in 4 MiB pieces. One `write` call for a whole 200 MB buffer measured 560 ms against
+  106 ms in pieces.
+
+**The editors closest to Klados's users do the same.** VS Code writes documents in place (`r+` then
+`ftruncate` on Windows, for exactly the hidden-file case) and keeps atomic rename for its own state
+files; Notepad++ writes in place and flushes. The survey is in the plan, §1.
+
+**Accepted residual:** a crash, power cut or dropped share *during* the write still leaves a
+truncated file, and the free-space check cannot see quotas, copy-on-write filesystems or a
+concurrent writer. The check removes the common case, a disk that was already full.
+
+**Rejected:**
+- **A temp file renamed over the original.** It replaces the file: the owner becomes whoever saved,
+  an explicit ACL, alternate streams and the file ID are lost, hard links break, a symlink is
+  replaced unless resolved first, and sync clients (OneDrive, Dropbox, Synology Drive) upload the
+  temp file and read the rename as delete-and-create. Windows' `ReplaceFile` keeps the DACL but not
+  the owner and has no Node binding.
+- **A backup copy before writing** (Vim's `backupcopy=yes`). It closes the crash window, but needs a
+  recovery flow and a second full write on every save, for the residual case above.
+- **Write retries** (VS Code retries three times). A retry after a partial write rewrites a file
+  already truncated, which changes nothing about the risk.
+- **`fsync` only for small files.** The flush cost was measured and is under the threshold.
+
+Invariant 6 ("Save writes the byte buffer") says what is written, not how; checked, and its wording
+in `CLAUDE.md` needs no change.
