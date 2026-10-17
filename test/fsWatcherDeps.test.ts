@@ -42,7 +42,12 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { createFsWatcherDeps } from '../src/main/fsWatcherDeps'
+import {
+  createFsWatcherDeps,
+  WATCHES_THROUGH_DIRECTORY,
+  watchDirectoryWithFs,
+  type WatchDirectory
+} from '../src/main/fsWatcherDeps'
 import { createDocumentWatcherRegistry, type WatchHandle } from '../src/core/documentWatchers'
 
 /** How long a test waits for a watcher error before calling it a failure.
@@ -226,4 +231,200 @@ describe('R171 — a real watcher error is reported, not thrown', () => {
       expect(watchCalls).toBe(2) // 'tab-3' joined the live entry, so no new watcher
     }
   )
+})
+
+/**
+ * R236 (`docs/plans/R236-save-and-watch.md` §2, criterion 16) — one directory
+ * watch per directory, shared by every open file in it.
+ *
+ * Against an injected directory watcher, because what is asserted is how many
+ * OS watches exist, which the real one cannot be asked. The real one is
+ * driven end to end by `mainElectron.test.ts`'s R236 tests on all three runners.
+ */
+describe('R236 — files are watched through one shared directory watch', () => {
+  function fakeDirectories(): {
+    watchDirectory: WatchDirectory
+    opened: {
+      dir: string
+      emit: (name: string | null) => void
+      fail: (e: Error) => void
+      closed: boolean
+    }[]
+  } {
+    const opened: {
+      dir: string
+      emit: (name: string | null) => void
+      fail: (e: Error) => void
+      closed: boolean
+    }[] = []
+    return {
+      opened,
+      watchDirectory: (dir, onEvent, onError) => {
+        const record = { dir, emit: onEvent, fail: onError, closed: false }
+        opened.push(record)
+        return {
+          close: () => {
+            record.closed = true
+          }
+        }
+      }
+    }
+  }
+
+  const dir = path.join(tmpdir(), 'r236-dir')
+  const a = path.join(dir, 'a.json')
+  const b = path.join(dir, 'b.json')
+
+  it('two files in one directory share one watch, closed with the last of them', () => {
+    const fake = fakeDirectories()
+    const deps = createFsWatcherDeps(undefined, fake.watchDirectory)
+
+    const first = deps.watch(
+      a,
+      () => {},
+      () => {}
+    )
+    const second = deps.watch(
+      b,
+      () => {},
+      () => {}
+    )
+    expect(fake.opened.map((o) => o.dir)).toEqual([dir])
+
+    first.close()
+    expect(fake.opened[0]!.closed).toBe(false)
+    second.close()
+    expect(fake.opened[0]!.closed).toBe(true)
+  })
+
+  it('files in two directories get two watches', () => {
+    const fake = fakeDirectories()
+    const deps = createFsWatcherDeps(undefined, fake.watchDirectory)
+    deps.watch(
+      a,
+      () => {},
+      () => {}
+    )
+    deps.watch(
+      path.join(tmpdir(), 'r236-other', 'c.json'),
+      () => {},
+      () => {}
+    )
+    expect(fake.opened).toHaveLength(2)
+  })
+
+  it('an event reaches the file it names, ignoring case, or every file when it names none', () => {
+    const fake = fakeDirectories()
+    const deps = createFsWatcherDeps(undefined, fake.watchDirectory)
+    const seen: string[] = []
+    deps.watch(
+      a,
+      () => seen.push('a'),
+      () => {}
+    )
+    deps.watch(
+      b,
+      () => seen.push('b'),
+      () => {}
+    )
+
+    fake.opened[0]!.emit('a.json')
+    fake.opened[0]!.emit('A.JSON')
+    fake.opened[0]!.emit('a.json.tmp') // a sibling's temp file
+    fake.opened[0]!.emit(null)
+
+    expect(seen).toEqual(['a', 'a', 'a', 'b'])
+  })
+
+  it('a failed directory watch is reported to every file in it, and the next watch opens a new one', () => {
+    const fake = fakeDirectories()
+    const reported: string[] = []
+    const deps = createFsWatcherDeps((p) => reported.push(p), fake.watchDirectory)
+    const errors: string[] = []
+    deps.watch(
+      a,
+      () => {},
+      () => errors.push('a')
+    )
+    deps.watch(
+      b,
+      () => {},
+      () => errors.push('b')
+    )
+
+    fake.opened[0]!.fail(new Error('EPERM: operation not permitted, watch'))
+
+    expect(errors).toEqual(['a', 'b'])
+    expect(reported).toEqual([a, b])
+    expect(fake.opened[0]!.closed).toBe(true)
+    deps.watch(
+      a,
+      () => {},
+      () => {}
+    )
+    expect(fake.opened).toHaveLength(2)
+  })
+
+  it.runIf(WATCHES_THROUGH_DIRECTORY)(
+    'a real directory watch whose directory is deleted does not keep firing',
+    async () => {
+      // The reason Windows is excluded: there, this measured an unbroken
+      // stream of events (`WATCHES_THROUGH_DIRECTORY`). Here it must stay a
+      // handful, or the directory watch is a busy loop in the main process.
+      const { dir } = tempFile()
+      let events = 0
+      const handle = watchDirectoryWithFs(
+        dir,
+        () => {
+          events++
+        },
+        () => {}
+      )
+      rmSync(dir, { recursive: true, force: true })
+      await new Promise((resolve) => setTimeout(resolve, NO_ERROR_SETTLE_MS))
+      handle.close()
+      expect(events).toBeLessThan(20)
+    }
+  )
+
+  it('a directory watch that fails during its own construction is still reported', () => {
+    const reported: string[] = []
+    const errors: string[] = []
+    const deps = createFsWatcherDeps(
+      (p) => reported.push(p),
+      (_dir, _onEvent, onError) => {
+        onError(new Error('EPERM'))
+        return { close: () => {} }
+      }
+    )
+
+    deps.watch(
+      a,
+      () => {},
+      () => errors.push('a')
+    )
+
+    expect(errors).toEqual(['a'])
+    expect(reported).toEqual([a])
+  })
+
+  it('a watch closed after its directory failed does not close the replacement', () => {
+    const fake = fakeDirectories()
+    const deps = createFsWatcherDeps(undefined, fake.watchDirectory)
+    const old = deps.watch(
+      a,
+      () => {},
+      () => {}
+    )
+    fake.opened[0]!.fail(new Error('EPERM'))
+    deps.watch(
+      b,
+      () => {},
+      () => {}
+    )
+
+    old.close()
+
+    expect(fake.opened[1]!.closed).toBe(false)
+  })
 })
