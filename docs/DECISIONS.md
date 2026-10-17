@@ -71,6 +71,7 @@ Search for the id to jump to one.
 | **D-050** | Wrapper descent stays; the breadcrumb marks it and the Tree unfolds to it |  |
 | **D-051** | One overlay scrollbar look across every pane (Tree, Detail, Grid, Raw) |  |
 | **D-052** | Expand All / Collapse All act on the selected node's subtree |  |
+| **D-053** | The Tree keeps its `Document` root row |  |
 | **D-054** | The title bar icon comes from the `.ico`, redrawn below 48px from `mark-16.svg` |  |
 | **D-054a** | regeneration done; the rasterizer, the mark colour, and two title bars |  |
 | **D-054b** | Every OS-facing raster is the tile again; the bare mark is renderer-only |  |
@@ -131,6 +132,12 @@ Search for the id to jump to one.
 | **D-109** | Raw's text selection has its own blue, stronger than a row band's |  |
 | **D-110** | A Raw range selection resolves to the smallest node containing it, once the mouse is released |  |
 | **D-111** | Klados registers for "Open with" by platform, never writing a default; on Windows through its own installer script |  |
+| **D-112** | A file error's kind crosses IPC inside its message, tagged where the code still exists |  |
+| **D-113** | Electron 44, and Klados remembers the Open dialog's folder itself |  |
+| **D-114** | One exception to R165's permission deny: writing to the clipboard, from the app's own page |  |
+| **D-115** | Raw is shown by default, and a command that needs Raw shows it |  |
+| **D-116** | The installer never kills a running Klados |  |
+| **D-117** | Grid export copies a cell's text unaltered; no formula escaping for spreadsheets |  |
 
 ---
 
@@ -1450,6 +1457,19 @@ something's selected) were considered and dropped: the command registry has no m
 a title that depends on live app state, and adding one for a label wasn't judged worth it —
 the static titles stay.
 
+### D-053 — The Tree keeps its `Document` root row · `settled`
+
+Decided in `docs/plans/M5c-PLAN.md` (M5c), and cited by D-052 above and by `Tree.tsx` and
+`treeController.ts`, but never written into this log until R232's review found the gap
+(2026-10-17). Transcribed from the plan, with nothing added.
+
+Considered and deliberately kept, so it isn't re-proposed cold: the row costs one row and one
+click, and it earns them as the single collapse-everything handle and as the place
+document-level facts hang. Selecting it and expanding is exactly the old document-wide
+behaviour, which is D-052's argument for keeping it.
+
+**Rejected:** rendering the Tree's top level as a forest. No task came of it; it was recorded only.
+
 ### D-054 — The title bar icon comes from the `.ico`, redrawn below 48px from `mark-16.svg` · `settled`
 
 M5c-PLAN.md J7, from `docs/plans/M5c-PLAN.md`'s appendix, "title bar icon renders poorly." `src/main/index.ts`
@@ -2252,6 +2272,42 @@ not once it empties an entire column. **Not changed:** export stays scoped to vi
 (`docs/plans/R34-wide-grids.md` §5 — that is about which columns, this is about what a cell contains), and
 the literal/derived distinction stays unexported, being the same comment's other imperfection and
 one that empties nothing.
+
+### D-117 — Grid export copies a cell's text unaltered; no formula escaping for spreadsheets (R232) · `settled`
+
+From the security review of 2026-10-16, finding 4. Plan and measurements:
+`docs/plans/R232-grid-export-escaping.md`.
+
+**The mechanism is real, measured on 2026-10-17** in Excel for Windows (Microsoft 365, German
+locale) by pasting a TSV export with Ctrl+V. A cell starting with `=`, `+`, `-` or `@` becomes a
+formula, and with `=`, `+` or `@` a document can plant a working `HYPERLINK` whose address is
+built from another cell. Quoting the field does not stop it, and a leading `'`, the usual defence,
+stays **visible** after a paste: Excel stored `'=1+1` with the apostrophe.
+
+**Decided: the export is not changed.** Copy as CSV, TSV and Markdown keep copying exactly the text
+the grid displays (D-068's rule, and `gridExport.ts`'s own "copy the cell text as displayed").
+- **Quoting changes the format, a prefix changes the content.** A CSV field's quotes are reversible
+  by any reader. A `'` is not removed by any reader, not even by Excel on paste, so a script, a
+  database import or an email would receive a value the document does not hold. A source-level tool
+  does not do that silently.
+- **Klados does not hide the payload.** The grid shows `=HYPERLINK(…)` as text before it is copied,
+  and the same payload in a `.csv` opened in a spreadsheet does the same thing without Klados.
+  Evaluating untrusted pasted text is the spreadsheet's decision.
+- **The cost was higher than the plan assumed.** It expected Excel to hide the `'`. It also needed
+  a locale-guessing number test so that `-5` and `-1,5` stayed numbers, in a tool that otherwise
+  makes no locale assumptions. That is a poor trade for a low-severity defect needing a hostile
+  document, an export, a paste and a click.
+
+**Rejected:**
+- **A `'` prefix in CSV and TSV** for cells starting with `=`, `+`, `@`, and `-` unless a number
+  or a lone dash. Designed in full in the plan, and chosen before the cost above was weighed.
+- **Quoting such cells instead**, which would have been invisible: measured not to work.
+- **Prefixing `=` and `@` only**: `+` produces a working link.
+
+**If it is ever wanted, the route is an explicit command**, not a change to the existing ones: a
+separate, clearly named "Copy for spreadsheet" that applies the plan's prefix rule. That follows
+D-008's split between the faithful path and an explicit, visible transformation. Reopen only on a
+user asking for it.
 
 ### D-069 — The Raw view gets no "edit mode"; the `EditorView` stops being rebuilt instead · `settled`
 
