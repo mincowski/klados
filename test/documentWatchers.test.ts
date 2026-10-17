@@ -497,6 +497,100 @@ describe('selfWrite (R175)', () => {
 })
 
 /**
+ * R238 (`docs/plans/R236-save-and-watch.md` §3) — `watch` awaits a `stat`
+ * before it registers, and an `unwatch` (or a newer `watch`) for the same key
+ * can arrive during that await. It found nothing to release, and the older
+ * `watch` then registered anyway: a file watched for a tab nobody had open any
+ * more, until the window closed.
+ */
+describe('a watch superseded while its stat is in flight is not registered (R238)', () => {
+  /** The fake with every `stat` held until the test releases it. */
+  function withHeldStats(): ReturnType<typeof createFakeFs> & {
+    held: { path: string; release: () => void }[]
+  } {
+    const fake = createFakeFs()
+    const held: { path: string; release: () => void }[] = []
+    const realStat = fake.deps.stat
+    fake.deps.stat = (path) =>
+      new Promise((resolve) => {
+        held.push({ path, release: () => resolve(realStat(path)) })
+      })
+    return Object.assign(fake, { held })
+  }
+
+  it('an unwatch during the stat leaves no OS watch, and nothing is delivered', async () => {
+    const fake = withHeldStats()
+    fake.mtimes.set('/a.json', 1)
+    const registry = createDocumentWatcherRegistry(fake.deps)
+    const onChange = vi.fn()
+
+    const watching = registry.watch('k', '/a.json', onChange)
+    registry.unwatch('k')
+    fake.held[0]!.release()
+    await watching
+
+    expect(fake.watchersFor.get('/a.json') ?? []).toHaveLength(0)
+    // Had it registered, a change would now be delivered to `k`.
+    fake.mtimes.set('/a.json', 2)
+    for (const w of fake.watchersFor.get('/a.json') ?? []) w.fire()
+    await drainTaskQueue()
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('of two watches for one key, released in reverse order, only the newer path is watched', async () => {
+    const fake = withHeldStats()
+    fake.mtimes.set('/p1.json', 1)
+    fake.mtimes.set('/p2.json', 1)
+    const registry = createDocumentWatcherRegistry(fake.deps)
+    const onChange = vi.fn()
+
+    const first = registry.watch('k', '/p1.json', onChange)
+    const second = registry.watch('k', '/p2.json', onChange)
+    fake.held[1]!.release()
+    await second
+    fake.held[0]!.release()
+    await first
+
+    expect(fake.watchersFor.get('/p1.json') ?? []).toHaveLength(0)
+    expect(fake.watchersFor.get('/p2.json')).toHaveLength(1)
+    expect(fake.watchersFor.get('/p2.json')![0]!.closed).toBe(false)
+
+    // And `k` still releases cleanly: one unwatch closes the one watch.
+    registry.unwatch('k')
+    expect(fake.watchersFor.get('/p2.json')![0]!.closed).toBe(true)
+  })
+
+  it('unwatchMatching supersedes a watch still awaiting its stat', async () => {
+    // A window closing while one of its tabs is still opening.
+    const fake = withHeldStats()
+    fake.mtimes.set('/a.json', 1)
+    const registry = createDocumentWatcherRegistry(fake.deps)
+
+    const watching = registry.watch('win1:tab', '/a.json', vi.fn())
+    registry.unwatchMatching((key) => key.startsWith('win1:'))
+    fake.held[0]!.release()
+    await watching
+
+    expect(fake.watchersFor.get('/a.json') ?? []).toHaveLength(0)
+  })
+
+  it('a later watch for the same key, after an unwatch, still registers', async () => {
+    const fake = withHeldStats()
+    fake.mtimes.set('/a.json', 1)
+    const registry = createDocumentWatcherRegistry(fake.deps)
+
+    const stale = registry.watch('k', '/a.json', vi.fn())
+    registry.unwatch('k')
+    const fresh = registry.watch('k', '/a.json', vi.fn())
+    fake.held[0]!.release()
+    fake.held[1]!.release()
+    await Promise.all([stale, fresh])
+
+    expect(fake.watchersFor.get('/a.json')).toHaveLength(1)
+  })
+})
+
+/**
  * R160 (`docs/plans/R159-fixed-duration-waits.md` §5): renamed from
  * `flushMicrotasks`, which is what it was called and not what it did — the body
  * is two *macrotask* hops. The behaviour was right and the name was wrong,

@@ -113,7 +113,8 @@ export function describeFileError(error: FileError, action: FileAction, path: st
   const cannot = `${name} can't be ${PARTICIPLE[action]}`
   switch (error.kind) {
     case 'missing':
-      // `writeFile` creates a missing file; what is missing on save is the folder.
+      // Save creates a missing file (R237's `w` fallback); what is missing on
+      // save is the folder.
       return action === 'save'
         ? `${cannot}: its folder no longer exists.`
         : `${cannot}: it no longer exists.`

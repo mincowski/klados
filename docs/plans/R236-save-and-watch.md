@@ -1,8 +1,11 @@
 # R236–R238 — Save stops failing blind, the watcher follows the path, and a watch race
 
-<!-- status: open -->
+<!-- status: built -->
 
-**Open.** Planned from the review of 2026-10-16, and rescoped by the project lead on 2026-10-17:
+**Built** (§6), with two departures from the plan, both recorded there. Windows keeps its file watch,
+because a directory watch there turns a deleted folder into a busy loop (D-120). Writes go in 4 MiB
+pieces, because one 200 MB `write` call was 4× slower than `writeFile`. Planned from the review of
+2026-10-16, and rescoped by the project lead on 2026-10-17:
 - **R237** (finding 6, high: data loss) is the reason for the round, and is built first. It stays an
   **in-place write**, made more robust: a free-space check before the file is touched, and an `r+`
   open, truncate, write and flush in place of `writeFile`. That also fixes a bug found while
@@ -232,3 +235,159 @@ only if that number is still the key's current one. `unwatch` and a newer `watch
   is ever observed.
 - Watching for *renames of the open file* to follow it to its new name. A file moved away is
   reported as gone, as today.
+
+## 6. Results
+
+Landed on branch `r236-save-and-watch` in this order: R237, R236's measurement, R238, then R236's fix.
+
+### 6.1 R237 — in place, with a free-space check and a flush
+
+Built as §1 describes:
+- `statfs` on the folder;
+- `r+`, falling back to `w` only on `ENOENT`;
+- `ftruncate(0)`, the write and `fsync`;
+- a close on every path.
+
+Two details the plan left open:
+- **Symlinks are resolved before the `statfs`**, so the volume asked is the one the bytes land on.
+- **A file whose size cannot be read counts as empty.** That only makes the check stricter.
+
+The file system calls are injected (`WriteDocumentFs`). The fakes wrap the real file system, so
+every test still writes a real file and reads it back.
+
+**Red first, against `writeFile`** (Windows 11, Node 24.15.0). Ten of the sixteen new tests failed,
+among them:
+```
+× refuses a save the disk has no room for, with the full kind, before opening the file
+  Error: expected a rejection
+× saves a hidden file on Windows, and it stays hidden
+  Error: [klados-file-error:denied] EPERM: operation not permitted, open '…\doc.json'
+× keeps an alternate data stream on Windows
+  Error: ENOENT: no such file or directory, open '…\doc.json:klados-test'
+```
+The plan did not predict the third failure. `CREATE_ALWAYS` **deletes a file's alternate data
+streams**, so every save before R237 stripped them silently.
+
+| # | Criterion | Result |
+|---|---|---|
+| 1 | Full disk refuses with `full`, bytes unchanged, no `open` | Pass. Red first (above) |
+| 2 | Failing `statfs` does not block | Pass |
+| 3 | Boundary exact; a new file needs the whole size | Pass. Mutations each red: `>=` for `>`, and ignoring the current size |
+| 4 | Hidden file saves on Windows and stays hidden | Pass. Red first (`EPERM`) |
+| 5 | Mode bits, file ID, hard link, symlink, ADS kept | Pass. Mode bits and symlink run on Linux and macOS CI. The symlink test skips, with the reason, on Windows without developer mode |
+| 6 | Existing `writeDocument` tests unmodified | Pass, including the held-file test: tagged `locked`, file left untouched |
+| 7 | Shorter save leaves no tail | Pass. Mutation red: dropping `truncate` |
+| 8 | Flush before close; failing flush rejects | Pass. Mutation red: dropping `sync` |
+| 9 | Handle closed on every failure path | Pass. Mutation red: rethrowing before the close |
+| 10 | R175 self-write test unmodified on three runners | Pass |
+| 11 | Flush cost on the 200 MB fixture | See the cost table below |
+| 12 | `DECISIONS.md`; invariant 6 checked | D-119. Invariant 6 says what is written, not how, so its wording needs no change |
+
+**A test the plan did not list.** It was added because a mutation survived without it. Falling back
+to `w` on **any** open error, not only `ENOENT`, passed every other test, because a held file refuses
+`w` too. A new test fakes an open where only `r+` fails (`EACCES`). It shows that this fallback would
+truncate the very file `r+` was refused.
+
+**Cost (criterion 11).** Measured on `spike/fixtures/cars-200mb.xml` (209,715,235 bytes) on the
+development machine's SSD. Medians of five runs:
+
+| | ms |
+|---|---|
+| `writeFile` (before) | 140 |
+| in place, one `write` call, no flush | 566 |
+| in place, 4 MiB pieces, no flush | 108 |
+| in place, 4 MiB pieces, flush (**shipped**) | 580 |
+
+- **The flush adds ~470 ms.** That is under the 1 s threshold, so it was not referred back.
+- **Unplanned finding (second row):** a single `write` call for a whole 200 MB buffer is 4× slower
+  than `writeFile`, which writes in pieces itself.
+- **Piece size**, same file:
+
+  | Piece | ms |
+  |---|---|
+  | 1 MiB | 120 |
+  | 2 MiB | 110 |
+  | 4 MiB | 106 |
+  | 8 MiB | 106 |
+  | 16 MiB | 104 |
+  | 32 MiB | **338** |
+
+  4 MiB sits on the flat part, well clear of the cliff. It is `WRITE_CHUNK_BYTES`. A test checks that
+  no call exceeds it, and goes red when the cap is removed.
+
+### 6.2 R236 — measured red on Linux and macOS, then fixed there
+
+**Before any change.** These are the three new built-app tests, on PR #62's first CI run (commit
+"R236: … (measurement)"):
+
+| Runner | after a rename-over, an in-place write | two rename-overs | delete, then recreate |
+|---|---|---|---|
+| `ubuntu-latest` | **× 15521 ms** | **× 15536 ms** | **× 15010 ms** |
+| `macos-latest` | **× 15529 ms** | **× 15571 ms** | **× 15049 ms** |
+| `windows-latest` | ✓ | ✓ | ✓ |
+
+Every other test passed on all three runners, the existing one-rename atomic-save test included. That
+is the gap: one replacement is noticed, and nothing after it. Locally, a watch made to close on its
+first `rename` event turned the three tests red, while the atomic-save test stayed green.
+
+**Departure: Windows keeps the file watch.** §2 asked for the directory watch "on every platform".
+It was probed on Windows before shipping:
+- **A directory watch whose directory is deleted never stops firing there.** It sends an unbroken
+  stream of `rename` events naming the directory itself, and no error. With the directory watch
+  forced on, the guard test below counted 539 events in 300 ms. That is a busy loop in the main
+  process, which R171 §6 forbids.
+- **A file watch on Windows reports the same deletion once**, as `EPERM`. Under the directory watch,
+  R171's three Windows-only tests went red for exactly this reason.
+- **Windows does not need the change.** libuv's file watch there already watches the parent and
+  filters by name, which is why it was green above.
+
+Recorded as D-120.
+
+**Where it lives: `fsWatcherDeps.ts`, not the registry.** The registry keeps its per-file
+`DocumentWatcherDeps` contract, so its R52, R171 and R175 unit tests are unmodified. Sharing a
+directory watch is the platform layer's job. Criterion 16's test is therefore in
+`test/fsWatcherDeps.test.ts`, against an injected directory watcher.
+
+| # | Criterion | Result |
+|---|---|---|
+| 13 | Rename-over, then in-place write, noticed; run before the fix | Red on Linux and macOS before the fix (above) |
+| 14 | Two rename-overs; delete and recreate | As 13 |
+| 15 | 13 and 14 pass with the fix on all three; atomic-save, R171, R175 unmodified | Pass on CI. Also run locally with the directory watch forced on Windows: all 14 built-app tests pass, so the directory code runs end to end on this machine as well |
+| 16 | Two files in one directory share one watch, closed with the last | Pass. Mutation red: one directory watch per file |
+
+**Also tested:**
+- An event reaches only the file it names, compared without case, or every file when it names none.
+  Mutations each red: no filter, a case-sensitive compare.
+- A failed directory watch is reported to every file in it, and the next watch opens a new one.
+- A failure during construction is still reported.
+- A stale handle cannot close its replacement.
+- **A real-filesystem guard** on Linux and macOS: deleting a watched directory produces fewer than
+  20 events in 300 ms. With the directory watch forced on, it is red on Windows (539).
+
+### 6.3 R238 — a per-key generation
+
+Built as §3 describes. Both criterion 17 tests were red before the fix ("expected [ … ] to have a
+length of +0 but got 1").
+
+**Extended to `unwatchMatching`**, which a closing window calls. It had the same hole for a tab still
+opening, because that tab's key is not registered yet. It now bumps every matching key ever watched.
+
+**Generations are never deleted.** A deleted one would restart at 1 and match a stale `watch` still
+holding 1.
+
+Mutations, each red:
+- no generation check: three tests;
+- `unwatch` not bumping the generation: one test;
+- `unwatchMatching` over registered keys only: one test.
+
+### 6.4 Review
+
+Each R id's `git diff` was read before its commit:
+- **R237:**
+  - Two stale comments still described `writeFile`; one was `fileErrors.ts`'s `missing` case. Fixed.
+  - The `stat` fallback's strictness was not written down. Fixed.
+  - The surviving `w`-fallback mutation (above) came from the mutation pass, not the review.
+- **R236:** the comment on `handle: null` claimed the error callback can fire during construction.
+  Had it done so, the code would have attached the listener to a dead entry. The case is now handled
+  and tested.
+- **R238:** nothing found.

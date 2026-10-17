@@ -720,3 +720,15 @@ union in `src/preload/api.ts` (R193) keeps the renderer's declared environment h
   facility**, so a trigger found on one platform is a finding about that platform until a second one
   agrees. Gate the reproduction, never the guard — the listener R171 adds is attached on every
   platform, and only the induced failure is Windows-only.
+- **On Windows, `fs.watch` of a directory that is then deleted never stops firing.** It sends an
+  unbroken stream of `rename` events naming the directory itself, and never an `'error'`: 539 events
+  in 300 ms, measured (R236). A watch on a *file* in it reports the same deletion once, as `EPERM`
+  (R171). Anything that watches a folder on Windows has to treat its own folder's name as "gone" or
+  it is a busy loop. Klados avoids it by watching folders only on Linux and macOS (D-120).
+- **`writeFile` over an existing file on Windows fails on a hidden file (`EPERM`) and deletes its
+  alternate data streams.** Both come from `CREATE_ALWAYS`. Write in place with `r+` and `ftruncate`
+  instead (R237, D-119).
+- **One `FileHandle.write` call for a whole 200 MB buffer is ~5× slower than the same bytes in
+  pieces** (566 ms against 106 ms in 4 MiB pieces; 338 ms again at 32 MiB), measured on Windows 11 /
+  Node 24 (R237). `writeFile` writes in pieces itself, which is why replacing it with a plain
+  `write` quietly costs 400 ms.
