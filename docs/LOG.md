@@ -16,6 +16,26 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R234–R235 — a reload never discards edits made during it, and checks the file first · built ⚠
+
+**Plan:** `docs/plans/R234-reload-safety.md` · **Decision:** D-118
+
+From the security review of 2026-10-16. **R234 was silent data loss**: a clean document reloads on
+its own when the file changes, the reload takes seconds on a large file, and nothing stopped typing
+meanwhile. The reload then replaced the buffer, cleared the dirty flag and emptied undo, so what was
+typed was gone with nothing to undo back to. It now keeps the buffer it started from and, if that
+is no longer the document's, does not commit and raises the external-change banner instead. One
+identity check covers typing, Replace All, Format and Undo; none of them changed. A built-app test
+types into Raw from inside the change notification, so the race is hit without a sleep, and a
+mutation run confirmed it fails without the check.
+
+**R235**: a reload now makes the open path's checks. A growing file was re-read in full on every
+change with no ceiling, past the 32-bit offset limit. Past 2 GB, 500 MB or the memory budget it reads
+nothing, and the banner says why. Above 500 MB it refuses where opening would ask, because the
+open path's confirmation replaces the document; that is owed. `readOnly` now follows the file.
+
+---
+
 ## R228 — R222's clipboard test raced the macOS pasteboard · built
 
 **Plan:** `docs/plans/R228-clipboard-test-race.md`

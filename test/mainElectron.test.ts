@@ -542,4 +542,87 @@ describe.skipIf(!builtAppAvailable)('the built app via _electron (R51, R58)', ()
       rmSync(dir, { recursive: true, force: true })
     }
   })
+
+  /**
+   * R234 (`docs/plans/R234-reload-safety.md` §3, criterion 7) — text typed
+   * into Raw while an automatic reload is in flight survives it.
+   *
+   * **How the typing is put inside the reload without a sleep.** The page
+   * subscribes its own `onExternalChange` listener *after* the document's
+   * session subscribed, and `ipcRenderer` calls listeners in registration
+   * order, synchronously, from one IPC message. So for the first notification
+   * the session's handler runs first: the document is clean, so it starts the
+   * reload, which runs synchronously up to its first IPC await. The page's
+   * listener then types — in the same task, before the reload can have read a
+   * single byte of a 10 MB file. That ordering is the evidence the test
+   * exercises the race rather than the dirty-document path; it is checked by
+   * mutation in this round's Results, not assumed.
+   *
+   * The file lives in this run's profile directory, which `afterAll` removes
+   * once the app has exited, so no watched path is deleted under a live watcher.
+   */
+  it('R234: text typed into Raw while a reload is in flight survives it', async () => {
+    const dir = mkdtempSync(path.join(userDataDir, 'r234-'))
+    const target = path.join(dir, 'reload-race.json')
+    // ~10 MB, one record per line, CRLF — not minified, so Raw is not one line.
+    const records: string[] = []
+    for (let i = 0; i < 120_000; i++) {
+      records.push(`{"id":${i},"name":"record ${i}","value":${i * 7},"note":"r234 fixture"}`)
+    }
+    const contents = (marker: number): string =>
+      `[\r\n${records.join(',\r\n')},\r\n{"marker":${marker}}\r\n]\r\n`
+    writeFileSync(target, contents(0))
+
+    await app.evaluate(({ BrowserWindow }, p) => {
+      BrowserWindow.getAllWindows()[0]!.webContents.send('app:openPaths', [p])
+    }, target)
+    await page.locator('.title-bar-title', { hasText: 'reload-race.json' }).waitFor()
+    const editor = page.locator('.cm-content')
+    await editor.waitFor()
+    // `execCommand` acts on the focused element of a focused document.
+    await app.evaluate(({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows()[0]!
+      window.show()
+      window.focus()
+    })
+    await page.bringToFront()
+    await editor.click()
+    await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true)
+    await expect.poll(() => page.locator('.title-bar-dirty-dot').count()).toBe(0)
+
+    await page.evaluate(() => {
+      const api = (
+        window as unknown as {
+          api: { document: { onExternalChange: (cb: (key: string) => void) => () => void } }
+        }
+      ).api
+      const seen: string[] = []
+      ;(window as unknown as { __r234Seen: string[] }).__r234Seen = seen
+      api.document.onExternalChange((key) => {
+        seen.push(key)
+        if (seen.length === 1) document.execCommand('insertText', false, 'TYPED-DURING-RELOAD')
+      })
+    })
+
+    let marker = 0
+    await waitForExternalChange('__r234Seen', () =>
+      rewriteWithNewerMtime(target, contents(++marker))
+    )
+
+    // The end state: the reload declined to commit and asked instead.
+    await page.locator('.notification-message', { hasText: 'changed on disk' }).waitFor({
+      timeout: 30_000
+    })
+    expect(await editor.textContent()).toContain('TYPED-DURING-RELOAD')
+    expect(await page.locator('.title-bar-dirty-dot').count()).toBe(1)
+
+    // Leave the app clean. A dirty document turns `afterAll`'s close into the
+    // quit prompt, the close budget runs out, the process is killed, and the
+    // profile directory is still locked when it is removed.
+    // Klados binds Save to Ctrl+S on every platform, macOS included
+    // (`keybindings.ts`); Meta is a separate modifier there.
+    await editor.focus()
+    await page.keyboard.press('Control+S')
+    await expect.poll(() => page.locator('.title-bar-dirty-dot').count()).toBe(0)
+  }, 90_000)
 })

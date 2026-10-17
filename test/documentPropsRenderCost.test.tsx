@@ -105,6 +105,7 @@ function baseDocument(): OpenDocument {
     dirty: false,
     externalChangeDetected: false,
     reloadPending: false,
+    reloadRefusal: null,
     pendingTransform: null,
     minifiedBannerDismissed: false,
     reparsePending: false,

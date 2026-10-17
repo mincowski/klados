@@ -138,6 +138,7 @@ Search for the id to jump to one.
 | **D-115** | Raw is shown by default, and a command that needs Raw shows it |  |
 | **D-116** | The installer never kills a running Klados |  |
 | **D-117** | Grid export copies a cell's text unaltered; no formula escaping for spreadsheets |  |
+| **D-118** | A reload commits only onto the buffer it started from, and past the open path's limits it refuses rather than asks |  |
 
 ---
 
@@ -4260,3 +4261,32 @@ changing the manifest in the same release.
 
 **Rejected: automating winget submissions in `release.yml`.** It needs a standing token able to open
 pull requests against Microsoft's repository, for a step that takes minutes per rare release.
+
+### D-118 — A reload commits only onto the buffer it started from, and past the open path's limits it refuses rather than asks (R234, R235) · `settled`
+
+From the security review of 2026-10-16, findings 5 and 7. Plan and results:
+`docs/plans/R234-reload-safety.md`.
+
+**Chosen: one identity check at commit.** `reloadFromDisk` keeps the `sourceBuffer` it started
+from, taken as its first statement, before any await. If the buffer is a different object when
+the parse lands, the reload does not commit. It raises the external-change banner and resolves
+`cancelled`. Every operation that changes the bytes replaces `sourceBuffer`, so the check covers
+edits, Replace All, Format and Minify, and Undo and Redo, none of which had to change.
+
+**Chosen: an explicit Reload and Discard yields too.** An edit typed after the click is the
+ambiguous case, and losing typed text silently is never the right answer to an ambiguity. The
+banner comes back and the user decides again.
+
+**Chosen: past the 2 GB ceiling, the 500 MB soft cap or the cross-tab budget, a reload reads
+nothing and says why in the banner**, which offers only Keep Mine, and an explicit reload returns
+the refusal. Below the ceiling this is a refusal where the open path asks, because the open path's
+`confirmSize` gate cannot be used from an open document: that phase holds no document, so
+entering it would drop the one the reload exists to keep. Closing the file and opening it again
+reaches the gate. An in-place confirmation is owed (`docs/TASKS.md`).
+
+**Rejected:**
+- **Aborting the reload from `applyEdit`**, the way Keep Mine and Save do. `applyEdit` runs on
+  every keystroke, and every other operation that replaces the buffer would also have to remember
+  to cancel, which is how per-caller fixes miss the caller added later (R101).
+- **Showing the ordinary Reload / Keep Mine question for a file past the soft cap.** Reload would
+  be refused again, and a button that does nothing is R169's dead button.

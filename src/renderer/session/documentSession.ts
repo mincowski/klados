@@ -245,9 +245,9 @@ export interface OpenDocument {
   /** M3-PLAN.md F8 (§11.3): an external change to this file landed on disk
    * while there are unsaved edits, so it was *not* auto-reloaded — the
    * pending choice between "Reload and discard" (`reloadAndDiscard`) and
-   * "Keep mine" (`keepMine`). Always `false` when `dirty` is `false`: a
-   * clean document reloads silently the moment the change is detected,
-   * never sets this. */
+   * "Keep mine" (`keepMine`). `false` when `dirty` is `false`, except while
+   * `reloadRefusal` is set: a clean document reloads silently the moment the
+   * change is detected, unless the file is now too large to (R235). */
   readonly externalChangeDetected: boolean
   /** R169 (`docs/plans/R169-external-change-reload.md`): a reload from disk
    * is in flight right now.
@@ -269,6 +269,13 @@ export interface OpenDocument {
    * reload that usually takes a few milliseconds. A reload keeps its
    * document on screen; only the acknowledgement is new. */
   readonly reloadPending: boolean
+  /** R235 (`docs/plans/R234-reload-safety.md` §2): why the file on disk could
+   * not be reloaded — it is past the 32-bit ceiling, past the soft cap, or
+   * would take the open tabs past the memory budget. Set alongside
+   * `externalChangeDetected`, and shown by the banner in place of its usual
+   * question, so it is the one case where that flag is raised on a *clean*
+   * document. `null` whenever the banner is down. */
+  readonly reloadRefusal: string | null
   /** M5-PLAN.md H7 (§11.2's soft-cap shape): a Format/Minify request on a
    * document at or above `TRANSFORM_CONFIRM_BYTES`, waiting on
    * `confirmTransformAnyway`/`cancelTransform` rather than running
@@ -606,6 +613,15 @@ export function formatBytes(bytes: number): string {
   return `${mib.toFixed(mib >= 10 ? 0 : 1)} MB`
 }
 
+/** The hard ceiling's refusal — the open path's words, which a reload past it
+ * returns too (R235). */
+function pastCeilingMessage(fileName: string, size: number): string {
+  return (
+    `${fileName} is ${formatBytes(size)} — larger than the ~2 GB Klados can ` +
+    `address (byte offsets are 32-bit).`
+  )
+}
+
 function describeError(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
@@ -843,6 +859,7 @@ export function createDocumentSession(deps: DocumentSessionDeps = {}): DocumentS
         reparsePending: false,
         externalChangeDetected: false,
         reloadPending: false,
+        reloadRefusal: null,
         pendingTransform: null,
         minifiedBannerDismissed: false,
         transformInProgress: false,
@@ -1362,12 +1379,7 @@ export function createDocumentSession(deps: DocumentSessionDeps = {}): DocumentS
     const fileName = fileNameOf(path)
 
     if (info.size >= HARD_CEILING_BYTES) {
-      setState({
-        phase: 'error',
-        message:
-          `${fileName} is ${formatBytes(info.size)} — larger than the ~2 GB Klados can ` +
-          `address (byte offsets are 32-bit).`
-      })
+      setState({ phase: 'error', message: pastCeilingMessage(fileName, info.size) })
       return
     }
 
@@ -2100,7 +2112,7 @@ export function createDocumentSession(deps: DocumentSessionDeps = {}): DocumentS
     reloadAbort?.abort()
     reloadAbort = null
     setCtx('hasExternalChange', false)
-    return { ...document, externalChangeDetected: false, reloadPending: false }
+    return { ...document, externalChangeDetected: false, reloadPending: false, reloadRefusal: null }
   }
 
   async function save(): Promise<SaveOutcome> {
@@ -2219,6 +2231,47 @@ export function createDocumentSession(deps: DocumentSessionDeps = {}): DocumentS
   }
 
   /**
+   * R235 — the three limits `openPath` applies, for a file already open:
+   * `null` when a reload may read it, otherwise what the banner says
+   * (`banner`, naming the size) and what an explicit reload returns
+   * (`message`). The budget counts every *other* tab plus this file's new
+   * estimate — `estimateOtherTabsBytes` already excludes the tab asking, so
+   * the version being replaced is not counted twice.
+   */
+  function reloadRefusalFor(
+    fileName: string,
+    size: number
+  ): { readonly banner: string; readonly message: string } | null {
+    const sizeText = formatBytes(size)
+    if (size >= HARD_CEILING_BYTES) {
+      return {
+        banner:
+          `${fileName} changed on disk and is now ${sizeText}, which Klados cannot open: ` +
+          `it can address up to ~2 GB.`,
+        message: pastCeilingMessage(fileName, size)
+      }
+    }
+    const reopen = 'Close it and open it again to load the new version.'
+    if (size >= SOFT_CAP_BYTES) {
+      return {
+        banner: `${fileName} changed on disk and is now ${sizeText}, too large to reload without confirming. ${reopen}`,
+        message: `${fileName} is now ${sizeText}, too large to reload without confirming. ${reopen}`
+      }
+    }
+    const total = Math.round(size * ESTIMATED_MEMORY_MULTIPLIER) + estimateOtherTabsBytes()
+    if (total > totalMemoryBudgetBytes) {
+      const why =
+        `is now ${sizeText}: reloading it would bring the open tabs to about ` +
+        `${formatBytes(total)}, past the memory budget. ${reopen}`
+      return {
+        banner: `${fileName} changed on disk and ${why}`,
+        message: `${fileName} ${why}`
+      }
+    }
+    return null
+  }
+
+  /**
    * F8 (§11.3) — re-reads the current file and replaces the live document
    * with it, discarding whatever unsaved edits exist. The undo/redo stack
    * is cleared too: its entries are patches against the buffer that
@@ -2226,8 +2279,23 @@ export function createDocumentSession(deps: DocumentSessionDeps = {}): DocumentS
    * stack could sensibly reverse into. Selection is carried across via
    * F5's own cascade — the reload produces a brand new store exactly the
    * way an ordinary reparse does, so the same machinery applies.
+   *
+   * R235: and it reads the file only if `openPath` would — see
+   * `reloadRefusalFor`.
+   *
+   * R234: the edits it discards are the ones that existed when it *started*.
+   * If the buffer changes while it runs, it does not commit — it raises the
+   * external-change banner instead and leaves the decision to the user.
    */
   async function reloadFromDisk(): Promise<ReloadOutcome> {
+    // R234 (`docs/plans/R234-reload-safety.md` §1): the buffer this reload is
+    // replacing. **The first statement, before any await** — an edit landing
+    // during even the first await would otherwise be the baseline, and be
+    // discarded exactly as before. Compared by identity at commit: every
+    // operation that changes the bytes (an edit, Replace, a Transform, Undo,
+    // Redo) replaces `sourceBuffer`, so one check covers them all without any
+    // of them having to remember to cancel a reload.
+    const baseline = state.phase === 'ready' ? state.document.sourceBuffer : null
     if (state.phase !== 'ready') return { ok: false, message: 'No document is open.' }
     const api = getApi()
     if (api === undefined) return { ok: false, message: 'The document API is unavailable.' }
@@ -2261,6 +2329,54 @@ export function createDocumentSession(deps: DocumentSessionDeps = {}): DocumentS
     transformAbort?.abort()
     transformAbort = null
     pendingTransformRequest = null
+
+    // R235 (`docs/plans/R234-reload-safety.md` §2): the checks `openPath`
+    // makes, made again. Reloads run on their own whenever the file changes,
+    // so a file growing on disk was re-read in full on every change with no
+    // ceiling — past 2 GB its offsets overflow `Int32Array` (invariant 3).
+    let info: DocumentStat
+    try {
+      info = await api.document.stat(filePath)
+    } catch (err) {
+      if (reloadAbort !== controller) return { ok: true, cancelled: true }
+      reloadAbort = null
+      clearReloadPending()
+      const fileError = fileErrorFrom(err)
+      return {
+        ok: false,
+        message:
+          fileError === null
+            ? `Could not read ${fileName}. It may have been moved or deleted.`
+            : describeFileError(fileError, 'reload', filePath)
+      }
+    }
+    if (reloadAbort !== controller) return { ok: true, cancelled: true }
+    if (state.phase !== 'ready' || state.document.filePath !== filePath) {
+      reloadAbort = null
+      clearReloadPending()
+      return { ok: true, cancelled: true }
+    }
+    const refusal = reloadRefusalFor(fileName, info.size)
+    if (refusal !== null) {
+      // Nothing is read. The document stays as it is and the banner says why;
+      // an automatic reload has no caller to tell, so the banner is how it is
+      // told. `openPath`'s size confirmation cannot be reused here: its
+      // `confirmSize` phase replaces the document, which is what this exists
+      // to keep — so above the soft cap or the budget a reload refuses too,
+      // and the way to the new version is to close the file and open it again.
+      reloadAbort = null
+      setCtx('hasExternalChange', true)
+      setState({
+        ...state,
+        document: {
+          ...state.document,
+          externalChangeDetected: true,
+          reloadPending: false,
+          reloadRefusal: refusal.banner
+        }
+      })
+      return { ok: false, message: refusal.message }
+    }
 
     // M5-PLAN.md H12: same token-mint + worker-fetch route as `startParse` —
     // see that function's own comment.
@@ -2322,6 +2438,27 @@ export function createDocumentSession(deps: DocumentSessionDeps = {}): DocumentS
       clearReloadPending()
       return { ok: true, cancelled: true }
     }
+    // R234: the document was changed while the read and parse ran. Before this
+    // check the commit below replaced those edits, cleared `dirty` and emptied
+    // undo — silent loss, reported as success. The document is dirty now and
+    // the file did change, which is exactly the state `handleExternalChange`
+    // puts a dirty document in: so the banner goes up and the user decides.
+    // Applies to an explicit Reload and Discard too: an edit typed after the
+    // click is ambiguous, and losing typed text is never the right answer to
+    // an ambiguity.
+    if (state.document.sourceBuffer !== baseline) {
+      setCtx('hasExternalChange', true)
+      setState({
+        ...state,
+        document: {
+          ...state.document,
+          externalChangeDetected: true,
+          reloadPending: false,
+          reloadRefusal: null
+        }
+      })
+      return { ok: true, cancelled: true }
+    }
 
     const oldStore = state.document.store
     const oldSelectedNode = state.selection.selectedNode
@@ -2338,6 +2475,8 @@ export function createDocumentSession(deps: DocumentSessionDeps = {}): DocumentS
     setCtx('isDirty', false)
     setCtx('hasExternalChange', false)
     setCtx('hasPendingTransform', false)
+    // R235: permissions can change on disk as well as contents.
+    setCtx('isReadOnly', info.readOnly)
     if (resolved.node !== NO_SELECTION) {
       setCtx('nodeKind', kindLabelOf(result.store.kindOf(resolved.node)))
     }
@@ -2359,9 +2498,11 @@ export function createDocumentSession(deps: DocumentSessionDeps = {}): DocumentS
         errorNode: node,
         errorOffset: offset,
         pendingParseError: null,
+        readOnly: info.readOnly,
         dirty: false,
         reparsePending: false,
         externalChangeDetected: false,
+        reloadRefusal: null,
         // R169: the reload has committed, so both the banner and the
         // acknowledgement it replaced go down together, in this same
         // `setState` — which is what makes the banner's disappearance
@@ -2406,7 +2547,12 @@ export function createDocumentSession(deps: DocumentSessionDeps = {}): DocumentS
       return
     }
     setCtx('hasExternalChange', true)
-    setState({ ...state, document: { ...state.document, externalChangeDetected: true } })
+    // A refusal from an earlier change describes the file as it was then; the
+    // banner asks its ordinary question about this one.
+    setState({
+      ...state,
+      document: { ...state.document, externalChangeDetected: true, reloadRefusal: null }
+    })
   }
 
   async function reloadAndDiscard(): Promise<ReloadOutcome> {
@@ -2431,7 +2577,12 @@ export function createDocumentSession(deps: DocumentSessionDeps = {}): DocumentS
     setCtx('hasExternalChange', false)
     setState({
       ...state,
-      document: { ...state.document, externalChangeDetected: false, reloadPending: false }
+      document: {
+        ...state.document,
+        externalChangeDetected: false,
+        reloadPending: false,
+        reloadRefusal: null
+      }
     })
   }
 

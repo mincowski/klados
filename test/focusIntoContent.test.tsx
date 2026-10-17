@@ -314,6 +314,7 @@ function baseOpenDocument(source: Uint8Array, store: NodeStore, filePath: string
     dirty: false,
     externalChangeDetected: false,
     reloadPending: false,
+    reloadRefusal: null,
     pendingTransform: null,
     minifiedBannerDismissed: false,
     reparsePending: false,
