@@ -619,8 +619,10 @@ describe.skipIf(!builtAppAvailable)('the built app via _electron (R51, R58)', ()
     // Leave the app clean. A dirty document turns `afterAll`'s close into the
     // quit prompt, the close budget runs out, the process is killed, and the
     // profile directory is still locked when it is removed.
+    // Klados binds Save to Ctrl+S on every platform, macOS included
+    // (`keybindings.ts`); Meta is a separate modifier there.
     await editor.focus()
-    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+S' : 'Control+S')
+    await page.keyboard.press('Control+S')
     await expect.poll(() => page.locator('.title-bar-dirty-dot').count()).toBe(0)
   }, 90_000)
 })
