@@ -399,21 +399,29 @@ describe.skipIf(!builtAppAvailable)('the built app via _electron (R51, R58)', ()
    * That reasoning was right about registration and wrong about the platform,
    * and only the macOS runner knew.
    */
-  async function waitForExternalChange(globalKey: string, rewrite: () => void): Promise<void> {
+  async function waitForExternalChange(
+    globalKey: string,
+    rewrite: () => void,
+    // R236: how many notifications `globalKey` already holds, so a second
+    // change can be waited for after a first. Resolves to the new count.
+    after = 0
+  ): Promise<number> {
+    let seen = after
     await expect
       .poll(
         async () => {
-          const seen = await page.evaluate(
+          seen = await page.evaluate(
             (key: string) => (window as unknown as Record<string, string[]>)[key]?.length ?? 0,
             globalKey
           )
-          if (seen > 0) return seen
+          if (seen > after) return seen
           rewrite()
-          return 0
+          return seen
         },
         { timeout: 15_000, interval: 500 }
       )
-      .toBeGreaterThan(0)
+      .toBeGreaterThan(after)
+    return seen
   }
 
   /**
@@ -539,6 +547,104 @@ describe.skipIf(!builtAppAvailable)('the built app via _electron (R51, R58)', ()
       })
     } finally {
       await releaseWatch('atomic-save')
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  /**
+   * R236 (`docs/plans/R236-save-and-watch.md` §2) — a watch outlives the file
+   * it was set on being replaced.
+   *
+   * The atomic-save test above proves **one** rename-over is noticed. On Linux
+   * `fs.watch` of a file is an inotify watch on its *inode*, so after a rename
+   * the watch is expected to follow an inode no longer at that path, and every
+   * later change to the file to go unnoticed. These tests make the second
+   * change, which that one does not.
+   *
+   * A notification from a first-step retry arriving after the second step
+   * began could pass the second step falsely. It would have to arrive more
+   * than one poll interval (500 ms) after its own rename; a notification is an
+   * event, a `stat` and one IPC message.
+   */
+  async function watchFromPage(filePath: string, key: string, globalKey: string): Promise<void> {
+    await page.evaluate(
+      async ({ filePath, key, globalKey }) => {
+        const api = (
+          window as unknown as {
+            api: {
+              document: {
+                watch: (p: string, key: string) => Promise<void>
+                onExternalChange: (cb: (key: string) => void) => () => void
+              }
+            }
+          }
+        ).api
+        const seen: string[] = []
+        ;(window as unknown as Record<string, string[]>)[globalKey] = seen
+        api.document.onExternalChange((k) => {
+          if (k === key) seen.push(k)
+        })
+        await api.document.watch(filePath, key)
+      },
+      { filePath, key, globalKey }
+    )
+  }
+
+  /** Replaces `target` by renaming a sibling over it, as Vim and Emacs save. */
+  function renameOver(target: string): void {
+    const staging = `${target}.tmp`
+    writeFileSync(staging, `{"renamed":${Date.now()}}`)
+    const future = new Date(Date.now() + 1000)
+    utimesSync(staging, future, future)
+    renameSync(staging, target)
+  }
+
+  it('R236: after an atomic save, a later in-place write is noticed too', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'klados-r236-'))
+    const watched = path.join(dir, 'doc.json')
+    writeFileSync(watched, '{"a":1}')
+    try {
+      await watchFromPage(watched, 'r236-second', '__r236Second')
+      const first = await waitForExternalChange('__r236Second', () => renameOver(watched))
+      await waitForExternalChange(
+        '__r236Second',
+        () => rewriteWithNewerMtime(watched, `{"inPlace":${Date.now()}}`),
+        first
+      )
+    } finally {
+      await releaseWatch('r236-second')
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('R236: two atomic saves in a row are each noticed', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'klados-r236-'))
+    const watched = path.join(dir, 'doc.json')
+    writeFileSync(watched, '{"a":1}')
+    try {
+      await watchFromPage(watched, 'r236-twice', '__r236Twice')
+      const first = await waitForExternalChange('__r236Twice', () => renameOver(watched))
+      await waitForExternalChange('__r236Twice', () => renameOver(watched), first)
+    } finally {
+      await releaseWatch('r236-twice')
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('R236: a file deleted and created again is noticed when it comes back', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'klados-r236-'))
+    const watched = path.join(dir, 'doc.json')
+    writeFileSync(watched, '{"a":1}')
+    try {
+      await watchFromPage(watched, 'r236-recreate', '__r236Recreate')
+      // A deletion alone notifies nothing: the registry's `stat` finds no
+      // file, which is not a change of contents.
+      rmSync(watched)
+      await waitForExternalChange('__r236Recreate', () =>
+        rewriteWithNewerMtime(watched, `{"back":${Date.now()}}`)
+      )
+    } finally {
+      await releaseWatch('r236-recreate')
       rmSync(dir, { recursive: true, force: true })
     }
   })
