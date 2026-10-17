@@ -2226,8 +2226,20 @@ export function createDocumentSession(deps: DocumentSessionDeps = {}): DocumentS
    * stack could sensibly reverse into. Selection is carried across via
    * F5's own cascade — the reload produces a brand new store exactly the
    * way an ordinary reparse does, so the same machinery applies.
+   *
+   * R234: the edits it discards are the ones that existed when it *started*.
+   * If the buffer changes while it runs, it does not commit — it raises the
+   * external-change banner instead and leaves the decision to the user.
    */
   async function reloadFromDisk(): Promise<ReloadOutcome> {
+    // R234 (`docs/plans/R234-reload-safety.md` §1): the buffer this reload is
+    // replacing. **The first statement, before any await** — an edit landing
+    // during even the first await would otherwise be the baseline, and be
+    // discarded exactly as before. Compared by identity at commit: every
+    // operation that changes the bytes (an edit, Replace, a Transform, Undo,
+    // Redo) replaces `sourceBuffer`, so one check covers them all without any
+    // of them having to remember to cancel a reload.
+    const baseline = state.phase === 'ready' ? state.document.sourceBuffer : null
     if (state.phase !== 'ready') return { ok: false, message: 'No document is open.' }
     const api = getApi()
     if (api === undefined) return { ok: false, message: 'The document API is unavailable.' }
@@ -2320,6 +2332,22 @@ export function createDocumentSession(deps: DocumentSessionDeps = {}): DocumentS
     reloadAbort = null
     if (state.phase !== 'ready' || state.document.filePath !== filePath) {
       clearReloadPending()
+      return { ok: true, cancelled: true }
+    }
+    // R234: the document was changed while the read and parse ran. Before this
+    // check the commit below replaced those edits, cleared `dirty` and emptied
+    // undo — silent loss, reported as success. The document is dirty now and
+    // the file did change, which is exactly the state `handleExternalChange`
+    // puts a dirty document in: so the banner goes up and the user decides.
+    // Applies to an explicit Reload and Discard too: an edit typed after the
+    // click is ambiguous, and losing typed text is never the right answer to
+    // an ambiguity.
+    if (state.document.sourceBuffer !== baseline) {
+      setCtx('hasExternalChange', true)
+      setState({
+        ...state,
+        document: { ...state.document, externalChangeDetected: true, reloadPending: false }
+      })
       return { ok: true, cancelled: true }
     }
 

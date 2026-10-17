@@ -3581,5 +3581,212 @@ describe('createDocumentSession (D6)', () => {
         expect(new TextDecoder().decode(documentOf(session).sourceBuffer.bytes)).toBe('{"a":1}')
       })
     })
+
+    /**
+     * R234 (`docs/plans/R234-reload-safety.md` §1) — an automatic reload must
+     * not overwrite edits made while it runs.
+     *
+     * A clean document reloads without asking, and the reload awaits a full
+     * read and parse — seconds on a large file — during which nothing stops
+     * editing. Before R234 the commit checked only that it had not been
+     * superseded and that the path was the same, then replaced the buffer,
+     * cleared `dirty` and emptied undo: every edit in that window was gone,
+     * silently, with nothing to undo back to.
+     *
+     * **CRLF throughout** (criterion 5): every Raw edit fixture was LF-only
+     * until R168, which is how a whole axis of the input space went untested.
+     */
+    describe('R234/R235 — a reload never discards edits made during it, and checks the file first', () => {
+      const OPENED = '{\r\n"a":1\r\n}'
+      const ON_DISK = '{\r\n"a":2\r\n}'
+      // The `1` of `"a":1` — after `{`, CR, LF, `"a":`.
+      const VALUE_START = 7
+
+      function documentOf(
+        session: ReturnType<typeof createDocumentSession>
+      ): Extract<DocumentSessionState, { phase: 'ready' }>['document'] {
+        const state = session.getSnapshot()
+        if (state.phase !== 'ready') throw new Error(`phase ${state.phase}, not ready`)
+        return state.document
+      }
+
+      function textOf(session: ReturnType<typeof createDocumentSession>): string {
+        return new TextDecoder().decode(documentOf(session).sourceBuffer.bytes)
+      }
+
+      /** A deferred promise and a second one that resolves when something has
+       * started waiting on it — the condition a test waits for, rather than a
+       * duration. */
+      function gate(): {
+        entered: Promise<void>
+        enter: () => void
+        released: Promise<void>
+        release: () => void
+      } {
+        let enter = (): void => {}
+        let release = (): void => {}
+        const entered = new Promise<void>((resolve) => (enter = resolve))
+        const released = new Promise<void>((resolve) => (release = resolve))
+        return { entered, enter, released, release }
+      }
+
+      /** A session whose first parse (the open) runs straight through and
+       * whose second (the reload) — or, with `holdStat`, whose second `stat` —
+       * waits on a gate the test releases. */
+      async function openWithHeldReload(
+        options: {
+          holdStat?: boolean
+          stat?: (path: string) => Promise<{ size: number; readOnly: boolean }>
+          undoDelayMs?: number
+        } = {}
+      ): Promise<{
+        session: ReturnType<typeof createDocumentSession>
+        api: FakeApi
+        triggerChange: () => void
+        held: ReturnType<typeof gate>
+        parseCalls: () => number
+      }> {
+        const held = gate()
+        const read = vi.fn().mockResolvedValueOnce(utf8(OPENED)).mockResolvedValue(utf8(ON_DISK))
+        let stats = 0
+        const baseStat = options.stat ?? (async () => ({ size: 100, readOnly: false }))
+        const stat = vi.fn().mockImplementation(async (path: string) => {
+          if (stats++ > 0 && options.holdStat === true) {
+            held.enter()
+            await held.released
+          }
+          return baseStat(path)
+        })
+        const { api, triggerChange } = fakeApiWithChangeCapture({ read, stat })
+        let parses = 0
+        const parseFromUrl: typeof fakeParseFromUrl = async (url, parseOptions) => {
+          if (parses++ > 0 && options.holdStat !== true) {
+            held.enter()
+            await held.released
+          }
+          return fakeParseFromUrl(url, parseOptions)
+        }
+        const session = createDocumentSession({
+          parse: fakeParse,
+          parseFromUrl,
+          transform: fakeTransform,
+          api,
+          reparseDelayMs: 5,
+          undoDelayMs: options.undoDelayMs ?? 5,
+          watchKey: TEST_WATCH_KEY
+        })
+        await session.openPath('C:/docs/data.json')
+        return { session, api, triggerChange, held, parseCalls: () => parses }
+      }
+
+      /** Criterion 1's shape, with the edit supplied by the caller: start an
+       * automatic reload, hold it, edit, release. */
+      async function editDuringAutomaticReload(
+        edit: (session: ReturnType<typeof createDocumentSession>) => Promise<void> | void,
+        options: Parameters<typeof openWithHeldReload>[0] = {}
+      ): Promise<ReturnType<typeof createDocumentSession>> {
+        const { session, triggerChange, held } = await openWithHeldReload(options)
+        expect(documentOf(session).dirty).toBe(false)
+
+        triggerChange()
+        await held.entered
+        await edit(session)
+        const editedBuffer = documentOf(session).sourceBuffer
+        const undoEntriesBefore = documentOf(session).undoEntryCount
+        held.release()
+        await flush(session)
+
+        const after = documentOf(session)
+        // The edit's own buffer is still the session's — not a copy of it, the
+        // very object, so nothing replaced it and put the same bytes back.
+        expect(after.sourceBuffer).toBe(editedBuffer)
+        expect(after.dirty).toBe(true)
+        expect(after.externalChangeDetected).toBe(true)
+        expect(after.reloadPending).toBe(false)
+        expect(after.undoEntryCount).toBeGreaterThanOrEqual(undoEntriesBefore)
+        return session
+      }
+
+      it('an edit typed while an automatic reload is held survives it (criterion 1)', async () => {
+        const session = await editDuringAutomaticReload((s) => {
+          const outcome = s.applyEdit({ start: VALUE_START, end: VALUE_START + 1, text: '9' })
+          expect(outcome.ok).toBe(true)
+        })
+        expect(textOf(session)).toBe('{\r\n"a":9\r\n}')
+        session.resyncContext()
+        expect(getContext().hasExternalChange).toBe(true)
+        expect(getContext().isDirty).toBe(true)
+      })
+
+      it('so does a Replace All (criterion 2)', async () => {
+        const session = await editDuringAutomaticReload((s) => {
+          const outcome = s.applyReplaceAll([{ start: VALUE_START, end: VALUE_START + 1 }], '7')
+          expect(outcome.ok).toBe(true)
+        })
+        expect(textOf(session)).toBe('{\r\n"a":7\r\n}')
+      })
+
+      it('so does an Undo (criterion 2)', async () => {
+        // A clean document with something to undo: edit, let the burst close,
+        // save. The automatic reload only runs on a clean document.
+        const { session, triggerChange, held } = await openWithHeldReload()
+        session.applyEdit({ start: VALUE_START, end: VALUE_START + 1, text: '5' })
+        await vi.waitFor(() => expect(documentOf(session).undoEntryCount).toBe(1))
+        expect((await session.save()).ok).toBe(true)
+        expect(documentOf(session).dirty).toBe(false)
+
+        triggerChange()
+        await held.entered
+        session.undo()
+        const undoneBuffer = documentOf(session).sourceBuffer
+        held.release()
+        await flush(session)
+
+        const after = documentOf(session)
+        expect(after.sourceBuffer).toBe(undoneBuffer)
+        expect(textOf(session)).toBe(OPENED)
+        expect(after.externalChangeDetected).toBe(true)
+        // The redo the undo made is still there: the reload emptied nothing.
+        session.resyncContext()
+        expect(getContext().canRedo).toBe(true)
+      })
+
+      it('so does a Format that completes during the hold (criterion 2)', async () => {
+        const session = await editDuringAutomaticReload(async (s) => {
+          const before = documentOf(s).sourceBuffer
+          s.requestTransform('format')
+          await vi.waitFor(() => expect(documentOf(s).sourceBuffer).not.toBe(before))
+        })
+        expect(textOf(session)).not.toBe(OPENED)
+        expect(textOf(session)).not.toBe(ON_DISK)
+      })
+
+      it('an explicit Reload and Discard yields to an edit typed after the click (criterion 3)', async () => {
+        const { session, held } = await openWithHeldReload()
+        const inFlight = session.reloadAndDiscard()
+        await held.entered
+        session.applyEdit({ start: VALUE_START, end: VALUE_START + 1, text: '9' })
+        held.release()
+
+        expect(await inFlight).toEqual({ ok: true, cancelled: true })
+        expect(textOf(session)).toBe('{\r\n"a":9\r\n}')
+        expect(documentOf(session).dirty).toBe(true)
+        expect(documentOf(session).externalChangeDetected).toBe(true)
+      })
+
+      it('with no edit during it, an automatic reload still commits (criterion 4)', async () => {
+        const { session, triggerChange, held } = await openWithHeldReload()
+        triggerChange()
+        await held.entered
+        held.release()
+        await flush(session)
+
+        const after = documentOf(session)
+        expect(textOf(session)).toBe(ON_DISK)
+        expect(after.dirty).toBe(false)
+        expect(after.externalChangeDetected).toBe(false)
+        expect(after.undoEntryCount).toBe(0)
+      })
+    })
   })
 })
