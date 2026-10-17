@@ -95,6 +95,7 @@ function openDocumentOf(xml: string, interner = new Interner()): OpenDocument {
     dirty: false,
     externalChangeDetected: false,
     reloadPending: false,
+    reloadRefusal: null,
     pendingTransform: null,
     minifiedBannerDismissed: false,
     reparsePending: false,

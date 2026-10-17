@@ -71,6 +71,7 @@ function openDocumentFor(overrides: Partial<OpenDocument> = {}): OpenDocument {
     dirty: true,
     externalChangeDetected: false,
     reloadPending: false,
+    reloadRefusal: null,
     pendingTransform: null,
     minifiedBannerDismissed: false,
     reparsePending: false,
@@ -204,5 +205,16 @@ describe('R169 — a failing reload is surfaced, a cancelled one is not', () => 
     await settled
 
     expect(getPushedNotifications()).toHaveLength(0)
+  })
+})
+
+describe('R235 — a reload refused for the file’s size says so', () => {
+  it('shows the refusal in place of the question, and offers only Keep Mine', () => {
+    // Reload and Discard would be refused again, so offering it would be the
+    // dead button R169 was about.
+    const refusal = 'data.json changed on disk and is now 2.00 GB, which Klados cannot open.'
+    const banner = bannerFor({ externalChangeDetected: true, reloadRefusal: refusal })
+    expect(banner.message).toBe(refusal)
+    expect(banner.actions).toEqual(['Keep Mine'])
   })
 })

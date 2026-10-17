@@ -106,19 +106,26 @@ export function derivedNotifications(
     // and R169 made it genuinely revocable, so offering it here is not a
     // decoration: clicking it aborts the in-flight read and keeps the buffer.
     // Reload is dropped, because it is the thing already happening.
+    //
+    // R235: a reload refused because of the file's size says so instead, and
+    // offers only Keep Mine — Reload would be refused again.
     const reloading = document.reloadPending
+    const refusal = document.reloadRefusal
     notifications.push({
       id: 'derived:externalChange',
       severity: 'warning',
-      message: reloading
-        ? `Reloading ${document.fileName} from disk…`
-        : `${document.fileName} changed on disk. Reload and discard your unsaved edits, or keep what you have?`,
-      actions: reloading
-        ? [{ label: 'Keep Mine', commandId: 'klados.document.keepMine' }]
-        : [
-            { label: 'Reload and Discard', commandId: 'klados.document.reloadExternalChange' },
-            { label: 'Keep Mine', commandId: 'klados.document.keepMine' }
-          ],
+      message:
+        refusal ??
+        (reloading
+          ? `Reloading ${document.fileName} from disk…`
+          : `${document.fileName} changed on disk. Reload and discard your unsaved edits, or keep what you have?`),
+      actions:
+        reloading || refusal !== null
+          ? [{ label: 'Keep Mine', commandId: 'klados.document.keepMine' }]
+          : [
+              { label: 'Reload and Discard', commandId: 'klados.document.reloadExternalChange' },
+              { label: 'Keep Mine', commandId: 'klados.document.keepMine' }
+            ],
       documentId
     })
   }

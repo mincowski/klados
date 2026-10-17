@@ -97,6 +97,7 @@ function bigDocumentFor(seed: string): OpenDocument {
     dirty: false,
     externalChangeDetected: false,
     reloadPending: false,
+    reloadRefusal: null,
     pendingTransform: null,
     minifiedBannerDismissed: false,
     reparsePending: false,

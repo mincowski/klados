@@ -29,8 +29,10 @@ import { previewOf } from '../src/renderer/nodeDisplay'
 import type { KladosApi } from '../src/preload/api'
 import { createDocumentWatcherRegistry } from '../src/core/documentWatchers'
 import { encodeFileError, fileErrorMessage } from '../src/core/fileErrors'
+import { derivedNotifications } from '../src/renderer/notifications/derivedNotifications'
 import {
   createDocumentSession,
+  formatBytes,
   NO_SELECTION,
   type DocumentSession,
   type DocumentSessionDeps,
@@ -3786,6 +3788,162 @@ describe('createDocumentSession (D6)', () => {
         expect(after.dirty).toBe(false)
         expect(after.externalChangeDetected).toBe(false)
         expect(after.undoEntryCount).toBe(0)
+      })
+
+      // R235 (§2): a reload stats the file and applies the open path's limits.
+
+      /** Opens at 100 bytes; every later `stat` (the reload's) answers
+       * `reloadStat`. Counts parses, so "did not parse" is an assertion. */
+      async function openThenRestat(
+        reloadStat: { size: number; readOnly: boolean },
+        deps: Partial<DocumentSessionDeps> = {}
+      ): Promise<{
+        session: ReturnType<typeof createDocumentSession>
+        api: FakeApi
+        triggerChange: () => void
+        parseCalls: () => number
+      }> {
+        const read = vi.fn().mockResolvedValueOnce(utf8(OPENED)).mockResolvedValue(utf8(ON_DISK))
+        const stat = vi
+          .fn()
+          .mockResolvedValueOnce({ size: 100, readOnly: false })
+          .mockResolvedValue(reloadStat)
+        const { api, triggerChange } = fakeApiWithChangeCapture({ read, stat })
+        let parses = 0
+        const session = createDocumentSession({
+          parse: fakeParse,
+          parseFromUrl: (url, options) => {
+            parses++
+            return fakeParseFromUrl(url, options)
+          },
+          api,
+          reparseDelayMs: 5,
+          watchKey: TEST_WATCH_KEY,
+          ...deps
+        })
+        await session.openPath('C:/docs/data.json')
+        expect(parses).toBe(1)
+        return { session, api, triggerChange, parseCalls: () => parses }
+      }
+
+      function bannerOf(session: ReturnType<typeof createDocumentSession>): string | undefined {
+        return derivedNotifications(session.getSnapshot(), null).find(
+          (n) => n.id === 'derived:externalChange'
+        )?.message
+      }
+
+      it('a file past the 32-bit ceiling is never re-read, and the banner names its size (criterion 8)', async () => {
+        const { session, api, triggerChange, parseCalls } = await openThenRestat({
+          size: 2_147_483_647,
+          readOnly: false
+        })
+        const before = documentOf(session).sourceBuffer
+
+        triggerChange()
+        await flush(session)
+
+        expect(api.document.mintReadToken).toHaveBeenCalledTimes(1) // the open's, only
+        expect(parseCalls()).toBe(1)
+        const after = documentOf(session)
+        expect(after.sourceBuffer).toBe(before)
+        expect(after.reloadPending).toBe(false)
+        expect(after.externalChangeDetected).toBe(true)
+        expect(bannerOf(session)).toContain(formatBytes(2_147_483_647))
+        // The ceiling's own words: the soft cap would also refuse this file.
+        expect(bannerOf(session)).toContain('cannot open')
+      })
+
+      it('an explicit reload past the ceiling refuses with the open path’s message (criterion 8)', async () => {
+        const { session, parseCalls } = await openThenRestat({
+          size: 2_147_483_647,
+          readOnly: false
+        })
+
+        const outcome = await session.reloadAndDiscard()
+
+        expect(outcome).toEqual({
+          ok: false,
+          message:
+            `data.json is ${formatBytes(2_147_483_647)} — larger than the ~2 GB Klados can ` +
+            `address (byte offsets are 32-bit).`
+        })
+        expect(parseCalls()).toBe(1)
+        expect(textOf(session)).toBe(OPENED)
+      })
+
+      it('a file past the soft cap is not reloaded automatically; the user is asked (criterion 9)', async () => {
+        const size = 500 * 1024 * 1024 + 1
+        const { session, triggerChange, parseCalls } = await openThenRestat({
+          size,
+          readOnly: false
+        })
+
+        triggerChange()
+        await flush(session)
+
+        expect(parseCalls()).toBe(1)
+        expect(textOf(session)).toBe(OPENED)
+        expect(documentOf(session).externalChangeDetected).toBe(true)
+        expect(bannerOf(session)).toContain(formatBytes(size))
+        // No confirmation can be given in place (the open path's gate replaces
+        // the document), so an explicit reload refuses with the size too.
+        const outcome = await session.reloadAndDiscard()
+        expect(outcome.ok).toBe(false)
+        if (outcome.ok) throw new Error('unreachable')
+        expect(outcome.message).toContain(formatBytes(size))
+        expect(parseCalls()).toBe(1)
+      })
+
+      it('a reload that would take the tabs past the memory budget is not run automatically (criterion 9)', async () => {
+        // Opens at 100 bytes (an estimate of 250); the reload's 1,000 bytes
+        // estimate 2,500, against a budget of 1,000.
+        const { session, triggerChange, parseCalls } = await openThenRestat(
+          { size: 1000, readOnly: false },
+          { totalMemoryBudgetBytes: 1000 }
+        )
+
+        triggerChange()
+        await flush(session)
+
+        expect(parseCalls()).toBe(1)
+        expect(textOf(session)).toBe(OPENED)
+        expect(documentOf(session).externalChangeDetected).toBe(true)
+        expect(bannerOf(session)).toContain('memory budget')
+      })
+
+      it('a reload takes readOnly from the file as it is now, both ways (criterion 10)', async () => {
+        const { session, triggerChange } = await openThenRestat({ size: 100, readOnly: true })
+        expect(documentOf(session).readOnly).toBe(false)
+
+        triggerChange()
+        await flush(session)
+
+        expect(textOf(session)).toBe(ON_DISK)
+        expect(documentOf(session).readOnly).toBe(true)
+        session.resyncContext()
+        expect(getContext().isReadOnly).toBe(true)
+        expect(await session.save()).toEqual({ ok: false, message: 'This file is read-only.' })
+
+        // And back: a file made writable again is writable after the next reload.
+        const { session: writable, api } = await openThenRestat({ size: 100, readOnly: false })
+        vi.mocked(api.document.stat).mockResolvedValue({ size: 100, readOnly: true })
+        expect((await writable.reloadAndDiscard()).ok).toBe(true)
+        expect(documentOf(writable).readOnly).toBe(true)
+        vi.mocked(api.document.stat).mockResolvedValue({ size: 100, readOnly: false })
+        expect((await writable.reloadAndDiscard()).ok).toBe(true)
+        expect(documentOf(writable).readOnly).toBe(false)
+        expect((await writable.save()).ok).toBe(true)
+      })
+
+      it('the snapshot precedes the stat: an edit landing while stat is held survives (criterion 11)', async () => {
+        const session = await editDuringAutomaticReload(
+          (s) => {
+            const outcome = s.applyEdit({ start: VALUE_START, end: VALUE_START + 1, text: '9' })
+            expect(outcome.ok).toBe(true)
+          },
+          { holdStat: true }
+        )
+        expect(textOf(session)).toBe('{\r\n"a":9\r\n}')
       })
     })
   })
