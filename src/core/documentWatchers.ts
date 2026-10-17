@@ -126,6 +126,16 @@ export function createDocumentWatcherRegistry(deps: DocumentWatcherDeps): Docume
    * A count rather than a flag so nested writes to one path release
    * correctly; absent means zero. */
   const selfWriteDepth = new Map<string, number>()
+  /** R238 — bumped by every `watch` and `unwatch` of a key. A `watch` takes
+   * the number before awaiting its `stat` and registers only if it is still
+   * the key's current one, so a call that arrived during the await wins.
+   * Entries are never removed: one number per tab ever opened. */
+  const generation = new Map<string, number>()
+  function nextGeneration(key: string): number {
+    const next = (generation.get(key) ?? 0) + 1
+    generation.set(key, next)
+    return next
+  }
 
   /** R171: closing a watcher that has already failed can itself throw — the
    * handle is being discarded either way, and a throw here would re-raise the
@@ -183,8 +193,12 @@ export function createDocumentWatcherRegistry(deps: DocumentWatcherDeps): Docume
   return {
     async watch(key, path, onChange) {
       releaseKey(key) // this key might already be watching a different path
+      const mine = nextGeneration(key)
 
       const info = await deps.stat(path)
+      // R238: an `unwatch` or a newer `watch` for this key arrived during the
+      // stat. Registering now would watch a file for a tab that has moved on.
+      if (generation.get(key) !== mine) return
       if (info === null) return // nothing to watch if the stat itself fails
 
       let entry = pathEntries.get(path)
@@ -258,11 +272,17 @@ export function createDocumentWatcherRegistry(deps: DocumentWatcherDeps): Docume
       entry.keys.set(key, onChange)
     },
     unwatch(key) {
+      nextGeneration(key)
       releaseKey(key)
     },
     unwatchMatching(matches) {
-      for (const key of [...keyToPath.keys()]) {
-        if (matches(key)) releaseKey(key)
+      // R238: over every key ever watched, not only the registered ones, so a
+      // watch still awaiting its stat is superseded too. Every registered key
+      // is in `generation`, since only `watch` registers.
+      for (const key of [...generation.keys()]) {
+        if (!matches(key)) continue
+        nextGeneration(key)
+        releaseKey(key)
       }
     },
     async selfWrite(path, write) {
