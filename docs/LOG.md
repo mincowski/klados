@@ -16,6 +16,36 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R236–R238 — Save writes in place and checks for room; the watcher follows the path; a watch race · built
+
+**Plan:** `docs/plans/R236-save-and-watch.md` · **Decisions:** D-119, D-120
+
+From the security review of 2026-10-16.
+
+**R237 was data loss on a full disk.** Save used `writeFile`, which empties the file before writing,
+so a write that failed part-way left the user with a destroyed original. Now:
+- a free-space check refuses before the file is touched;
+- the same file is written in place (`r+`, truncate, write) and flushed to disk.
+
+The red-first tests also found that, on Windows, **a hidden file could not be saved at all**, and that
+**every save deleted the file's alternate data streams**.
+
+The flush costs ~470 ms on 200 MB. Writing in place cost more than planned, for an unplanned reason:
+one `write` call for the whole buffer was 4× slower than `writeFile`. The write now goes in 4 MiB
+pieces.
+
+**R236**: after another program saves by renaming a new file over the open one (Vim, Emacs), Linux
+and macOS stopped noticing any later change. This was measured on CI first and was red on exactly
+those two runners. They now watch the folder.
+
+Windows was left on its file watch. Probed before shipping, a folder watch there **fires without end
+once the folder is deleted**, a busy loop in the main process. Windows also never needed the change.
+
+**R238**: a tab closed while its file was still opening left that file watched. A per-key generation
+fixes it, extended to closing a whole window.
+
+---
+
 ## R234–R235 — a reload never discards edits made during it, and checks the file first · built ⚠
 
 **Plan:** `docs/plans/R234-reload-safety.md` · **Decision:** D-118

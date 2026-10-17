@@ -140,6 +140,7 @@ Search for the id to jump to one.
 | **D-117** | Grid export copies a cell's text unaltered; no formula escaping for spreadsheets |  |
 | **D-118** | A reload commits only onto the buffer it started from, and past the open path's limits it refuses rather than asks |  |
 | **D-119** | Save writes the file in place, after a free-space check, and flushes it; never by rename, never with a backup copy |  |
+| **D-120** | On Linux and macOS a file is watched through its folder; Windows keeps the file watch |  |
 
 ---
 
@@ -4342,3 +4343,35 @@ concurrent writer. The check removes the common case, a disk that was already fu
 
 Invariant 6 ("Save writes the byte buffer") says what is written, not how; checked, and its wording
 in `CLAUDE.md` needs no change.
+
+### D-120 — On Linux and macOS a file is watched through its folder; Windows keeps the file watch (R236) · `settled`
+
+From the security review of 2026-10-16, finding 8. Plan and results:
+`docs/plans/R236-save-and-watch.md` §6.2.
+
+**Measured before the change.** After another program replaces the file by renaming a new one over
+it, `fs.watch` of the file on `ubuntu-latest` and `macos-latest` noticed nothing more:
+- not an in-place write afterwards;
+- not a second rename-over;
+- not a recreate after a delete.
+
+All three were noticed on `windows-latest`.
+
+**Chosen: on Linux and macOS, one watch per folder**, shared by the open files in it and closed
+with the last one. Each event is passed to the file it names, compared without case. An event that
+names no file goes to every file. The registry's mtime comparison still decides whether contents
+changed. It lives in `fsWatcherDeps.ts`, so the registry's per-file contract is unchanged.
+
+**Chosen: Windows keeps the file watch**, where the plan said every platform:
+- **A folder watch on Windows spins once its folder is deleted.** It sends an unbroken stream of
+  `rename` events naming the folder itself, and never an error: 539 events in 300 ms, measured. That
+  is a busy loop in the main process, which R171 §6 forbids.
+- **The file watch there reports the deletion once**, as `EPERM`.
+- **Windows does not need the change.** libuv already implements a Windows file watch as a parent
+  watch filtered by name.
+
+A real-filesystem test asserts the deletion stays a handful of events where the folder is watched.
+**Before turning the folder watch on for Windows, re-measure that.**
+
+**Rejected: re-arming the file watch after each `rename`** (plan §2). Between the unlink and the
+rename the file can briefly not exist. A re-arm that loses that race leaves no watch at all, silently.
