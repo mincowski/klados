@@ -4,14 +4,24 @@ name: Release
 # packaging; this is the round it defers to.
 #
 # Tag-driven: pushing `v1.0.0` builds on all three platforms and uploads to a
-# **draft** release, which is electron-builder's own default and is kept on
-# purpose — three runners finish at different times, and a draft lets them
-# accumulate onto one release that a human publishes after looking at it.
+# **draft** release, kept on purpose: the four builds finish at different
+# times, and a human publishes the draft after looking at it.
+#
+# **R229 (`docs/plans/R229-release-token-scope.md`): no write token where
+# third-party code runs.** The `release` jobs install, test and package with
+# a read-only token and upload their files as workflow artifacts. Only the
+# `publish` job holds `contents: write`, and it runs no `npm`, no Node and
+# no checkout of the code: `gh` (preinstalled on the runner) creates or
+# reuses the draft, hashes the downloaded files and uploads them with their
+# `SHA256SUMS.txt`. Before R229 the whole workflow held the write token,
+# `actions/checkout` left it in `.git/config`, and electron-builder was
+# handed it directly, so any compromised dev dependency could have replaced
+# an installer and its checksum in one move.
 #
 # **D-095 — once any release has been published, rehearse with
 # `workflow_dispatch` before moving a tag.** The dispatch path builds every
 # target and produces the same inspectable draft, but creates **no git tag**;
-# it skips only the version assertion and the `checksums` job. Moving a tag
+# it skips only the version assertion. Moving a tag
 # after publication leaves `SHA256SUMS.txt` describing bytes the tag no longer
 # points at — and for unsigned builds with no auto-updater that file is the
 # only integrity signal a downloader has. Delete the rehearsal draft before
@@ -23,10 +33,9 @@ on:
     tags: ['v*']
   workflow_dispatch:
 
-# electron-builder uploads the artifacts itself, which needs write access to
-# releases. Nothing else here writes to the repository.
+# R229: read-only by default. `publish` alone raises it, for its own job.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   release:
@@ -80,15 +89,36 @@ jobs:
     # reordering away from the same outage.
     timeout-minutes: 30
 
-    steps:
-      - uses: actions/checkout@v7
+    # R229: read-only even if the default above is ever raised.
+    permissions:
+      contents: read
 
-      - uses: actions/setup-node@v7
+    # Every leg computes the same value from the same `package.json`; `publish`
+    # names the draft from it, since it checks nothing out to read it itself.
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      # R229: the token is not written into `.git/config`, where every later
+      # process in the job could read it. Nothing in this workflow pushes.
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version: 22
           cache: npm
 
-      - run: npm ci
+      # R229 §2E: no install scripts. Measured on all three runners, CI and the
+      # packaging builds alike, before adopting it: nothing here needs one. The
+      # six packages that declare one (esbuild ×3, fsevents ×2,
+      # electron-winstaller) and the project's own `postinstall`
+      # (`electron-builder install-app-deps`, with `npmRebuild: false` and no
+      # native modules) were all skippable, and Electron itself is installed
+      # explicitly below. A dependency's install script is the first code a
+      # compromised version runs; this removes that half of the exposure.
+      - run: npm ci --ignore-scripts
 
       # R221 (`docs/plans/R221-electron-44.md` § 3.1): from Electron 42 the
       # binary is no longer downloaded by `npm ci`. The first
@@ -97,6 +127,11 @@ jobs:
       # download into the same folder. Installed once here, still checked against
       # the SHA-256s pinned in the `electron` package.
       - run: npx install-electron
+
+      - name: Version
+        id: version
+        shell: bash
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
 
       # The tag and `package.json` are *not* connected: electron-builder takes
       # the version from package.json and GitHub takes the release name from the
@@ -138,69 +173,104 @@ jobs:
             npm test
           fi
 
-      - name: Build and publish
-        run: npm run package -- ${{ matrix.args }} --publish always
+      # R229: `--publish never`, and no `GH_TOKEN` in this job at all. The
+      # files go to `publish` below as a workflow artifact instead.
+      - name: Build
+        run: npm run package -- ${{ matrix.args }} --publish never
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Nothing is code-signed (no certificates, `notarize: false`), and the
           # macOS runner would otherwise try to sign with whatever identity it
           # finds in its keychain and fail confusingly. Being explicit turns
           # that into an unsigned build, which is what the README documents.
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
-  # R167 (`docs/plans/R164-release-security-hardening.md` §5) — publish a
-  # SHA-256 for every artifact.
+      # Exactly the files the release carries (R198 removed the updater feeds
+      # and blockmaps). electron-builder's other output in `dist/` (the unpacked
+      # app, its debug and effective-config files) stays behind.
+      - name: Upload the built files
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: release-${{ matrix.name }}
+          path: |
+            dist/*-setup.exe
+            dist/*.dmg
+            dist/*.AppImage
+            dist/*.deb
+          if-no-files-found: error
+          retention-days: 7
+
+  # R229 — the only job that can write to the repository, and it runs no
+  # third-party code: no checkout, no `npm`, no Node. `gh` is the runner's own.
   #
-  # The builds are unsigned by design (no certificates, `notarize: false`,
-  # documented in the README) and there is no auto-updater, so the download *is*
-  # the whole trust decision. An unsigned artifact with no integrity signal at
-  # all gives a downloader nothing to check against a tampered mirror; a
-  # published hash costs nothing and gives them something.
+  # **It creates or reuses the draft that R141 and D-095 depend on**, named as
+  # electron-builder named it (tag `v<version>`, title `<version>`), so a tag
+  # push and a `workflow_dispatch` rehearsal produce the same draft as before.
+  # A `workflow_dispatch` run creates **no git tag**: a draft's tag only comes
+  # into being when the draft is published. A release of that name that is
+  # already *published* is never touched.
   #
-  # **One job over the assembled release, not a step on each runner.** The plan
-  # offered either; per-runner is three shells with three output formats
-  # (`sha256sum`, `shasum -a 256`, `Get-FileHash`) plus a fourth step to merge
-  # them, and it would hash what each runner *built* rather than what was
-  # actually *published* — which is the thing a downloader compares against.
-  # This reads the release back and hashes that.
-  checksums:
-    name: checksums
+  # R167 (`docs/plans/R164-release-security-hardening.md` §5) — a SHA-256 for
+  # every artifact, folded in here. The builds are unsigned by design and there
+  # is no auto-updater, so the download *is* the whole trust decision, and a
+  # published hash gives a downloader something to check a mirror against.
+  # **The files are hashed as downloaded from the build jobs, before they are
+  # uploaded**, so the sums never round-trip through the release, and every
+  # file, `SHA256SUMS.txt` included, is on the draft before anyone can publish
+  # it — which immutable releases require (R229 §2F).
+  publish:
+    name: publish
     needs: release
-    # A tag is what creates the release these assets live on; a
-    # `workflow_dispatch` run has no release to read back or upload to.
-    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
-    # R192. Downloads the release assets, hashes them, uploads one file; ten
-    # minutes is far more than it needs and still bounded.
-    timeout-minutes: 10
+    # R192. Downloads, hashes and uploads five files; bounded and generous.
+    timeout-minutes: 15
+    permissions:
+      contents: write
     steps:
-      - name: Hash every published asset
+      - name: Download the built files
+        uses: actions/download-artifact@v8.0.2
+        with:
+          pattern: release-*
+          path: assets
+          merge-multiple: true
+
+      - name: Hash, then upload to the draft
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # `gh` needs the repository when the workflow checks out nothing.
+          GH_TOKEN: ${{ github.token }}
+          # `gh` needs the repository when the job checks out nothing.
           GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.release.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p assets
-          # Draft releases are addressable by tag for anyone with write access,
-          # which is what `permissions: contents: write` above grants.
-          gh release download "$GITHUB_REF_NAME" --dir assets
-
+          tag="v$VERSION"
           cd assets
-          # Exclude the sums file itself so a re-run is idempotent rather than
-          # hashing its own previous output.
-          rm -f SHA256SUMS.txt
           shopt -s nullglob
           files=(*)
           if [ ${#files[@]} -eq 0 ]; then
-            echo "::error::no release assets found for $GITHUB_REF_NAME — nothing to hash"
+            echo "::error::no built files arrived from the release jobs"
             exit 1
           fi
           # The standard `<hash>␣␣<filename>` format, so `sha256sum -c` and
           # `Get-FileHash` comparison both work without anyone parsing anything.
           sha256sum "${files[@]}" > SHA256SUMS.txt
-          echo "hashed ${#files[@]} assets:"
+          echo "hashed ${#files[@]} files:"
           cat SHA256SUMS.txt
 
-          gh release upload "$GITHUB_REF_NAME" SHA256SUMS.txt --clobber
+          # Only "not found" means create. Any other failure (the API, the
+          # network) stops here, or a second draft of the same name would be
+          # made beside the first.
+          if draft="$(gh release view "$tag" --json isDraft --jq .isDraft 2>view.err)"; then
+            if [ "$draft" != "true" ]; then
+              echo "::error::release $tag is already published; refusing to change it"
+              exit 1
+            fi
+            echo "reusing the draft $tag"
+          elif grep -q "release not found" view.err; then
+            gh release create "$tag" --draft --title "$VERSION" --notes "" --target "$GITHUB_SHA"
+            echo "created the draft $tag"
+          else
+            cat view.err >&2
+            exit 1
+          fi
+          rm -f view.err
+          gh release upload "$tag" "${files[@]}" SHA256SUMS.txt --clobber
