@@ -123,15 +123,23 @@ async function launch(options: {
     stderr += chunk.toString()
   })
   let outcome: 'marker' | 'started' | null = null
-  await vi.waitFor(
-    () => {
-      if (options.marker !== undefined && existsSync(options.marker)) outcome = 'marker'
-      else if (existsSync(theme)) outcome = 'started'
-      if (outcome === null)
-        throw new Error('neither the probe nor the app has written anything yet')
-    },
-    { timeout: STARTUP_TIMEOUT_MS, interval: 50 }
-  )
+  await vi
+    .waitFor(
+      () => {
+        if (options.marker !== undefined && existsSync(options.marker)) outcome = 'marker'
+        else if (existsSync(theme)) outcome = 'started'
+        if (outcome === null)
+          throw new Error('neither the probe nor the app has written anything yet')
+      },
+      { timeout: STARTUP_TIMEOUT_MS, interval: 50 }
+    )
+    .catch((err: unknown) => {
+      // Why it did not start is in the app's own stderr; without it a timeout
+      // here says nothing.
+      throw new Error(`${(err as Error).message}
+--- the app's stderr:
+${stderr.slice(-4000)}`)
+    })
   return { outcome: outcome!, stderr: () => stderr }
 }
 
