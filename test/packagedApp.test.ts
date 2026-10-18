@@ -107,16 +107,21 @@ function tempDir(prefix: string): string {
 /** Launches the binary with its own profile, and resolves with which file
  * appeared first: the probe's `marker`, or the app's own theme file. */
 async function launch(options: {
+  binary?: string
   args?: string[]
   env?: Record<string, string>
   marker?: string
 }): Promise<{ outcome: 'marker' | 'started'; stderr: () => string }> {
   const profile = tempDir('klados-r230-profile-')
   const theme = path.join(profile, 'titlebar-theme.json')
-  const child = spawn(BINARY!, [...(options.args ?? []), `--user-data-dir=${profile}`], {
-    env: { ...process.env, ...options.env },
-    stdio: ['ignore', 'ignore', 'pipe']
-  })
+  const child = spawn(
+    options.binary ?? BINARY!,
+    [...(options.args ?? []), `--user-data-dir=${profile}`],
+    {
+      env: { ...process.env, ...options.env },
+      stdio: ['ignore', 'ignore', 'pipe']
+    }
+  )
   running.push(child)
   let stderr = ''
   child.stderr!.on('data', (chunk: Buffer) => {
@@ -266,7 +271,7 @@ function unpackedRoot(binary: string): { root: string; asar: string } {
 
 describe('R230 — an edited app.asar is refused', () => {
   it.runIf(BINARY !== null && ASAR_VALIDATED)(
-    'a copy with one byte changed exits without starting',
+    'a copy starts, and the same copy with one byte changed refuses for integrity',
     async () => {
       const { root, asar } = unpackedRoot(BINARY!)
       const copyParent = tempDir('klados-r230-tamper-')
@@ -274,6 +279,20 @@ describe('R230 — an edited app.asar is refused', () => {
       cpSync(root, copyRoot, { recursive: true, verbatimSymlinks: true })
       const copyAsar = path.join(copyRoot, path.relative(root, asar))
       const copyBinary = path.join(copyRoot, path.relative(root, BINARY!))
+      // On Linux the copy's `chrome-sandbox` is no longer setuid root, and
+      // Chromium would abort for that reason alone, whatever the archive
+      // holds. It is pointed at the original helper, which CI configured.
+      const env: Record<string, string> =
+        process.platform === 'linux'
+          ? { CHROME_DEVEL_SANDBOX: path.resolve(root, 'chrome-sandbox') }
+          : {}
+
+      // The control: untampered, the copy starts. Without it, a refusal below
+      // could be the copy failing for any reason at all, which is how the first
+      // Linux measurement was confounded twice.
+      const control = await launch({ binary: copyBinary, env })
+      expect(control.outcome).toBe('started')
+      for (const child of running.splice(0)) child.kill()
 
       // One byte inside a string literal of the app's own code.
       const bytes = readFileSync(copyAsar)
@@ -283,13 +302,22 @@ describe('R230 — an edited app.asar is refused', () => {
       writeFileSync(copyAsar, bytes)
 
       const profile = tempDir('klados-r230-profile-')
-      const child = spawn(copyBinary, [`--user-data-dir=${profile}`], { stdio: 'ignore' })
+      const child = spawn(copyBinary, [`--user-data-dir=${profile}`], {
+        env: { ...process.env, ...env },
+        stdio: ['ignore', 'ignore', 'pipe']
+      })
       running.push(child)
+      let stderr = ''
+      child.stderr!.on('data', (chunk: Buffer) => {
+        stderr += chunk.toString()
+      })
       const code = await new Promise<number | null>((resolve) => child.on('exit', resolve))
 
       expect(code).not.toBe(0)
       expect(existsSync(path.join(profile, 'titlebar-theme.json'))).toBe(false)
+      // Windows: "ASAR Integrity Violation: got a hash mismatch".
+      expect(stderr).toMatch(/integrity/i)
     },
-    60_000
+    90_000
   )
 })
