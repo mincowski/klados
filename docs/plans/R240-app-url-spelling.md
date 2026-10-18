@@ -95,7 +95,7 @@ that Chromium refuses an encoded `/` outright rather than reading it as a separa
 - **A long path with `~`, `[` or `]`**, with no 8.3 name involved, e.g. `D:\Apps [portable]\Klados`
   or `C:\~tools\Klados`. The table above is that case.
 - **macOS and Linux, probably.** `pathToFileURL` and Chromium's canonicalization are not
-  Windows-specific, so a folder named `a~b` likely fails there as well. **Not measured**; criterion 5
+  Windows-specific, so a folder named `a~b` likely fails there as well. **Not measured**; criterion 6
   measures it.
 - **The installer's default path** (`%LOCALAPPDATA%\Programs\Klados`) contains none of these and
   works, which is why this went unnoticed until R230 launched from `%TEMP%`.
@@ -144,9 +144,18 @@ Chromium's spelling.
 In `isAppUrl`'s `file:` branch, compare the two pathnames **after percent-decoding both, in one pass,
 byte by byte**, instead of comparing the raw strings:
 - **Decoded:** every `%XX` with two hex digits, either case, to the byte it names.
-- **Never decoded:** `%2F` (`/`), `%5C` (`\`) and `%00`. An encoded separator must not change the
-  path's structure, and Chromium refuses those URLs anyway (§1.3's `%2F` row). They are compared as
-  written, so they never match a literal separator.
+- **Never decoded:** `%2F` (`/`), `%5C` (`\`) and `%00`, **in either case** (`%2f` and `%5c` too).
+  An encoded separator must not change the path's structure, and Chromium refuses those URLs anyway
+  (§1.3's `%2F` row). They are compared as written, so they never match a literal separator.
+- **Dot segments are not resolved.** `new URL()` already resolves literal `.` and `..`; an encoded one
+  (`%2E%2E`) decodes to the text `..` and is compared as text, so it never equals a path without it.
+  That refuses a spelling Chromium might load as the same file, which fails closed and is acceptable.
+- **Not `decodeURIComponent` or `decodeURI`.** Measured in Node 24: `decodeURIComponent` *throws* on
+  `a%%b` and on `%FF`, and turns `%2F` into `/`. That breaks both rules above, and a throw inside the
+  guard would refuse every call. Write the scan by hand: a `%` followed by two hex digits becomes that
+  byte, unless it is one of the three exclusions, and every other character stays as it is. Comparing
+  the two results as strings of byte values is enough, since `new URL()` has already escaped every
+  non-ASCII character on both sides.
 - **Unchanged:** a lone `%` not followed by two hex digits stays literal, so Chromium's `a%%b` meets
   Node's decoded `%25%25`. Protocol and host checks stay exact (R231), case stays significant, and the
   development branch (`http:` origin) is untouched.
@@ -190,27 +199,32 @@ round, if ever.
    That includes `KLADOS%7E1` against `KLADOS~1`, `%5B`/`%5D` against `[`/`]`, and `%25%25` against
    `%%`.
 2. **Still refused**, one test each: another host (R231's tests, unchanged); another path; `%2F` in
-   place of a `/`; `%5C`; `%00`; a single `%257E` against `~` (no double decode); a path differing
-   only in case; an unparseable URL.
-3. **Mutation:** restoring the raw `pathname ===` comparison turns criterion 1's `~` test red.
-   Decoding `%2F` turns criterion 2's separator test red.
-4. **The packaged app starts through an 8.3 path on Windows.** `test/packagedApp.test.ts` gains a
+   place of a `/`, and the lower-case `%2f`; `%5C` and `%5c`; `%00`; a single `%257E` against `~` (no
+   double decode); `%2E%2E` standing for a `..` segment; a path differing only in case; an
+   unparseable URL.
+3. **`isAppUrl` never throws**, on any input: a target containing `%FF`, a lone `%` at the end of the
+   path, and `%%` return `true` or `false` like any other URL. Asserted directly, since a throw in
+   the guard refuses every IPC call.
+4. **Mutation:** restoring the raw `pathname ===` comparison turns criterion 1's `~` test red.
+   Decoding `%2F` turns criterion 2's separator test red. Replacing the hand-written scan with
+   `decodeURIComponent` turns criteria 1 (`%%`) and 3 red.
+5. **The packaged app starts through an 8.3 path on Windows.** `test/packagedApp.test.ts` gains a
    launch from a copy in a folder with a long name, invoked through its 8.3 alias (taken from
    `dir /x`, never assumed). It must reach `started`. The 8.3 alias must be looked up because 8.3
    generation can be off on a volume; if no alias exists the test is skipped with that reason
    printed, never passed silently.
-5. **The packaged app starts from a long folder name containing `~`, `[` and `]`, on all three
+6. **The packaged app starts from a long folder name containing `~`, `[` and `]`, on all three
    platforms.** This does not depend on 8.3 generation, so it cannot be skipped. It also measures
    §1.4's unmeasured macOS/Linux claim: record in the results whether the pre-fix build failed there.
-6. **The workaround goes.** `tempDir` in `test/packagedApp.test.ts` stops calling
+7. **The workaround goes.** `tempDir` in `test/packagedApp.test.ts` stops calling
    `realpathSync.native`, and its comment goes with it. On `windows-latest` every packaged test then
    runs from `RUNNER~1` again, which is a second regression check at no cost.
-7. **Copy works from the short path**: `isPermissionGranted` is green for criterion 1's `~` pair.
+8. **Copy works from the short path**: `isPermissionGranted` is green for criterion 1's `~` pair.
    It inherits the fix, but nothing would notice if it did not.
-8. **`isAppUrl`'s doc comment** says why the pathname is compared decoded, citing this plan, and why
+9. **`isAppUrl`'s doc comment** says why the pathname is compared decoded, citing this plan, and why
    not case-insensitively.
-9. **`docs/FINDINGS.md`**: the "8.3 short path" entry is removed once criteria 4–6 are green. The
-   `%XX` folder entry stays.
+10. **`docs/FINDINGS.md`**: the entry for paths containing `~`, `[`, `]` or `%` is removed once
+    criteria 5–7 are green. The `%XX` folder entry stays.
 
 ## 6. Method notes, and what was wrong before measuring
 
