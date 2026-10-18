@@ -262,6 +262,17 @@ URL, the same local file, not another machine's. Electron reports its page with 
 Measured in the built app: `location.href`, `webContents.getURL()` and `mainFrame.url` are all
 `file:///C:/…`. The test asserts the acceptance, and why.
 
+**Found by this test, outside this round: Klados launched through an 8.3 short path refuses its
+own page.** The `windows-latest` temp folder is `C:UsersRUNNER~1…`. A copy launched from there
+started, but every IPC call failed with "Refused … from an untrusted frame", and it never rendered.
+- **Reproduced locally** through `KLADOS~1…`, **with every fuse at Electron's default**. Through
+  the long path, the same copy works.
+- **It predates R230 and R231.** R164's sender guard compares the app's `file:` path exactly, and
+  the main process and the page end up with two spellings of it.
+- **Not fixed here**, since it changes a security guard outside this round's scope. The packaged test
+  launches from long-name folders (`realpathSync.native`) so it measures what it is for.
+- **Proposed as its own round.**
+
 ### 5.3 Review
 
 Each R id's diff was read before its commit.

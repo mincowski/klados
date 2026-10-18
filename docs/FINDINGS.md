@@ -748,3 +748,9 @@ union in `src/preload/api.ts` (R193) keeps the renderer's declared environment h
   found, but is not configured correctly". `CHROME_DEVEL_SANDBOX` is not honoured by a packaged app.
   CI sets the helper up as the `.deb` does (R230). Any test that launches a packaged Linux build
   inherits this, and it looks exactly like the app failing to start for its own reasons.
+- **Klados launched through a Windows 8.3 short path (`C:UsersRUNNER~1…`, `KLADOS~1…`)
+  refuses every IPC call from its own page** ("Refused … from an untrusted frame"), and never renders.
+  R164's sender guard compares the app's `file:` path exactly, and the two sides spell it
+  differently. Found by R230's packaged test on `windows-latest`, whose temp folder is a short name.
+  Not yet fixed. Any test that launches a copy from `os.tmpdir()` on Windows needs
+  `realpathSync.native` first.
