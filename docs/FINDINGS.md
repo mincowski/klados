@@ -737,3 +737,9 @@ union in `src/preload/api.ts` (R193) keeps the renderer's declared environment h
   lockfile" annotated on `actions.lock` line 1. It does not look like a red `lockfile` job (R229).
   Any change to a `uses:` line, by hand or by Dependabot, needs `gh actions-lock` run in the same
   commit.
+- **`grantFileProtocolExtraPrivileges: false` stops `loadFile` reading inside `app.asar`.** The
+  packaged app's own `index.html` fails with `ERR_FILE_NOT_FOUND` and the renderer crashes, measured
+  on Windows (R230). Turning that fuse off needs the renderer served from a custom scheme first. Its
+  sibling trap: a packaged Electron GUI ignores `NODE_OPTIONS=--require …` **without** any fuse
+  ("Most NODE_OPTIONs are not supported in packaged apps"), so a probe for that fuse that only
+  checks "did my script run" passes on an unfused build too.

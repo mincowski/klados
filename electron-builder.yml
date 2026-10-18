@@ -293,4 +293,9 @@ electronFuses:
   enableCookieEncryption: true
   onlyLoadAppFromAsar: true
   enableEmbeddedAsarIntegrityValidation: true
-  grantFileProtocolExtraPrivileges: false
+  # **Left at Electron's default, deliberately** (R230, D-122). Off, a
+  # `file://` page can no longer read inside `app.asar`: `loadFile` of the
+  # app's own `index.html` fails with ERR_FILE_NOT_FOUND and the renderer
+  # crashes. Measured on Windows and on the Linux and macOS CI runners. Turning
+  # it off needs the renderer served from a custom scheme first.
+  grantFileProtocolExtraPrivileges: true

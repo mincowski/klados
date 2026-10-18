@@ -79,7 +79,8 @@ const EXPECTED_FUSES: Record<string, 'Enabled' | 'Disabled'> = {
   EnableNodeCliInspectArguments: 'Disabled',
   EnableEmbeddedAsarIntegrityValidation: 'Enabled',
   OnlyLoadAppFromAsar: 'Enabled',
-  GrantFileProtocolExtraPrivileges: 'Disabled'
+  // At its default: off, `loadFile` cannot read inside app.asar (D-122).
+  GrantFileProtocolExtraPrivileges: 'Enabled'
 }
 
 const running: ChildProcess[] = []
