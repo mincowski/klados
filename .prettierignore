@@ -17,3 +17,9 @@ src/core/types.ts
 # one, not something `prettier --write .` does as a side effect of
 # formatting code. (Subsumes the old standalone `LICENSE.md` entry above.)
 *.md
+
+# R229 (`docs/plans/R229-release-token-scope.md` §2C): the project lead fixed
+# this file's content exactly, double quotes included. The machine-generated
+# lockfile beside the workflows is never formatted by hand either.
+.github/dependabot.yml
+.github/workflows/actions.lock
