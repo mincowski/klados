@@ -31,9 +31,16 @@
  *   entry at more than one path, so pinning the full URL would break the
  *   development loop for no security gain — an attacker who can serve from
  *   `localhost:5173` has already won by other means.
- * - **Production** (`file:`, from `loadFile`): the same **file**, compared on
- *   pathname alone. Not merely "protocol is `file:`", which would let any local
- *   HTML file — including one an attacker persuaded the user to save — become a
+ * - **Production** (`file:`, from `loadFile`): the same **file**: the same
+ *   pathname **on the same host**. R231: a `file:` URL with a host is a UNC
+ *   path on another machine, so the pathname alone matched
+ *   `file://evil.example/C:/…/index.html` as the app's own page. The app's
+ *   URL has an empty host, and Electron reports its page the same way
+ *   (measured), so any URL with a host is now refused. (`file://localhost/`
+ *   is not one: the URL parser turns that host into the empty one.)
+ *
+ *   Not merely "protocol is `file:`", which would let any local HTML file
+ *   (including one an attacker persuaded the user to save) become a
  *   navigation target that inherits `window.api`.
  *
  * Anything unparseable is denied. A guard that throws on a malformed URL fails
@@ -50,7 +57,11 @@ export function isAppUrl(target: string, appUrl: string): boolean {
   }
 
   if (parsedApp.protocol === 'file:') {
-    return parsedTarget.protocol === 'file:' && parsedTarget.pathname === parsedApp.pathname
+    return (
+      parsedTarget.protocol === 'file:' &&
+      parsedTarget.host === parsedApp.host &&
+      parsedTarget.pathname === parsedApp.pathname
+    )
   }
 
   return parsedTarget.origin === parsedApp.origin && parsedTarget.origin !== 'null'
