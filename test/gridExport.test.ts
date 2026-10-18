@@ -112,6 +112,45 @@ describe('exportGrid (M2-PLAN.md E8)', () => {
     expect(md).toContain('Golf \\| GTI')
   })
 
+  describe('R233: Markdown escapes backslashes and every line break', () => {
+    /** A `|` is a column boundary unless an odd number of backslashes
+     * precede it. */
+    function unescapedPipes(line: string): number {
+      let count = 0
+      let backslashes = 0
+      for (const ch of line) {
+        if (ch === '|' && backslashes % 2 === 0) count++
+        backslashes = ch === '\\' ? backslashes + 1 : 0
+      }
+      return count
+    }
+
+    // [cell text in the document, its exact Markdown cell]
+    const cases: readonly (readonly [string, string])[] = [
+      ['a\\|b', 'a\\\\\\|b'],
+      ['a\\b', 'a\\\\b'],
+      ['x\ry', 'x y'],
+      ['x\r\ny', 'x y'],
+      ['x\ny', 'x y'],
+      ['|', '\\|']
+    ]
+
+    for (const [cell, expected] of cases) {
+      it(`exports ${JSON.stringify(cell)} as ${JSON.stringify(expected)}`, () => {
+        const { store, source, members, columns, indices } = setup(
+          `<garage><car><v>${cell}</v><w>after</w></car><car><v>${cell}</v><w>after</w></car></garage>`
+        )
+        const md = exportGrid(store, source, members, indices, columns, 'markdown')
+        const row = `| ${expected} | after |`
+        expect(md).toBe(`| v | w |\n| --- | --- |\n${row}\n${row}`)
+        const lines = md.split('\n')
+        for (const line of lines) {
+          expect(unescapedPipes(line), line).toBe(unescapedPipes(lines[0]!))
+        }
+      })
+    }
+  })
+
   it('exports the displayed order, not necessarily document order', () => {
     const { store, source, members, columns } = setup(
       '<garage><car><name>Golf</name></car><car><name>Polo</name></car></garage>'
