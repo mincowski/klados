@@ -43,7 +43,8 @@ page from `app.asar`, on all three platforms. It needs the renderer on a custom 
 app's own path is no longer the app's page. `file://localhost/` stays accepted: the URL parser turns
 it into the app's own URL.
 
-Owed: a Windows screenshot of a document opened in the packaged app.
+Owed: a Windows screenshot of a document opened in the packaged app. *(Corrected 2026-10-18: taken by
+the project lead after the merge, `package.json` rendered in full; R230 is `built`.)*
 
 ---
 

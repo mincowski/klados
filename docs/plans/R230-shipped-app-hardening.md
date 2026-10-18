@@ -1,13 +1,13 @@
 # R230–R231 — the shipped binary: Electron fuses, and the `file:` host
 
-<!-- status: built-caveat -->
+<!-- status: built -->
 
-**Built, with one check owed** (§5).
+**Built** (§5).
 - **Six of the seven fuses ship as planned.** `grantFileProtocolExtraPrivileges` stays at its
   default on every platform: off, the app cannot load its own page from `app.asar` (D-122).
 - **Asar integrity** is enforced on Windows and macOS. It has no effect on Linux.
 - **R231** landed as planned, except that `file://localhost/` is correctly accepted.
-- **The Windows screenshot** is owed.
+- **The Windows screenshot** was taken by the project lead after the merge (§5.4).
 
 Planned from the security review of 2026-10-16, findings 2 (low–medium) and 3 (low, defence
 in depth). Both are about what the packaged `Klados` executable accepts from outside its own page.
@@ -148,8 +148,8 @@ become a test file that runs after that step, not a manual pass.
 
 ## 5. Results
 
-Landed on branch `r230-shipped-app-hardening` (PR #66). **`built-caveat`**: criterion 4's Windows
-screenshot of an opened document is the project lead's to take (§5.4).
+Landed on branch `r230-shipped-app-hardening` (PR #66). Criterion 4's Windows screenshot was taken
+by the project lead after the merge (§5.4).
 
 ### 5.1 R230 — the fuses, per platform
 
@@ -284,9 +284,18 @@ Each R id's diff was read before its commit.
     either way.
 - **R231:** the doc comment was rewrapped and the `localhost` case added to it.
 
-### 5.4 Owed
+### 5.4 The Windows screenshot (criterion 4)
 
-- **Criterion 4's Windows screenshot**, for the project lead: install or unpack the build, open a
-  document, and confirm it renders. The theme file proves the renderer started. It does not prove a
-  document was read through the parse worker and the `klados-file://` fetch, and Playwright can no
-  longer drive the packaged app to check.
+Taken by the project lead on 2026-10-18, after the merge. The `--dir` build of the merged code was
+launched from its long path with its own profile and `package.json` on the command line:
+`docs/screenshots/r230-packaged-windows.png`.
+
+![The packaged Windows build with package.json open](../screenshots/r230-packaged-windows.png)
+
+**It shows what the theme file could not:** a document read and parsed inside the packaged app, under
+the shipped fuses. The tree shows `Document` and `Object 12`. The detail grid lists the twelve
+children with their values (`"klados"`, `"1.2.2"`, `"MIT"`, …), and Raw shows the source with
+highlighting. So the parse worker, the `klados-file://` read-token fetch and the renderer all work
+with asar integrity and `onlyLoadAppFromAsar` on. Its fuses were read back beforehand: `RunAsNode`
+off, asar integrity on, `OnlyLoadAppFromAsar` on, `GrantFileProtocolExtraPrivileges` at its
+default.

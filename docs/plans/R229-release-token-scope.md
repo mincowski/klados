@@ -440,7 +440,20 @@ The workflow diff was read before the first commit. Findings, all fixed before t
 - the token probe step;
 - the `-r229-rehearsal` suffix on the draft's tag.
 
-### 5.5 Owed
+### 5.5 Checked after the merge, and still owed
+
+**Checked on 2026-10-18:**
+- **Release immutability is on.** The project lead switched it on, and
+  `gh api repos/mincowski/klados/immutable-releases` reports `{"enabled":true,"enforced_by_owner":false}`.
+  What it does to a published release is still criterion 8, below.
+- **Criterion 7: Dependabot reads the configuration.** Its tab under *Insights → Dependency graph*
+  lists the monitored files `.github/workflows/ci.yml`, `release.yml` and `actions.lock`, with no
+  error banner. `dependabot.yml` itself is not listed, and is not expected to be: the page lists
+  the manifests a configuration makes Dependabot watch, not the configuration file.
+- **§2C: *Require lockfile* is not offered** to this repository: not found in its settings. Nothing
+  depends on it. GitHub already refuses to start a workflow whose lockfile does not cover it (§5.2).
+
+**Still owed:**
 
 - **Criterion 8, on the first tagged release after this round.**
   - `gh api repos/mincowski/klados/immutable-releases` reports `"enabled": true`, and the release's
@@ -448,11 +461,7 @@ The workflow diff was read before the first commit. Findings, all fixed before t
   - `gh release verify` and `gh release verify-asset` pass.
   - `gh release upload … SHA256SUMS.txt --clobber` is refused, and the refusal is quoted here.
 
-  **The project lead switches immutability on** after the merge and before that tag. The README
-  already describes releases after 1.2.2 as immutable, which holds only once it is switched on.
-- **Criterion 7, after the merge:** Dependabot's own check of `dependabot.yml` reports no error.
-- **§2C, after the merge:** whether *Require lockfile* is offered to this repository, and whether it
-  was enabled.
+  Immutability was switched on after the merge (above), so the README's description holds.
 - **Criterion 9, at the first Dependabot pull request for an action:**
   - whether it changed `actions.lock` in the same PR;
   - whether the `lockfile` job was green;
