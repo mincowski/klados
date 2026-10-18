@@ -34,7 +34,6 @@ import {
   readFileSync,
   rmSync,
   statSync,
-  symlinkSync,
   writeFileSync
 } from 'node:fs'
 import { connect } from 'node:net'
@@ -255,10 +254,12 @@ describe('R230 — the packaged binary is not a general-purpose Node runtime', (
  * R230 criterion 3 — with `enableEmbeddedAsarIntegrityValidation`, an edited
  * `app.asar` is refused. Run on a copy of the `--dir` output, never on it.
  *
- * Electron validates the archive on Windows and macOS; on Linux the fuse has
- * nothing to check against (see the plan's Results).
+ * Electron validates the archive on Windows and macOS only. **Measured on
+ * Linux** (ubuntu-latest, with the control launch below passing): the tampered
+ * copy started and ran, so there the fuse has no effect. That is Electron's
+ * documented scope, and the plan's Results record it.
  */
-const ASAR_VALIDATED = true // R230 MEASUREMENT: every platform, to see whether Linux refuses
+const ASAR_VALIDATED = process.platform === 'win32' || process.platform === 'darwin'
 
 /** The folder `electron-builder --dir` produced, and the archive inside it. */
 function unpackedRoot(binary: string): { root: string; asar: string } {
@@ -280,22 +281,10 @@ describe('R230 — an edited app.asar is refused', () => {
       cpSync(root, copyRoot, { recursive: true, verbatimSymlinks: true })
       const copyAsar = path.join(copyRoot, path.relative(root, asar))
       const copyBinary = path.join(copyRoot, path.relative(root, BINARY!))
-      // On Linux the copy's `chrome-sandbox` is no longer setuid root, and
-      // Chromium aborts for that reason alone, whatever the archive holds.
-      // `CHROME_DEVEL_SANDBOX` is not honoured by the packaged app (measured),
-      // so the copy's helper becomes a link to the original, which CI made
-      // setuid root; the check follows the link.
-      if (process.platform === 'linux') {
-        const helper = path.join(copyRoot, 'chrome-sandbox')
-        rmSync(helper)
-        symlinkSync(path.resolve(root, 'chrome-sandbox'), helper)
-      }
-      const env: Record<string, string> = {}
-
       // The control: untampered, the copy starts. Without it, a refusal below
       // could be the copy failing for any reason at all, which is how the first
       // Linux measurement was confounded twice.
-      const control = await launch({ binary: copyBinary, env })
+      const control = await launch({ binary: copyBinary })
       expect(control.outcome).toBe('started')
       for (const child of running.splice(0)) child.kill()
 
@@ -308,7 +297,6 @@ describe('R230 — an edited app.asar is refused', () => {
 
       const profile = tempDir('klados-r230-profile-')
       const child = spawn(copyBinary, [`--user-data-dir=${profile}`], {
-        env: { ...process.env, ...env },
         stdio: ['ignore', 'ignore', 'pipe']
       })
       running.push(child)
@@ -316,10 +304,30 @@ describe('R230 — an edited app.asar is refused', () => {
       child.stderr!.on('data', (chunk: Buffer) => {
         stderr += chunk.toString()
       })
-      const code = await new Promise<number | null>((resolve) => child.on('exit', resolve))
+      // Either it exits, or it starts. Waiting for the exit alone would hang on
+      // a copy that runs, which is what an unchecked archive does.
+      const theme = path.join(profile, 'titlebar-theme.json')
+      const exited = new Promise<number | null>((resolve) => child.on('exit', resolve))
+      const result = await Promise.race([
+        exited.then((code) => ({ code })),
+        vi
+          .waitFor(
+            () => {
+              if (!existsSync(theme)) throw new Error('not started')
+            },
+            { timeout: STARTUP_TIMEOUT_MS, interval: 50 }
+          )
+          // Settled either way, so the wait left behind when the copy exits
+          // first does not reject later as an unhandled error.
+          .then(
+            () => 'started' as const,
+            () => 'neither exited nor started' as const
+          )
+      ])
 
-      expect(code).not.toBe(0)
-      expect(existsSync(path.join(profile, 'titlebar-theme.json'))).toBe(false)
+      if (typeof result === 'string') throw new Error(`the tampered copy ${result}`)
+      expect(result.code).not.toBe(0)
+      expect(existsSync(theme)).toBe(false)
       // Windows: "ASAR Integrity Violation: got a hash mismatch".
       expect(stderr).toMatch(/integrity/i)
     },

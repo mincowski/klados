@@ -738,8 +738,13 @@ union in `src/preload/api.ts` (R193) keeps the renderer's declared environment h
   Any change to a `uses:` line, by hand or by Dependabot, needs `gh actions-lock` run in the same
   commit.
 - **`grantFileProtocolExtraPrivileges: false` stops `loadFile` reading inside `app.asar`.** The
-  packaged app's own `index.html` fails with `ERR_FILE_NOT_FOUND` and the renderer crashes, measured
-  on Windows (R230). Turning that fuse off needs the renderer served from a custom scheme first. Its
+  packaged app's own `index.html` fails with `ERR_FILE_NOT_FOUND` and the renderer crashes. Measured
+  on Windows; the app failed to start on Linux and macOS CI as well (R230). Turning that fuse off needs the renderer served from a custom scheme first. Its
   sibling trap: a packaged Electron GUI ignores `NODE_OPTIONS=--require …` **without** any fuse
   ("Most NODE_OPTIONs are not supported in packaged apps"), so a probe for that fuse that only
   checks "did my script run" passes on an unfused build too.
+- **A packaged Linux Electron aborts before its first window when `chrome-sandbox` is not setuid
+  root**, which it never is in a CI checkout or a copied folder: "The SUID sandbox helper binary was
+  found, but is not configured correctly". `CHROME_DEVEL_SANDBOX` is not honoured by a packaged app.
+  CI sets the helper up as the `.deb` does (R230). Any test that launches a packaged Linux build
+  inherits this, and it looks exactly like the app failing to start for its own reasons.
