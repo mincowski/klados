@@ -737,3 +737,20 @@ union in `src/preload/api.ts` (R193) keeps the renderer's declared environment h
   lockfile" annotated on `actions.lock` line 1. It does not look like a red `lockfile` job (R229).
   Any change to a `uses:` line, by hand or by Dependabot, needs `gh actions-lock` run in the same
   commit.
+- **`grantFileProtocolExtraPrivileges: false` stops `loadFile` reading inside `app.asar`.** The
+  packaged app's own `index.html` fails with `ERR_FILE_NOT_FOUND` and the renderer crashes. Measured
+  on Windows; the app failed to start on Linux and macOS CI as well (R230). Turning that fuse off needs the renderer served from a custom scheme first. Its
+  sibling trap: a packaged Electron GUI ignores `NODE_OPTIONS=--require …` **without** any fuse
+  ("Most NODE_OPTIONs are not supported in packaged apps"), so a probe for that fuse that only
+  checks "did my script run" passes on an unfused build too.
+- **A packaged Linux Electron aborts before its first window when `chrome-sandbox` is not setuid
+  root**, which it never is in a CI checkout or a copied folder: "The SUID sandbox helper binary was
+  found, but is not configured correctly". `CHROME_DEVEL_SANDBOX` is not honoured by a packaged app.
+  CI sets the helper up as the `.deb` does (R230). Any test that launches a packaged Linux build
+  inherits this, and it looks exactly like the app failing to start for its own reasons.
+- **Klados launched through a Windows 8.3 short path (`C:UsersRUNNER~1…`, `KLADOS~1…`)
+  refuses every IPC call from its own page** ("Refused … from an untrusted frame"), and never renders.
+  R164's sender guard compares the app's `file:` path exactly, and the two sides spell it
+  differently. Found by R230's packaged test on `windows-latest`, whose temp folder is a short name.
+  Not yet fixed. Any test that launches a copy from `os.tmpdir()` on Windows needs
+  `realpathSync.native` first.

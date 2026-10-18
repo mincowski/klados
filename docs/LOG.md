@@ -16,6 +16,37 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R230–R231 — the shipped binary: Electron fuses, and the `file:` host · built ⚠
+
+**Plan:** `docs/plans/R230-shipped-app-hardening.md` · **Decision:** D-122
+
+From the security review of 2026-10-16. **R230: the packaged Klados ran any script it was handed**
+with `ELECTRON_RUN_AS_NODE=1`, under its own name, from a folder the user can write to. Six Electron
+fuses now close that, the inspector and `NODE_OPTIONS`, and make Windows and macOS refuse an edited
+`app.asar`. A new test spawns each platform's packaged binary on CI and probes every route. Each
+probe was shown to go red when its fuse is switched back on.
+
+**One fuse could not be set.** `grantFileProtocolExtraPrivileges` off stops the app loading its own
+page from `app.asar`, on all three platforms. It needs the renderer on a custom scheme first.
+
+**Linux took three CI runs to measure honestly.**
+- First, the fuse above stopped the untouched app too.
+- Then a Chromium sandbox abort hid everything: a CI checkout cannot make `chrome-sandbox` setuid
+  root, so CI now does what the `.deb` does.
+- With a control launch added, the answer was that Linux does not check the archive at all, as
+  Electron documents.
+
+**Two of the plan's probes were wrong:** one could never have run its code, and `NODE_OPTIONS
+--require` turned out to be refused by Electron already.
+
+**R231**: `isAppUrl` now compares a `file:` URL's host, so a UNC path to another machine with the
+app's own path is no longer the app's page. `file://localhost/` stays accepted: the URL parser turns
+it into the app's own URL.
+
+Owed: a Windows screenshot of a document opened in the packaged app.
+
+---
+
 ## R229 — no write token where third-party code runs, locked actions, immutable releases · built ⚠
 
 **Plan:** `docs/plans/R229-release-token-scope.md` · **Decisions:** D-121, D-095 amended

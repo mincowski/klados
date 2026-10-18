@@ -61,6 +61,40 @@ describe('R164 — isAppUrl, in production', () => {
   })
 })
 
+describe('R231 — isAppUrl compares the host of a file: URL', () => {
+  // The same pathname under a host is a UNC path: `file://evil.example/C:/…`
+  // is `\\evil.example\C:\…`, another machine's file. Comparing the pathname
+  // alone accepted it as the app's own page.
+  const OTHER_HOST =
+    'file://evil.example/C:/Program%20Files/Klados/resources/app.asar/out/renderer/index.html'
+
+  it('denies the app path on another host', () => {
+    expect(new URL(OTHER_HOST).pathname).toBe(new URL(PROD_URL).pathname)
+    expect(isAppUrl(OTHER_HOST, PROD_URL)).toBe(false)
+  })
+
+  it('accepts localhost, which the URL parser turns into no host at all', () => {
+    // The plan expected a refusal here. But the URL standard's file-host rule
+    // replaces `localhost` with the empty host (`new URL('file://localhost/C:/x')
+    // .href` is `file:///C:/x`), so this is the app's own URL, the same local
+    // file, not another machine's. Electron reports its page with no host as
+    // well: measured, `location.href`, `webContents.getURL()` and
+    // `mainFrame.url` are all `file:///C:/…` in the built app.
+    const localhost = PROD_URL.replace('file:///', 'file://localhost/')
+    expect(new URL(localhost).host).toBe('')
+    expect(isAppUrl(localhost, PROD_URL)).toBe(true)
+  })
+
+  it('still allows the app page itself', () => {
+    expect(isAppUrl(PROD_URL, PROD_URL)).toBe(true)
+  })
+
+  it('isPermissionGranted refuses the app path on another host', () => {
+    expect(isPermissionGranted('clipboard-sanitized-write', OTHER_HOST, true, PROD_URL)).toBe(false)
+    expect(isPermissionGranted('clipboard-sanitized-write', PROD_URL, true, PROD_URL)).toBe(true)
+  })
+})
+
 describe('R164 — isAppUrl fails closed', () => {
   it('denies anything unparseable rather than throwing', () => {
     expect(isAppUrl('', PROD_URL)).toBe(false)

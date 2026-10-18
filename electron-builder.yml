@@ -276,3 +276,26 @@ publish:
 appImage:
   artifactName: ${name}-${version}.${ext}
 npmRebuild: false
+
+# R230 (`docs/plans/R230-shipped-app-hardening.md`): the packaged binary is
+# not a general-purpose Node runtime. Without these, `ELECTRON_RUN_AS_NODE=1
+# Klados.exe <script>` ran any script under Klados's name and path (measured
+# on the 1.2.2 build), and the app code in `app.asar` was not checked. Nothing
+# in Klados forks, reads `NODE_OPTIONS` or uses the inspector in production.
+# Read back on every CI platform by `test/packagedApp.test.ts`.
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  # Also stops Playwright's `_electron` attaching to the *packaged* app, which
+  # it does through `--inspect`. `mainElectron.test.ts` launches the stock
+  # Electron against `out/`, which no fuse touches.
+  enableNodeCliInspectArguments: false
+  enableCookieEncryption: true
+  onlyLoadAppFromAsar: true
+  enableEmbeddedAsarIntegrityValidation: true
+  # **Left at Electron's default, deliberately** (R230, D-122). Off, a
+  # `file://` page can no longer read inside `app.asar`: `loadFile` of the
+  # app's own `index.html` fails with ERR_FILE_NOT_FOUND and the renderer
+  # crashes. Measured on Windows and on the Linux and macOS CI runners. Turning
+  # it off needs the renderer served from a custom scheme first.
+  grantFileProtocolExtraPrivileges: true

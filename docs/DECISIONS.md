@@ -142,6 +142,7 @@ Search for the id to jump to one.
 | **D-119** | Save writes the file in place, after a free-space check, and flushes it; never by rename, never with a backup copy |  |
 | **D-120** | On Linux and macOS a file is watched through its folder; Windows keeps the file watch |  |
 | **D-121** | Releases are built with a read-only token and published by a job that runs no third-party code; actions are locked by a lockfile, not by SHAs |  |
+| **D-122** | The packaged binary ships with six Electron fuses set; `grantFileProtocolExtraPrivileges` stays at its default |  |
 
 ---
 
@@ -4427,3 +4428,35 @@ The `publish` job keeps the draft, which answers that objection.
 
 **Accepted:** the lockfile format is a public preview, pre-1.0. A change in it shows as a red
 `lockfile` job, never as a silent pass.
+
+### D-122 — The packaged binary ships with six Electron fuses set; `grantFileProtocolExtraPrivileges` stays at its default (R230) · `settled`
+
+From the security review of 2026-10-16, finding 2. Plan and results:
+`docs/plans/R230-shipped-app-hardening.md` §5.
+
+**Chosen, in `electron-builder.yml`'s `electronFuses`:**
+- `runAsNode`, `enableNodeOptionsEnvironmentVariable` and `enableNodeCliInspectArguments` off;
+- `enableCookieEncryption`, `onlyLoadAppFromAsar` and `enableEmbeddedAsarIntegrityValidation` on.
+
+Before this, `ELECTRON_RUN_AS_NODE=1 Klados.exe <script>` ran any script under Klados's name and
+path. `test/packagedApp.test.ts` reads the fuses back from each platform's packaged binary and
+probes each route.
+
+**`grantFileProtocolExtraPrivileges` stays at its default, `true`, on every platform.** Off, a
+`file://` page can no longer read inside `app.asar`. `loadFile` of the app's own `index.html`
+fails with `ERR_FILE_NOT_FOUND` and the renderer crashes. That was measured on Windows, and the app
+failed to start on the Linux and macOS runners too. **Turning it off needs the renderer served from a
+custom scheme first**, which is its own round, and that is the measurement the plan said would
+justify one.
+
+**Asar integrity is enforced on Windows and macOS only.** On Linux a tampered archive runs: measured,
+with a control launch, and it matches Electron's documented scope. The fuse is harmless there, so one
+configuration serves all three platforms.
+
+**Recorded so nobody re-derives it:** a packaged Electron GUI refuses `NODE_OPTIONS=--require` with
+no fuse at all ("Most NODE_OPTIONs are not supported in packaged apps"). The fuse still matters, both
+for the options Electron does honour and so the variable is not read at all.
+
+**Accepted:** Playwright cannot drive the packaged binary, since it attaches through `--inspect`.
+The built-app suite (`mainElectron.test.ts`) runs the stock Electron against `out/`, which no fuse
+touches.
