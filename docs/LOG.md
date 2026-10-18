@@ -16,6 +16,34 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R229 — no write token where third-party code runs, locked actions, immutable releases · built ⚠
+
+**Plan:** `docs/plans/R229-release-token-scope.md` · **Decisions:** D-121, D-095 amended
+
+From the security review of 2026-10-16. **The release workflow gave every step a token that could
+replace a published installer and its checksum**, including `npm ci`'s install scripts, the test
+suite and the build. Those are all third-party code, and the builds are unsigned, so nobody
+downstream would have noticed. Now:
+- **The builds** hold a read-only token and stop at `--publish never`.
+- **A `publish` job** holds the only write token and runs no npm, no Node and no checkout. It hashes
+  the built files and puts them on the draft, `SHA256SUMS.txt` included, in one go.
+- **No checkout** leaves its token in `.git/config` any more.
+- **A probe in the rehearsal's build jobs** got `HTTP 403` trying to create a release, on all four
+  legs.
+
+**Every action is now locked** to a commit by GitHub's new workflow lockfile, and `uses:` lines stay
+on exact version tags, so Dependabot alerts keep working. A `lockfile` job checks it. **GitHub turned
+out to enforce the lockfile itself:** a scratch branch naming a version the lockfile did not cover
+never started, with "Invalid lockfile".
+
+**`npm ci --ignore-scripts` passed on all three runners**, the packaging builds included, so it is now
+used in both workflows.
+
+Owed: immutability can only be measured on the next tagged release, and two settings are the
+project lead's to switch after the merge.
+
+---
+
 ## R236–R238 — Save writes in place and checks for room; the watcher follows the path; a watch race · built
 
 **Plan:** `docs/plans/R236-save-and-watch.md` · **Decisions:** D-119, D-120

@@ -85,6 +85,14 @@ jobs:
           node-version: 22
           cache: npm
 
+      # R229 §2E: no install scripts. Measured on all three runners, CI and the
+      # packaging builds alike, before adopting it: nothing here needs one. The
+      # six packages that declare one (esbuild ×3, fsevents ×2,
+      # electron-winstaller) and the project's own `postinstall`
+      # (`electron-builder install-app-deps`, with `npmRebuild: false` and no
+      # native modules) were all skippable, and Electron itself is installed
+      # explicitly below. A dependency's install script is the first code a
+      # compromised version runs; this removes that half of the exposure.
       - run: npm ci --ignore-scripts
 
       # R221 (`docs/plans/R221-electron-44.md` § 3.1): from Electron 42 the

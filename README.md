@@ -41,6 +41,22 @@ trade-off doesn't suit you, [building it yourself](#development) takes about two
 Every release also includes a `SHA256SUMS.txt` with checksums for each build, if you want to verify
 your download.
 
+Releases from the one after 1.2.2 on are also **immutable**: once published, GitHub refuses any
+change to their files or their tag, and signs a record of them. With the
+[GitHub CLI](https://cli.github.com/) 2.81 or later, you can check both a release and a file you
+downloaded from it:
+
+```bash
+gh release verify v1.3.0 -R mincowski/klados
+```
+
+```bash
+gh release verify-asset v1.3.0 klados-1.3.0-setup.exe -R mincowski/klados
+```
+
+Use the version you downloaded. This proves the file is the one the release was published with. It
+does not prove how the file was built.
+
 ## What it does today
 
 | Format | Opens |

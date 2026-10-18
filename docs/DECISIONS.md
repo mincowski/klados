@@ -141,6 +141,7 @@ Search for the id to jump to one.
 | **D-118** | A reload commits only onto the buffer it started from, and past the open path's limits it refuses rather than asks |  |
 | **D-119** | Save writes the file in place, after a free-space check, and flushes it; never by rename, never with a backup copy |  |
 | **D-120** | On Linux and macOS a file is watched through its folder; Windows keeps the file watch |  |
+| **D-121** | Releases are built with a read-only token and published by a job that runs no third-party code; actions are locked by a lockfile, not by SHAs |  |
 
 ---
 
@@ -3337,18 +3338,18 @@ and would imply these patterns govern it.
 ### D-095 — rehearse a release with `workflow_dispatch` before tagging, once anything has been published · `settled`
 
 `release.yml` runs on a `v*` tag **and** on `workflow_dispatch`. The two paths build identically —
-same 4-job matrix, same `npm run package --publish always`, and both produce a **draft** release
-that a human publishes. They differ in exactly three things:
+same 4-job matrix, same `publish` job, and both produce a **draft** release that a human
+publishes. They differ in exactly two things:
 
 | | `workflow_dispatch` | tag push |
 |---|---|---|
 | tag-matches-`package.json` assertion | skipped | runs |
-| `checksums` job → `SHA256SUMS.txt` | skipped | runs |
 | git tag created or moved | **no** | yes |
 
-The dispatch path creates no git tag: electron-publish looks a release up by name rather than by
-tag because, in its own words, *"we draft release and don't create git tag"*
-(`electron-publish/out/gitHubPublisher.js`).
+The dispatch path creates no git tag: a draft release's tag only comes into being when the draft is
+published. *(R229 amendment: before R229, electron-publish created the draft, and `SHA256SUMS.txt`
+was made only on a tag. Since R229 the `publish` job creates or reuses it with `gh`, and the sums are
+made on both paths.)*
 
 **Decided: once any release has been published, rehearse with `workflow_dispatch` before moving a
 tag.** Inspect the draft it produces, delete it, then tag.
@@ -3372,10 +3373,17 @@ why rehearsing buys nothing before publication. What it buys afterwards is that 
 cost of learning this the other way: three of the first ten commits broke only when a tag started a
 release build, "each costing a deleted draft release and a moved tag".
 
-**Delete the rehearsal draft before tagging.** `getOrCreateRelease` matches an existing release by
-name and reuses it if it is a draft, so a later tag run uploads into the same one. At an unchanged
+**Delete the rehearsal draft before tagging.** The `publish` job reuses an existing draft of the same
+tag, so a later tag run uploads into the same one. At an unchanged
 version the filenames collide and are overwritten, but an asset the tagged build did not produce
 can otherwise survive into a published release.
+
+**R229: moving a tag after publication is now refused by GitHub, not only forbidden here.** With
+release immutability on, a published release's files cannot be changed and its tag cannot be moved
+or deleted, and the tag name cannot be reused. The rehearsal rule stays, for its other reason, which
+is now sharper: **a published mistake can only be corrected with a new version.** Drafts are not
+affected, so rehearsals work as before. The `publish` job also refuses to upload to a release that is
+already published.
 
 ---
 
@@ -4375,3 +4383,47 @@ A real-filesystem test asserts the deletion stays a handful of events where the 
 
 **Rejected: re-arming the file watch after each `rename`** (plan §2). Between the unlink and the
 rename the file can briefly not exist. A re-arm that loses that race leaves no watch at all, silently.
+
+### D-121 — Releases are built with a read-only token and published by a job that runs no third-party code; actions are locked by a lockfile, not by SHAs (R229) · `settled`
+
+From the security review of 2026-10-16, finding 1, as widened by the project lead on 2026-10-17.
+Plan and results: `docs/plans/R229-release-token-scope.md`.
+
+**The finding.** `release.yml` held `contents: write` at workflow level. `actions/checkout` left the
+token in `.git/config`, and electron-builder was handed it directly. So `npm ci`'s install scripts,
+the test suite and the build, all third-party code, ran with a token that could replace a published
+installer and its `SHA256SUMS.txt` in one move. The builds are unsigned, so nothing downstream would
+notice.
+
+**Chosen: two jobs.**
+- **The build jobs** hold `contents: read`. They run `electron-builder --publish never` and upload
+  their files as workflow artifacts.
+- **A `publish` job** holds the only `contents: write`. It runs no checkout, no `npm` and no Node. It
+  downloads the artifacts and hashes them before uploading. It then creates or reuses the draft with
+  `gh`, named as electron-builder named it, and puts every file and `SHA256SUMS.txt` on it together.
+  It refuses to touch a release that is already published.
+- `persist-credentials: false` on every checkout, and `ci.yml` says `contents: read` itself.
+
+R198 had rejected "`--publish never` plus manual upload" because it lost the draft R141 relies on.
+The `publish` job keeps the draft, which answers that objection.
+
+**Chosen: a workflow lockfile (`gh actions-lock`), not SHAs in `uses:`.**
+- Both lock the commit. The lockfile keeps `uses:` on exact version tags (`@v7.0.1`).
+- GitHub's Dependabot creates no alerts for actions pinned to SHAs. SHA pins would have switched off
+  security alerts for actions.
+- The lockfile records each action's owner and repository ids as well, which catches a repository
+  deleted and re-registered under the same name.
+- A `lockfile` job in `ci.yml` runs `gh actions-lock --verify`, with the extension itself pinned
+  (`--pin v0.2.0`). Dependabot does not update that pin.
+- Dependabot keeps actions current monthly, grouped (`.github/dependabot.yml`).
+
+**Rejected:**
+- **GitHub's suggested `update` job**, which regenerates the lockfile and commits it with a write
+  token. That is a write token committing to `main` past review.
+- **The *require full-length SHA pins* repository setting.** It demands what the lockfile approach
+  deliberately does not write.
+- **Signing and build provenance** (R224, R226 closed). Immutable releases (R229 §2F) prove a
+  downloaded file is the published one, not how it was built.
+
+**Accepted:** the lockfile format is a public preview, pre-1.0. A change in it shows as a red
+`lockfile` job, never as a silent pass.

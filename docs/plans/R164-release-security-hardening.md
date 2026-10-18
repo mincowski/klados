@@ -299,6 +299,15 @@ Because the release workflow only truly runs on a tag (the R141/R151 ordering le
 plainly that its first *real* exercise is the 1.0.0 tag, and the step is written to fail the job —
 not silently skip — if it finds no artifacts to hash.
 
+**Reshaped by R229 (`docs/plans/R229-release-token-scope.md`).** The `checksums` job described here
+and in §8 no longer exists. The build jobs now hold a read-only token and stop at `--publish never`.
+A `publish` job, the only one with `contents: write`, downloads their files as workflow artifacts
+and hashes them **before** uploading anything, then puts every file and `SHA256SUMS.txt` on the
+draft together. The sums no longer round-trip through the release. They also run on a
+`workflow_dispatch` rehearsal now, not only on a tag. The reason is R229's: the old shape gave every
+step, `npm ci` and the test suite included, a token that could replace an installer and its checksum
+in one move.
+
 **Cost:** a workflow step (a few lines of `sha256sum` / `shasum` / `Get-FileHash`) and a README
 section. No dependency, no code change.
 

@@ -732,3 +732,8 @@ union in `src/preload/api.ts` (R193) keeps the renderer's declared environment h
   pieces** (566 ms against 106 ms in 4 MiB pieces; 338 ms again at 32 MiB), measured on Windows 11 /
   Node 24 (R237). `writeFile` writes in pieces itself, which is why replacing it with a plain
   `write` quietly costs 400 ms.
+- **A workflow whose `uses:` is missing from `.github/workflows/actions.lock` never starts.** GitHub
+  validates the lockfile before any job runs, so the run ends as `startup_failure` with "Invalid
+  lockfile" annotated on `actions.lock` line 1. It does not look like a red `lockfile` job (R229).
+  Any change to a `uses:` line, by hand or by Dependabot, needs `gh actions-lock` run in the same
+  commit.

@@ -110,6 +110,14 @@ jobs:
           node-version: 22
           cache: npm
 
+      # R229 §2E: no install scripts. Measured on all three runners, CI and the
+      # packaging builds alike, before adopting it: nothing here needs one. The
+      # six packages that declare one (esbuild ×3, fsevents ×2,
+      # electron-winstaller) and the project's own `postinstall`
+      # (`electron-builder install-app-deps`, with `npmRebuild: false` and no
+      # native modules) were all skippable, and Electron itself is installed
+      # explicitly below. A dependency's install script is the first code a
+      # compromised version runs; this removes that half of the exposure.
       - run: npm ci --ignore-scripts
 
       # R221 (`docs/plans/R221-electron-44.md` § 3.1): from Electron 42 the
@@ -123,25 +131,7 @@ jobs:
       - name: Version
         id: version
         shell: bash
-        run: echo "version=$(node -p "require('./package.json').version")-r229-rehearsal" >> "$GITHUB_OUTPUT"
-
-      # R229 TEMPORARY (criterion 4), removed before merge: the token must be
-      # neither in .git/config nor able to write.
-      - name: R229 probe
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          set +e
-          git config --get-regexp 'http\..*\.extraheader'
-          echo "git config --get-regexp exit: $?"
-          gh release create r229-probe --draft --title probe
-          status=$?
-          echo "gh release create exit: $status"
-          if [ $status -eq 0 ]; then gh release delete r229-probe --yes; exit 1; fi
-          git config --get-regexp 'http\..*\.extraheader' >/dev/null && exit 1
-          exit 0
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
 
       # The tag and `package.json` are *not* connected: electron-builder takes
       # the version from package.json and GitHub takes the release name from the
