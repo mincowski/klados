@@ -198,11 +198,25 @@ jobs:
       # there is nowhere to show it.
       #
       # Windows and macOS runners have a desktop session already, so this is
-      # one of exactly three Linux-only steps — this one, the vendor-apt-source
-      # removal above, and the `xvfb-run` branch inside the test step below.
+      # one of exactly four Linux-only steps — this one, the vendor-apt-source
+      # removal above, the sandbox helper step below, and the `xvfb-run` branch
+      # inside the test step.
       - name: Install xvfb
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      # R230: `test/packagedApp.test.ts` launches the `--dir` binary itself.
+      # On Linux, Chromium's sandbox helper must be setuid root, or the app
+      # aborts before its first window ("The SUID sandbox helper binary was
+      # found, but is not configured correctly"), which is what CI measured. The
+      # `.deb` sets this up when it is installed; a checkout cannot. This does
+      # the same, rather than `--no-sandbox`, which would test a weaker app
+      # than the one shipped.
+      - name: Configure the packaged app's sandbox helper
+        if: runner.os == 'Linux'
+        run: |
+          sudo chown root:root dist/linux-unpacked/chrome-sandbox
+          sudo chmod 4755 dist/linux-unpacked/chrome-sandbox
 
       - name: Test
         shell: bash
