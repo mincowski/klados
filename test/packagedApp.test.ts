@@ -34,6 +34,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync
 } from 'node:fs'
 import { connect } from 'node:net'
@@ -280,12 +281,16 @@ describe('R230 — an edited app.asar is refused', () => {
       const copyAsar = path.join(copyRoot, path.relative(root, asar))
       const copyBinary = path.join(copyRoot, path.relative(root, BINARY!))
       // On Linux the copy's `chrome-sandbox` is no longer setuid root, and
-      // Chromium would abort for that reason alone, whatever the archive
-      // holds. It is pointed at the original helper, which CI configured.
-      const env: Record<string, string> =
-        process.platform === 'linux'
-          ? { CHROME_DEVEL_SANDBOX: path.resolve(root, 'chrome-sandbox') }
-          : {}
+      // Chromium aborts for that reason alone, whatever the archive holds.
+      // `CHROME_DEVEL_SANDBOX` is not honoured by the packaged app (measured),
+      // so the copy's helper becomes a link to the original, which CI made
+      // setuid root; the check follows the link.
+      if (process.platform === 'linux') {
+        const helper = path.join(copyRoot, 'chrome-sandbox')
+        rmSync(helper)
+        symlinkSync(path.resolve(root, 'chrome-sandbox'), helper)
+      }
+      const env: Record<string, string> = {}
 
       // The control: untampered, the copy starts. Without it, a refusal below
       // could be the copy failing for any reason at all, which is how the first
