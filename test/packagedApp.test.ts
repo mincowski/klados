@@ -32,6 +32,7 @@ import {
   existsSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync
@@ -98,8 +99,16 @@ afterEach(() => {
   }
 })
 
+/** A fresh folder under the OS temp folder, by its **long** name.
+ *
+ * The Windows runner's temp folder is `C:UsersRUNNER~1…`, an 8.3 short
+ * name, and Klados launched from a path with one refuses every IPC call from
+ * its own page: R164's sender guard compares the app's `file:` path exactly,
+ * and the two spellings differ. That is a defect of its own (found here,
+ * reported separately), not what these tests measure, so the copies and
+ * profiles they launch live at the long name. */
 function tempDir(prefix: string): string {
-  const dir = mkdtempSync(path.join(tmpdir(), prefix))
+  const dir = realpathSync.native(mkdtempSync(path.join(tmpdir(), prefix)))
   temps.push(dir)
   return dir
 }
