@@ -281,3 +281,18 @@ Each part's diff was read before the commit. Found and fixed:
 - **The built-app test's first version used the plan's `page.evaluate(() => 1)` probe**, which the
   measurement in §6.1 showed would pass against `main`'s build too. It was rewritten to measure the
   frame gap, and run against both builds: it fails on `main`'s and passes on this one.
+
+### 6.6 After the merge: the test measures long tasks, not frame gaps
+
+**Criterion 1's frame-gap assertion failed once on `macos-latest`**, on PR #71, a docs-only change:
+a 1,399 ms gap against the 500 ms budget. It had passed on macOS in #70's own run. A frame gap is
+not only the main thread being busy: Chromium also stops painting a window it treats as hidden,
+which is a plausible state for a window on a CI runner. So it could fail with nothing blocked.
+
+The test now asserts the **longest main-thread long task** overlapping the search (a
+`PerformanceObserver` for `longtask`), under the same 500 ms, and that the browser supports that
+entry type, so "no long task" cannot pass vacuously. Run against both builds:
+- the code before R239: red, *"expected 17803 to be less than 500"*;
+- this code: green.
+
+§6.1's frame-gap figures stand as measurements; only the assertion changed.

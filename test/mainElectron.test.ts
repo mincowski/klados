@@ -742,12 +742,18 @@ describe.skipIf(!builtAppAvailable)('the built app via _electron (R51, R58)', ()
    * worker, the 2 s deadline stops the search and says so, and Escape
    * terminates the worker.
    *
-   * **Responsiveness is measured inside the page, as the longest gap between
-   * animation frames, not with `page.evaluate(() => 1)`** as the plan
-   * proposed. Chromium answers a DevTools evaluation from inside running
-   * JavaScript: on the build before R239 that probe answered in 5 ms while the
-   * window was frozen for 17.8 s, so it could not tell the two builds apart
-   * (R239 §6).
+   * **Responsiveness is measured inside the page, as the longest main-thread
+   * task, not with `page.evaluate(() => 1)`** as the plan proposed. Chromium
+   * answers a DevTools evaluation from inside running JavaScript: on the build
+   * before R239 that probe answered in 5 ms while the window was frozen for
+   * 17.8 s, so it could not tell the two builds apart (R239 §6).
+   *
+   * **Not as the gap between animation frames either**, which the first
+   * version used. On a `macos-latest` runner the gap was 1,399 ms once and
+   * under 500 ms on the run before; why was not diagnosed. A frame gap also
+   * measures whether Chromium paints at all, which it may not for a window it
+   * treats as hidden. A long task is the main thread itself being busy,
+   * whatever is painted. The build before R239 has one of 17,775 ms.
    *
    * The worker count is Playwright's own list of the page's workers,
    * so it sees a worker that is still running whatever the app's bookkeeping
@@ -755,8 +761,8 @@ describe.skipIf(!builtAppAvailable)('the built app via _electron (R51, R58)', ()
    * (measured, R239 §6), past `expect.poll`'s 1 s default, hence `TIMEOUT_MS`.
    */
   it('R239: a backtracking regex leaves the window responsive, stops, and Escape ends it', async () => {
-    // Criterion 1's 500 ms, as the longest the page may go without a frame.
-    const FRAME_GAP_BUDGET_MS = 500
+    // Criterion 1's 500 ms, as the longest the main thread may be busy at once.
+    const LONG_TASK_BUDGET_MS = 500
     // The 2 s per-window deadline plus criterion 1's 1 s.
     const NOTIFICATION_BUDGET_MS = 3000
     const SEARCH_END_TIMEOUT_MS = 30_000
@@ -786,47 +792,49 @@ describe.skipIf(!builtAppAvailable)('the built app via _electron (R51, R58)', ()
     await page.locator('.find-toggle[title="Use regular expression"]').click()
     const count = page.locator('.find-count-value')
 
-    // Criterion 1. Every frame's time, and when the count says the search
-    // started and ended, all on the page's own clock.
-    await page.evaluate(() => {
-      const record = { frames: [] as number[], started: 0, ended: 0 }
+    // Criterion 1. Every long task, and when the count says the search started
+    // and ended, all on the page's own clock.
+    const longTasksObservable = await page.evaluate(() => {
+      const record = { tasks: [] as { start: number; end: number }[], started: 0, ended: 0 }
       ;(window as unknown as { __r239: typeof record }).__r239 = record
-      function frame(time: number): void {
-        record.frames.push(time)
-        requestAnimationFrame(frame)
-      }
-      requestAnimationFrame(frame)
+      new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          record.tasks.push({ start: entry.startTime, end: entry.startTime + entry.duration })
+        }
+      }).observe({ type: 'longtask' })
       const label = document.querySelector('.find-count-value')!
       new MutationObserver(() => {
         if (label.textContent === 'Searching…') record.started = performance.now()
         else if (record.started !== 0 && record.ended === 0) record.ended = performance.now()
       }).observe(label, { childList: true, characterData: true, subtree: true })
+      return PerformanceObserver.supportedEntryTypes.includes('longtask')
     })
+    // Not vacuous: without the entry type, "no long task" would always hold.
+    expect(longTasksObservable).toBe(true)
     await input.fill('(a+)+$')
     // Long enough for the build before R239 to come out of its ~18 s freeze,
-    // so that build fails on the frame gap below rather than on this wait.
+    // so that build fails on the long task below rather than on this wait.
     await page.waitForFunction(
       () => (window as unknown as { __r239: { ended: number } }).__r239.ended !== 0,
       undefined,
       { timeout: SEARCH_END_TIMEOUT_MS }
     )
-    const { searchMs, framesDuring, longestGap } = await page.evaluate(() => {
-      const { frames, started, ended } = (
-        window as unknown as { __r239: { frames: number[]; started: number; ended: number } }
+    const { searchMs, longestTask } = await page.evaluate(() => {
+      const { tasks, started, ended } = (
+        window as unknown as {
+          __r239: { tasks: { start: number; end: number }[]; started: number; ended: number }
+        }
       ).__r239
-      const during = frames.filter((time) => time >= started && time <= ended)
-      // The gaps that overlap the search, including the one into it and the
-      // one out of it.
+      // Every task that overlaps the search, including one running into it or
+      // out of it.
       let longest = 0
-      for (let i = 1; i < frames.length; i++) {
-        if (frames[i]! < started || frames[i - 1]! > ended) continue
-        longest = Math.max(longest, frames[i]! - frames[i - 1]!)
+      for (const task of tasks) {
+        if (task.end < started || task.start > ended) continue
+        longest = Math.max(longest, task.end - task.start)
       }
-      return { searchMs: ended - started, framesDuring: during.length, longestGap: longest }
+      return { searchMs: ended - started, longestTask: longest }
     })
-    expect(longestGap).toBeLessThan(FRAME_GAP_BUDGET_MS)
-    // Not vacuous: frames were being recorded the whole time.
-    expect(framesDuring).toBeGreaterThan(10)
+    expect(longestTask).toBeLessThan(LONG_TASK_BUDGET_MS)
     expect(searchMs).toBeLessThanOrEqual(NOTIFICATION_BUDGET_MS)
     await page
       .locator('.notification-message', { hasText: 'takes too long to search with' })
