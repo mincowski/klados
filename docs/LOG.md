@@ -20,25 +20,7 @@ lines — read in full at the start of every session, and never once pruned.
 
 **Plan:** `docs/plans/R239-regex-find.md` · **Decision:** D-123, amending D-041
 
-From the review of 2026-10-16, finding 10. **A regex that backtracks froze the window**: `(a+)+# Klados — build log
-
-What was built, when, and what it turned out to cost. **Newest first.** Append-only: entries are
-never rewritten, only corrected in place with the correction visible.
-
-**Nobody reads this file end to end.** It is archaeology — the answer to "why is this like this?"
-and "did someone already try that?". For the small set of things worth knowing *before* touching
-anything, read `docs/FINDINGS.md` instead; for what's built right now, `docs/TASKS.md`'s board.
-
-**Entry titles are historical too.** An entry describing a round that was open when it was written
-keeps saying so; where a later round closed it, the correction is added in place and visible rather
-than the original being edited away.
-
-Moved out of `CLAUDE.md` by R32, which found that section had grown to 419 of that file's 615
-lines — read in full at the start of every session, and never once pruned.
-
----
-
-
+From the review of 2026-10-16, finding 10. **A regex that backtracks froze the window**: `(a+)+$`
 against thirty `a` and a `b` painted no frame for 17.8 s. Nothing could cancel it, short of killing
 the app and losing every tab's unsaved edits. Regex mode now matches in a worker, which is terminated
 after 2 s on one window, on Escape or a new query, and when the search ends. The same search now
