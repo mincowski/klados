@@ -79,10 +79,19 @@ function delimitedField(text: string, delimiter: string): string {
   return text
 }
 
-/** Markdown table cells can't contain a literal `|` or a raw newline
- * without breaking the table structure. */
+/** Markdown table cells can't contain a literal `|` or a line break
+ * without breaking the table structure.
+ *
+ * R233: `\` is escaped first, so a cell's own backslash before a `|` can
+ * never read as the pipe's escape. Unescaped, `a\|b` exported as `a\\|b`:
+ * GitHub's renderer drops the backslash (`a|b`), and one that counts
+ * backslashes would split the cell. Every line break becomes a space, a lone
+ * `\r` included, since GitHub ends a table row at one. */
 function markdownField(text: string): string {
-  return text.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ')
+  return text
+    .replace(/\\/g, '\\\\')
+    .replace(/\|/g, '\\|')
+    .replace(/\r\n|\r|\n/g, ' ')
 }
 
 /** A cell's export-relevant state, one per (row, visible column) — resolved

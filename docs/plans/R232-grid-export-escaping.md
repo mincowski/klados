@@ -1,13 +1,14 @@
 # R232–R233 — grid export: spreadsheet formulas, and Markdown escaping
 
-<!-- status: open -->
+<!-- status: built -->
 
-**R233 is open. R232 is closed without being built** (2026-10-17, D-117, §6): its mechanism was
-measured and is real, and the project lead decided the export keeps copying the grid's text unaltered.
+**R233 is built** (2026-10-18, §7). **R232 is closed without being built** (2026-10-17, D-117, §6):
+its mechanism was measured and is real, and the project lead decided the export keeps copying the
+grid's text unaltered. **§3's first claim was wrong in GitHub's renderer**: `a\|b` did not add a
+column there, it lost its backslash. The fix is the planned one and is correct either way (§7).
 Planned from the review of 2026-10-16: finding 4 (security, low) and finding 9 (functional, low). One
 topic because both are about what `src/renderer/components/Detail/gridExport.ts` does to a cell's text
-on the way to the clipboard. **Only R233 remains to be built**, in `markdownField`, and it needs no
-decision.
+on the way to the clipboard.
 
 ## 1. Where the text goes
 
@@ -98,7 +99,8 @@ is their record. The links pointed at `example.invalid`, which never resolves.
 `markdownField` escapes `|` as `\|` and replaces `\r?\n` with a space. It does not escape `\`
 itself:
 - **A cell containing `a\|b` becomes `a\\|b`.** In a GFM table that is an escaped backslash followed
-  by an unescaped `|`, so the row gains a column and every cell after it shifts right.
+  by an unescaped `|`, so the row gains a column and every cell after it shifts right. **Not so in
+  GitHub's renderer** (§7): the row keeps its columns and the cell shows `a|b`, its backslash lost.
 - **A lone `\r`** (old Mac line endings, or a CR inside an attribute value) is not replaced, so it
   reaches the clipboard and splits the row in tools that treat CR as a line break.
 
@@ -144,3 +146,80 @@ withdrawn once that cost was weighed.
 following D-008's split between the faithful path and an explicit transformation. Not scheduled.
 
 **No code changed.** R233 is unaffected and still open.
+
+## 7. Results — R233 (2026-10-18)
+
+Landed on branch `r233-markdown-escaping`. `markdownField` now escapes `\` as `\\`, then `|` as `\|`,
+and replaces every `\r\n`, `\n` and `\r` with a space, as §3 planned.
+
+### 7.1 The rendering before the fix (§3's "verify before fixing")
+
+No GFM renderer is installed, and none was added. The rendering used **GitHub's own renderer**:
+`gh api markdown` with `mode: gfm`, the endpoint behind GitHub's preview. The input was the real
+`exportGrid` output for a document of six rows, one for each cell §4 names (`a\|b`, `a\b`,
+`x\ry`, `x\r\ny`, `x\ny`, `|`), each with a second column holding `after`. The export was:
+
+```
+| v | w |
+| --- | --- |
+| a\\|b | after |
+| a\b | after |
+| x<CR>y | after |
+| x y | after |
+| x y | after |
+| \| | after |
+```
+
+where `<CR>` is a literal carriage return. GitHub rendered **seven body rows for six**:
+- `a\|b`: two columns, but the cell shows `a|b`. **The backslash is lost.**
+- `a\b`: two columns, `a\b`.
+- `x\ry`: **split into two rows**, `x` with an empty second cell, then `y` and `after`.
+- `x\r\ny` and `x\ny`: two columns, `x y`.
+- `|`: two columns, `|`.
+
+**§3's first claim did not hold in this renderer.** cmark-gfm, which GitHub uses, splits a row at
+every `|` *not preceded by a backslash*, without counting the backslashes, so `\\|` is still an
+escaped pipe there. The defect was still real, only different: a lost backslash rather than
+shifted columns. **The planned fix is correct in both models.** `a\|b` exports as `a\\\|b`. GitHub
+reads that as the escaped pipe `\|`, then the inline `\\` as one backslash, which renders `a\|b`. A
+renderer that counts backslashes sees three, an odd number, so the pipe is escaped there too.
+Since the fix was unchanged, the round went ahead rather than stopping.
+
+**Not measured:** any renderer other than GitHub's. Whether some renderer does add a column for
+`a\\|b`, as §3 expected, is unknown.
+
+### 7.2 After the fix (criterion 7)
+
+The same probe, after the fix:
+
+```
+| v | w |
+| --- | --- |
+| a\\\|b | after |
+| a\\b | after |
+| x y | after |
+| x y | after |
+| x y | after |
+| \| | after |
+```
+
+GitHub rendered **six body rows, every one with two columns**, with the texts `a\|b`, `a\b`, `x y`
+(three times) and `|`: every cell as it is in the document, except that line breaks are spaces.
+
+### 7.3 Tests and mutations
+
+| # | Criterion | Result |
+|---|---|---|
+| 6 | Exact Markdown for the six cells; each row has the header's count of unescaped pipes | Pass. `test/gridExport.test.ts`, one test per cell. A pipe counts as escaped only after an odd number of backslashes |
+| 7 | §3's rendering repeated on the fixed output | Pass (§7.2) |
+| 8 | Reverting the backslash escape turns the backslash-pipe cell red | Pass: it and `a\b` go red, nothing else |
+
+A second mutation, restoring `/\r?\n/`, turns `x\ry` red and nothing else. Both mutations were
+checked in the diff before their runs were read.
+
+### 7.4 Review
+
+The diff was read before the commit. Criteria 6 and 8 are written out in the table above without the
+pipe cell itself, because GitHub would render it as `a|b` there too. One correction: the first version of `markdownField`'s
+comment stated as fact that a renderer counting backslashes splits the cell. That was not
+measured, so the comment now says it would.

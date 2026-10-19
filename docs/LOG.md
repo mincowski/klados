@@ -16,6 +16,23 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R233 — Markdown export escapes backslashes and every line break · built
+
+**Plan:** `docs/plans/R232-grid-export-escaping.md` §3, §7
+
+From the review of 2026-10-16, finding 9. **Copy as Markdown escaped `|` but not `\`**, and turned
+only `\n` and `\r\n` into spaces. Rendered with GitHub's own renderer before fixing:
+- **A lone `\r` split the table row in two**, as the plan said.
+- **A cell `a\|b` did not add a column**, which the plan expected. GitHub showed it as `a|b`: its
+  backslash was silently lost. GitHub treats any `|` after a `\` as escaped and does not count
+  the backslashes.
+
+The fix is the planned one: escape `\` first, then `|`, and turn every `\r\n`, `\n` and `\r` into a
+space. It renders every cell faithfully on GitHub, and it is also correct for a renderer that
+does count backslashes. R232 stays closed (D-117): grid export still does no formula escaping.
+
+---
+
 ## R230–R231 — the shipped binary: Electron fuses, and the `file:` host · built ⚠
 
 **Plan:** `docs/plans/R230-shipped-app-hardening.md` · **Decision:** D-122
