@@ -296,3 +296,9 @@ entry type, so "no long task" cannot pass vacuously. Run against both builds:
 - this code: green.
 
 §6.1's frame-gap figures stand as measurements; only the assertion changed.
+
+**The browser test's deadline cases used a 300 ms deadline, and failed once on `windows-latest`** on
+the same PR: no matches, where the first window's matches were expected. The deadline also covers
+loading the worker for the first window, which on that runner took longer than 300 ms. Those cases
+now use the real 2 s deadline. **The app's own 2 s also covers that load**; locally the worker
+started in a few milliseconds.

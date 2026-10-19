@@ -144,12 +144,18 @@ describe('R239 — a backtracking pattern stops at the deadline', () => {
   const text = `${lead}${'a'.repeat(30)}b\n`
   const bytes = new TextEncoder().encode(text)
   const rowIndex = buildRowIndex(bytes, DEFAULT_MAX_ROW_BYTES, [0x0a])
+  // The real 2 s deadline. It also covers loading the worker for the first
+  // window: a 300 ms deadline timed out there on a slow `windows-latest`
+  // runner, before any window was searched.
 
   it('keeps the matches found before it and terminates the worker', async () => {
-    const job = runRegexFindJob(
-      { bytes, rowIndex, encoding: 'utf-8', needle: '(a+)+$', options: CS },
-      { deadlineMs: 300 }
-    )
+    const job = runRegexFindJob({
+      bytes,
+      rowIndex,
+      encoding: 'utf-8',
+      needle: '(a+)+$',
+      options: CS
+    })
     const value: RegexFindValue = await job.result
     expect(value.timedOut).toBe(true)
     // `$` anchors to the end of a window (`textFind.ts`), and no window ends
@@ -160,10 +166,13 @@ describe('R239 — a backtracking pattern stops at the deadline', () => {
   })
 
   it('a pattern that also matches early keeps those matches', async () => {
-    const job = runRegexFindJob(
-      { bytes, rowIndex, encoding: 'utf-8', needle: 'a b|(a+)+$', options: CS },
-      { deadlineMs: 300 }
-    )
+    const job = runRegexFindJob({
+      bytes,
+      rowIndex,
+      encoding: 'utf-8',
+      needle: 'a b|(a+)+$',
+      options: CS
+    })
     const value = await job.result
     expect(value.timedOut).toBe(true)
     // Every lead line holds `a b`. The 240 KB lead fills several windows
