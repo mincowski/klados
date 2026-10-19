@@ -4,14 +4,55 @@
 
 **Open.** Planned 2026-10-19, from R239 §6.4 (`docs/plans/R239-regex-find.md`): turning `u` on changed a
 test result, so the project lead shipped R239's worker without it and asked for `u` as its own change
-to D-097. This plan decides the five questions that change raises (§3–§7) and measures what each
-answer costs. **Nothing here is built yet, and the decisions take effect when the project lead
+to D-097. This plan decides the five questions that change raises (§3–§7), adds one D-082 never
+considered (§4a, keeping today's harmless escapes working), and measures what each answer costs.
+**§0 records that `u` was rejected twice before (D-082, R202), and why neither reason still holds**,
+including a regression in R205 that those measurements could not see. **Nothing here is built yet, and the decisions take effect when the project lead
 approves the plan.**
 
 D-097, unchanged in purpose: Find has **one folding algorithm**, so plain and regex mode agree **by
 construction**, and equivalence is **canonical**, not compatibility. Turning on `u` keeps all three.
 It changes which folding algorithm that one algorithm is: from the engine's legacy `toUpperCase`
 canonicalization to Unicode simple case folding.
+
+## 0. `u` was rejected twice before — what changed since
+
+**R72 §6 measured `u` and rejected it, recorded as D-082. R202 §10 rejected it again, citing D-082.**
+Neither rejection was wrong when made. Both rested on two arguments, and the ground under each has
+moved.
+
+**Argument 1: "fixes 58 of 154, leaves 96; it moves the boundary rather than unifying the two
+algorithms".** The 154 were disagreements *between the modes*: plain folded with `toLowerCase`, regex
+with the engine's `Canonicalize`, and `u` changed only the regex side. **R205 removed that premise**:
+plain case-insensitive search *is* the regex now (D-097). With `u` on in both modes, the modes cannot
+disagree, except for the four byte-path pairs that §3 closes. And R72's own yardstick for a *correct*
+fold was "Unicode simple case folding as the reference (what JS's regex `u` flag uses)": it scored
+`toLowerCase` at 94 wrong pairs and the round trip at 6. Under `u`, the engine's fold *is* that
+reference.
+
+**Argument 2: "it rejects Annex B syntax (`\-`, `a{`, `[a-\d]`), and `decodedTextMatches` swallows the
+throw, so a working regex silently reports zero matches. A worse failure than the one it fixes."**
+Two halves:
+- **The silence** is fixed by §4, which is needed regardless: `a(` and `*a` are invalid today and are
+  already shown as "No matches".
+- **The breakage** is mostly removed by §4a, which was not considered in D-082: rewrite escapes of
+  harmless punctuation (`\-`, `\:`, `\#`, …) before compiling. Measured: same matches as today on 26
+  of 26 patterns, 22 of them rescued from a syntax error. What still breaks is rarer (a lone `]` or
+  `}`, `a{`, `[a-\d]`, `\1` without a group), and it now says so.
+
+**What D-082 and R72 did not measure: R205 lost case-insensitive matching above U+FFFF.** Both measured
+U+0020–U+2FFF only. Measured now over every code point (§2.12): the pre-R205 plain fold
+(`toLowerCase`) equated **686 ordered pairs that today's fold does not**. **614 of them are astral**:
+Deseret, Osage, Adlam and others are not found case-insensitively in **either** mode today, because
+`Canonicalize` without `u` folds code units. The rest are the pairs D-097 already lists (`ß`/`ẞ`) or
+R239 §6.4 found (`ϴ`, Greek with ypogegrammeni). **`u` restores all 686.** So `u` repairs a regression
+nobody had measured, as well as D-097's accepted `ß`/`ẞ` loss.
+
+**What does not change from D-082/D-097:**
+- **Canonical, not compatibility.** NFKC stays rejected; `u` is case folding, not normalization.
+- **R76's length-changing mappings.** Simple case folding is one code point to one, so `İ` U+0130
+  still does not find `i̇`, and `ß` still does not find `ss`. The module's third limit stands.
+- **R204's NFC gating** on non-ASCII needles.
 
 ## 1. What `u` changes, from R239 §6.4
 
@@ -133,6 +174,40 @@ character class`). It would invalidate more of what users type, for no folding d
 **2.11 Nothing else compiles a user pattern.** The only other `new RegExp` in `src/` is
 `fileErrors.ts`'s fixed tag pattern. Replace works from match spans, so it inherits the result.
 
+**2.12 Three folds over every code point.** All 3,037 code points that case mapping or folding
+touches; an ordered pair counts when needle `c` finds text `d`. The bare fold, without R204's NFC, so it
+differs slightly from R239's pipeline count (680), which already includes what NFC recovers:
+
+| Fold | Pairs, all | U+0000–U+2FFF | Above U+FFFF |
+|---|---|---|---|
+| `toLowerCase` (plain mode before R205) | 2,990 | 1,904 | 614 |
+| regex `i` (both modes today) | 2,392 | 1,916 | **0** |
+| regex `iu` | 3,090 | 1,998 | 614 |
+
+- **686 pairs** that `toLowerCase` equated are not equated by today's fold: **614 astral** (e.g. Deseret
+  `𐐀`/`𐐨` U+10400/U+10428, Osage U+104B0/U+104D8, Adlam U+1E900/U+1E922), and 72 below U+FFFF: the
+  Kelvin and angstrom signs, `ß`/`ẞ`, `ϴ`, and 54 Greek letters in U+1F80–U+1FFF.
+- **`iu` equates all 686.** None remains lost.
+- **R72's range (U+0020–U+2FFF) contains none of the 614**, which is why R205's regression for astral
+  scripts was never visible.
+
+**2.13 Rewriting harmless identity escapes keeps today's meaning under `u`.** For each pattern, the
+matches of the rewritten pattern under `u` were compared with today's matches without `u`, over a
+probe string containing every rewritten character. The rule: `\` followed by a character that is
+**not** `A–Z`, `a–z`, `0–9` and **not** one of `^ $ \ . * + ? ( ) [ ] { } | /` becomes `\x` and two hex
+digits.
+
+| Pattern | Rewritten | Under `u` today | Same matches as today without `u` |
+|---|---|---|---|
+| `\-` `\_` `\:` `\#` `\@` `\%` `\=` `\!` `\,` `\"` `\'` `\<` `\>` `\ ` `\~` `` \` `` `\&` `\;` | `\x2d` … | throws | yes, all 18 |
+| `x\-y`, `\d\-\d`, `[\:\#]+`, `\.\-` | `x\x2dy`, … | throws | yes |
+| `[a\-z]`, `[\-]`, `[\w\-]+` | `[a\x2dz]`, … | ok | yes |
+| `\\-` (an escaped backslash, then `-`) | unchanged | ok | yes |
+
+**26 of 26 keep their meaning, and 22 that throw under `u` stop throwing.** `\xHH` is a literal character
+both inside and outside a class, so the rewrite needs no class tracking: a left-to-right pass that
+consumes `\` with the character after it, so `\\-` is not misread.
+
 ## 3. Decision 1 — the four regex-only pairs: route `k`/`s` needles to the decoded path
 
 **Decided:** a **case-insensitive, all-ASCII, plain** needle that contains `k`, `K`, `s` or `S` takes
@@ -205,6 +280,27 @@ The compile failure has to reach the UI as a state, not as an empty result. Toda
 The pattern is compiled **once, before the search starts**, on the main thread, and an invalid one
 ends the search with that state, without starting the worker.
 
+## 4a. Decision 2a — today's harmless escapes keep working
+
+**Decided, for the project lead to confirm with the plan:** before compiling in regex mode, rewrite
+every identity escape of a non-alphanumeric, non-syntax character to its `\x` form (§2.13's rule), so
+`\-`, `\:`, `\#` and the rest mean what they mean today. **Non-ASCII too**: `\` followed by a non-ASCII
+character becomes `\u{…}`, which `u` accepts and which is the same literal.
+
+**Why:** escaping punctuation "to be safe" is a habit from PCRE, Python and .NET, which all accept it,
+so it is what a user is most likely to type. Without the rewrite, `u` breaks exactly those patterns.
+That is the larger half of D-082's objection (§0), and §2.13 shows the rewrite preserves meaning.
+
+**What stays an error**, shown through §4: a lone `]`, `}` or `{`, `a{`, `{,2}`, `[a-\d]`, `[\w-x]`, `\1`
+without a group, `\8`, `\c`, `\x4`, `\k`. Making those work means re-implementing Annex B's grammar,
+and they are rare in hand-typed searches. Not proposed.
+
+**Shown as typed.** The rewrite is internal: the Find field keeps the user's text, and an error reason
+in the footnote refers to it as typed.
+
+**Cost:** one linear pass over the pattern, once per search. Plain mode needs none, since
+`escapeForRegex` emits only syntax-character escapes (§2.2).
+
 ## 5. Decision 3 — `u` applies to plain mode too
 
 **Decided: yes.** Plain case-insensitive search **is** a regex (R205), and D-097 requires the two
@@ -262,13 +358,22 @@ vitest timeout cannot fire because the loop never yields.
       misses, §3's presence-scan refinement is built and measured before landing; if that also
       misses, it goes to the project lead.
 12. **`docs/DECISIONS.md`**: a new entry amending D-097: one fold, now Unicode simple case folding;
-    `ß`/`ẞ` recovered; §3's routing; §4's display. D-097 itself gains a pointer to it.
+    `ß`/`ẞ` and the astral scripts recovered (§0); §3's routing; §4's display; §4a's rewrite. It answers
+    D-082's and R202's rejection of `u` point by point (§0), so the question is not reopened by
+    accident in the other direction. D-097 itself gains a pointer to it.
 13. **`docs/FINDINGS.md`**: the entry on code points that fold to ASCII (*"Only two non-ASCII code points
     lower-case to ASCII"*) gains the `iu` pairs of §2.1, and a new entry records §2.3's trap, since it
     bites any `lastIndex` loop under `u`, not only Find's.
 14. **`src/core/textFind.ts`'s module comment** is corrected: its claim that ASCII folding and the
     engine's agree on every case for an ASCII needle stops being true under `u` (`:46`), and the third
     "limit" gains `ß`/`ẞ` as found.
+15. **Astral scripts are found again, in both modes**: case-insensitive `𐐀` U+10400 finds `𐐨` U+10428
+    (Deseret), and likewise one pair each from Osage and Adlam, built from `\u{…}` escapes with a
+    code-point guard (R202's fixture rule). Each row is red against today's build.
+16. **§4a's rewrite**: a node test over §2.13's 26 patterns asserts that the rewritten pattern under
+    `u` gives the same matches as the original without `u`, on the same probe string, and that `\\-`
+    is left alone. In the Find bar, regex `x\-y` finds `x-y`. Mutation: dropping the rewrite turns the
+    18 single-escape rows red, as `Invalid pattern`.
 
 ## 8. Not in scope
 
