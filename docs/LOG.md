@@ -16,6 +16,48 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R239 — a regex Find that can be stopped · built
+
+**Plan:** `docs/plans/R239-regex-find.md` · **Decision:** D-123, amending D-041
+
+From the review of 2026-10-16, finding 10. **A regex that backtracks froze the window**: `(a+)+# Klados — build log
+
+What was built, when, and what it turned out to cost. **Newest first.** Append-only: entries are
+never rewritten, only corrected in place with the correction visible.
+
+**Nobody reads this file end to end.** It is archaeology — the answer to "why is this like this?"
+and "did someone already try that?". For the small set of things worth knowing *before* touching
+anything, read `docs/FINDINGS.md` instead; for what's built right now, `docs/TASKS.md`'s board.
+
+**Entry titles are historical too.** An entry describing a round that was open when it was written
+keeps saying so; where a later round closed it, the correction is added in place and visible rather
+than the original being edited away.
+
+Moved out of `CLAUDE.md` by R32, which found that section had grown to 419 of that file's 615
+lines — read in full at the start of every session, and never once pruned.
+
+---
+
+
+against thirty `a` and a `b` painted no frame for 17.8 s. Nothing could cancel it, short of killing
+the app and losing every tab's unsaved edits. Regex mode now matches in a worker, which is terminated
+after 2 s on one window, on Escape or a new query, and when the search ends. The same search now
+stops at 2 s with the window painting throughout, keeps what earlier windows found, and says so.
+Regex Find also got faster: 0.68× and 0.73× of its old time at 200 MB.
+
+**The plan's freeze test could not have failed.** It checked that `page.evaluate(() => 1)` answers.
+Chromium answers that from inside running JavaScript, so it answered in 5 ms during the 17.8 s
+freeze. The test now records animation frames inside the page and fails on `main` with a 17,788 ms
+gap. That one is in FINDINGS.
+
+**The `u` flag was measured and not turned on.** It changed one test: `ß` now finds `ẞ`. Across every
+cased code point it adds 680 matching pairs, most of them astral scripts. It would make plain and
+regex mode disagree on `k` and `s` against the Kelvin sign and `ſ`, and it rejects patterns that work
+today, such as `\-` and a lone `]`. The project lead chose to build the worker now and take `u` up
+separately.
+
+---
+
 ## R233 — Markdown export escapes backslashes and every line break · built
 
 **Plan:** `docs/plans/R232-grid-export-escaping.md` §3, §7

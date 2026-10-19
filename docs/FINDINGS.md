@@ -325,6 +325,14 @@ app's handlers and pass either way. **A feature that depends on a permission has
 built app** (`mainElectron.test.ts`). Fixed by R222, which grants that one permission to the app's own page; the
 lesson stands for the next permission-shaped feature.
 
+**`page.evaluate` answers while the renderer's main thread is frozen, so it cannot show a freeze.**
+Chromium serves a DevTools evaluation from inside running JavaScript, through a V8 interrupt, which is
+how `Debugger.pause` reaches a wedged thread. Measured in R239: during a 17.8 s regex `exec` that
+painted no frame, `page.evaluate(() => 1)` answered in 5 ms, and 34,643 back-to-back pings never
+took more than 18 ms. A test that asserts "the page answers" passes on a frozen window. **Measure
+responsiveness inside the page**: record `requestAnimationFrame` times, or a `longtask` observer,
+and assert the longest gap.
+
 **Predicting a consequence is not evaluating it.** D-054's icon split named the exact side effect
 that broke it and dismissed it in the same sentence. If a plan says "this might mean X," that is a
 thing to test, not a thing already handled.

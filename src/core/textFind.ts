@@ -205,7 +205,7 @@ export function decodedWindowsFor(
   return windows
 }
 
-interface DecodedText {
+export interface DecodedText {
   readonly text: string
   /** `checkpoints[i]` is the UTF-16 length of `rowTexts[0..i)` concatenated
    * — where row `startRow + i`'s own decoded text begins within `text`. */
@@ -569,8 +569,12 @@ function escapeForRegex(needle: string): string {
 }
 
 /** `{ index, length }` matches within `text`, in ascending order, string
- * (UTF-16) coordinates — not yet mapped to bytes. */
-function decodedTextMatches(
+ * (UTF-16) coordinates — not yet mapped to bytes.
+ *
+ * R239: exported because regex mode runs this one call in a worker
+ * (`regexFind.worker.ts`), on the text `prepareDecodedWindow` produced. It is
+ * the only part of the decoded path that can run unboundedly long. */
+export function decodedTextMatches(
   text: string,
   needle: string,
   options: TextFindOptions
@@ -637,22 +641,34 @@ function decodedTextMatches(
 }
 
 /**
- * Matches owned by `window` — a match belongs to the window whose byte
- * range its **start** falls the earliest inside, so consecutive windows'
- * results tile the byte space with no gaps and no duplicates despite their
- * one-row overlap. Every window's own decoded text has full context to
- * either side of any match it owns, since the overlap row is present
- * (whole) in both the window that gives it up and the one that claims it.
+ * One window, decoded and made ready to match against: everything
+ * `findDecodedInWindow` does before `decodedTextMatches`, kept so the matches
+ * can be mapped back to bytes afterwards by `mapWindowMatches`.
+ *
+ * R239 split `findDecodedInWindow` here so regex mode can run the match
+ * itself in a worker. `text` and `needle` are exactly what that worker is
+ * given: the normalized window and the normalized needle, never the raw
+ * decoded text, so the worker's indices are in the same coordinates
+ * `mapWindowMatches` maps from.
  */
-export function findDecodedInWindow(
+export interface PreparedWindow {
+  readonly window: DecodedWindow
+  /** What to match against: the window after R204's normalization. */
+  readonly text: string
+  /** What to match: the needle after R204's normalization. */
+  readonly needle: string
+  readonly decoded: DecodedText
+  readonly normalized: NormalizedWindow
+}
+
+export function prepareDecodedWindow(
   bytes: Uint8Array,
   rowIndex: Int32Array,
   encoding: string,
   needle: string,
-  options: TextFindOptions,
   window: DecodedWindow,
   bytesLength: number
-): MatchSet {
+): PreparedWindow {
   const decoded = decodeWindow(bytes, rowIndex, encoding, window, bytesLength)
 
   // R204. Normalization is applied only for a needle that is not pure ASCII,
@@ -671,11 +687,35 @@ export function findDecodedInWindow(
   const normalized: NormalizedWindow = normalize
     ? normalizeWindowForSearch(decoded.text)
     : identityWindow(decoded.text)
-  const searchNeedle = normalize ? needle.normalize('NFC') : needle
-  const toOriginal = (index: number): number => originalIndexOf(normalized, index)
+  return {
+    window,
+    text: normalized.text,
+    needle: normalize ? needle.normalize('NFC') : needle,
+    decoded,
+    normalized
+  }
+}
 
-  const matches = decodedTextMatches(normalized.text, searchNeedle, options)
+/**
+ * Matches owned by the window — a match belongs to the window whose byte
+ * range its **start** falls the earliest inside, so consecutive windows'
+ * results tile the byte space with no gaps and no duplicates despite their
+ * one-row overlap. Every window's own decoded text has full context to
+ * either side of any match it owns, since the overlap row is present
+ * (whole) in both the window that gives it up and the one that claims it.
+ *
+ * `matches` are in `prepared.text`'s coordinates, as `decodedTextMatches`
+ * returns them.
+ */
+export function mapWindowMatches(
+  prepared: PreparedWindow,
+  matches: ReadonlyArray<{ readonly index: number; readonly length: number }>,
+  rowIndex: Int32Array,
+  encoding: string
+): MatchSet {
   if (matches.length === 0) return EMPTY_MATCH_SET
+  const { window, decoded, normalized } = prepared
+  const toOriginal = (index: number): number => originalIndexOf(normalized, index)
 
   const isLastWindow = window.endRow >= rowIndex.length
   // The handoff boundary: this window's last row is the next window's
@@ -699,6 +739,24 @@ export function findDecodedInWindow(
     ends.push(end)
   }
   return { starts: Int32Array.from(starts), ends: Int32Array.from(ends) }
+}
+
+/** The matches `window` owns, matched on this thread: `prepareDecodedWindow`,
+ * `decodedTextMatches`, `mapWindowMatches`. Plain Find runs this; regex mode
+ * runs the same three steps with the middle one in a worker, and this stays
+ * the reference that path is tested against. */
+export function findDecodedInWindow(
+  bytes: Uint8Array,
+  rowIndex: Int32Array,
+  encoding: string,
+  needle: string,
+  options: TextFindOptions,
+  window: DecodedWindow,
+  bytesLength: number
+): MatchSet {
+  const prepared = prepareDecodedWindow(bytes, rowIndex, encoding, needle, window, bytesLength)
+  const matches = decodedTextMatches(prepared.text, prepared.needle, options)
+  return mapWindowMatches(prepared, matches, rowIndex, encoding)
 }
 
 /**

@@ -178,7 +178,8 @@ describe('createSearchStore (G4)', () => {
       ends: new Int32Array(0),
       complete: true,
       provisional: false,
-      stale: false
+      stale: false,
+      timedOut: false
     })
     store.dispose()
   })
@@ -318,7 +319,8 @@ describe('createSearchStore (G4)', () => {
       ends: new Int32Array(0),
       complete: true,
       provisional: false,
-      stale: false
+      stale: false,
+      timedOut: false
     })
     store.dispose()
   })
@@ -480,7 +482,8 @@ describe('createSearchStore (G4)', () => {
         ends: new Int32Array(0),
         complete: true,
         provisional: false,
-        stale: false
+        stale: false,
+        timedOut: false
       })
       store.dispose()
     })

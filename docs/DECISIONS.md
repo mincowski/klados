@@ -143,6 +143,7 @@ Search for the id to jump to one.
 | **D-120** | On Linux and macOS a file is watched through its folder; Windows keeps the file watch |  |
 | **D-121** | Releases are built with a read-only token and published by a job that runs no third-party code; actions are locked by a lockfile, not by SHAs |  |
 | **D-122** | The packaged binary ships with six Electron fuses set; `grantFileProtocolExtraPrivileges` stays at its default |  |
+| **D-123** | Regex Find matches in a worker that a 2 s per-window deadline or a cancel terminates; amends D-041 for regex matching only |  |
 
 ---
 
@@ -850,6 +851,9 @@ nearly free rather than a seam change, flipping this calculation entirely. Or if
 kind of thing only real use settles.
 
 ### D-041 — Search and query run chunked on the main thread, not in the worker · `settled`
+
+**Amended by D-123 (R239) for regex matching only**, which now runs in a terminable worker. Plain
+Find, grid filter and path queries stay as below.
 
 **A deviation from `CONCEPT.md` §6.6**, which states: *"Queries run in the worker, against
 the same store, so the UI never blocks."* That sentence does not describe the architecture
@@ -4460,3 +4464,52 @@ for the options Electron does honour and so the variable is not read at all.
 **Accepted:** Playwright cannot drive the packaged binary, since it attaches through `--inspect`.
 The built-app suite (`mainElectron.test.ts`) runs the stock Electron against `out/`, which no fuse
 touches.
+
+### D-123 — Regex Find matches in a worker that a 2 s per-window deadline or a cancel terminates; amends D-041 for regex matching only (R239) · `settled`
+
+From the security review of 2026-10-16, finding 10. Plan and results: `docs/plans/R239-regex-find.md`.
+
+**The problem D-041's chunking cannot solve.** `runChunkedJob` bounds the time *between* windows,
+not within one. A regex that backtracks catastrophically runs one `exec` for as long as it likes:
+`(a+)+$` against thirty `a` and a `b` painted no frame for 17.8 s, measured. A keystroke, Escape
+or timer cannot interrupt it on the thread that runs it; the only way out was killing the process,
+which loses every tab's unsaved edits.
+
+**Chosen:**
+- **Regex mode only.** The case-sensitive `indexOf` path and the escaped literal used for
+  case-insensitive plain search cannot backtrack, so they stay on the main thread under D-041.
+- **One dedicated worker per search**, not the parse pool, since terminating a pool worker would
+  cost a parse.
+- **The worker replaces one call, `decodedTextMatches`.** The renderer still decodes each window,
+  applies R204's normalization, posts the normalized text and needle, and maps the returned indices
+  back to bytes.
+- **The worker is terminated** on the deadline, on cancel, and when the search finishes.
+  Termination is the only thing that stops a running `exec`, and it does: measured, the worker
+  closed 1.8 s after `terminate()`, not after the 19 s its `exec` would have taken.
+- **A per-window deadline of 2 s**, decided by the project lead on 2026-10-17. That is about
+  10,000× an ordinary regex's 0.18 ms per window (R205). The window stays responsive whatever the
+  pattern does, so the deadline no longer protects the UI. It only decides when Klados gives up
+  without being asked. Matches from earlier windows are kept, and the counter labels them
+  `(stopped)`.
+
+**Why this is consistent with D-041.** D-041 kept search on the main thread because, after a parse,
+there is no worker-side store for a query to run against. Regex matching never touches the store:
+it needs one window of text and a needle, both copied to the worker. D-041 also put every search
+behind `runChunkedJob` so that moving work off-thread later would be "a swap behind one interface".
+This is that swap, for regex mode only.
+
+**It is not slower.** At 200 MB, regex Find takes 0.68× and 0.73× of its old time. The budget was
+1.25×, with batching windows as the fallback, which was not needed.
+
+**Rejected:**
+- **Detecting dangerous patterns before running them** (nested quantifiers and the like). The
+  detection is incomplete in both directions, and a refusal the user cannot predict is worse than a
+  slow search they can stop.
+- **A per-window timeout on the main thread.** JavaScript cannot interrupt a running `exec` from
+  the same thread.
+- **No automatic deadline, only Escape.** A stuck search the user does not notice would keep a CPU
+  core busy indefinitely.
+- **A 500 ms or 10 s deadline**, weighed and not chosen.
+
+**Not part of this decision:** the `u` flag. It was measured (R239 §6.4) and not turned on. It would
+change D-097's folding, so it is a separate decision.

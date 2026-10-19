@@ -731,4 +731,114 @@ describe.skipIf(!builtAppAvailable)('the built app via _electron (R51, R58)', ()
     await page.keyboard.press('Control+S')
     await expect.poll(() => page.locator('.title-bar-dirty-dot').count()).toBe(0)
   }, 90_000)
+
+  /**
+   * R239 (`docs/plans/R239-regex-find.md` §4, criteria 1 and 2): a regex that
+   * backtracks catastrophically must not freeze the window.
+   *
+   * `(a+)+$` against thirty `a` and a `b` runs one `exec` for about 19 s.
+   * Before R239 it ran on the renderer's main thread: measured on the build
+   * before it, no frame was painted for 17,758 ms. Now the match runs in a
+   * worker, the 2 s deadline stops the search and says so, and Escape
+   * terminates the worker.
+   *
+   * **Responsiveness is measured inside the page, as the longest gap between
+   * animation frames, not with `page.evaluate(() => 1)`** as the plan
+   * proposed. Chromium answers a DevTools evaluation from inside running
+   * JavaScript: on the build before R239 that probe answered in 5 ms while the
+   * window was frozen for 17.8 s, so it could not tell the two builds apart
+   * (R239 §6).
+   *
+   * The worker count is Playwright's own list of the page's workers,
+   * so it sees a worker that is still running whatever the app's bookkeeping
+   * says. A terminated worker leaves that list about 1.8 s after `terminate()`
+   * (measured, R239 §6), past `expect.poll`'s 1 s default, hence `TIMEOUT_MS`.
+   */
+  it('R239: a backtracking regex leaves the window responsive, stops, and Escape ends it', async () => {
+    // Criterion 1's 500 ms, as the longest the page may go without a frame.
+    const FRAME_GAP_BUDGET_MS = 500
+    // The 2 s per-window deadline plus criterion 1's 1 s.
+    const NOTIFICATION_BUDGET_MS = 3000
+    const SEARCH_END_TIMEOUT_MS = 30_000
+    const dir = mkdtempSync(path.join(userDataDir, 'r239-'))
+    // XML, since Klados opens no `.txt`. The backtracking fails at the `b`
+    // whatever follows it.
+    const target = path.join(dir, 'backtrack.xml')
+    writeFileSync(target, `<r>\n${'b a b\n'.repeat(1000)}${'a'.repeat(30)}b\n</r>\n`)
+    const regexWorkers = (): number =>
+      page.workers().filter((worker) => worker.url().includes('regexFind')).length
+
+    await app.evaluate(({ BrowserWindow }, p) => {
+      BrowserWindow.getAllWindows()[0]!.webContents.send('app:openPaths', [p])
+    }, target)
+    await page.locator('.title-bar-title', { hasText: 'backtrack.xml' }).waitFor()
+    await page.locator('.cm-content').waitFor()
+    await app.evaluate(({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows()[0]!
+      window.show()
+      window.focus()
+    })
+    await page.bringToFront()
+    await page.locator('.cm-content').click()
+    await page.keyboard.press('Control+F')
+    const input = page.locator('.find-input').first()
+    await input.waitFor()
+    await page.locator('.find-toggle[title="Use regular expression"]').click()
+    const count = page.locator('.find-count-value')
+
+    // Criterion 1. Every frame's time, and when the count says the search
+    // started and ended, all on the page's own clock.
+    await page.evaluate(() => {
+      const record = { frames: [] as number[], started: 0, ended: 0 }
+      ;(window as unknown as { __r239: typeof record }).__r239 = record
+      function frame(time: number): void {
+        record.frames.push(time)
+        requestAnimationFrame(frame)
+      }
+      requestAnimationFrame(frame)
+      const label = document.querySelector('.find-count-value')!
+      new MutationObserver(() => {
+        if (label.textContent === 'Searching…') record.started = performance.now()
+        else if (record.started !== 0 && record.ended === 0) record.ended = performance.now()
+      }).observe(label, { childList: true, characterData: true, subtree: true })
+    })
+    await input.fill('(a+)+$')
+    // Long enough for the build before R239 to come out of its ~18 s freeze,
+    // so that build fails on the frame gap below rather than on this wait.
+    await page.waitForFunction(
+      () => (window as unknown as { __r239: { ended: number } }).__r239.ended !== 0,
+      undefined,
+      { timeout: SEARCH_END_TIMEOUT_MS }
+    )
+    const { searchMs, framesDuring, longestGap } = await page.evaluate(() => {
+      const { frames, started, ended } = (
+        window as unknown as { __r239: { frames: number[]; started: number; ended: number } }
+      ).__r239
+      const during = frames.filter((time) => time >= started && time <= ended)
+      // The gaps that overlap the search, including the one into it and the
+      // one out of it.
+      let longest = 0
+      for (let i = 1; i < frames.length; i++) {
+        if (frames[i]! < started || frames[i - 1]! > ended) continue
+        longest = Math.max(longest, frames[i]! - frames[i - 1]!)
+      }
+      return { searchMs: ended - started, framesDuring: during.length, longestGap: longest }
+    })
+    expect(longestGap).toBeLessThan(FRAME_GAP_BUDGET_MS)
+    // Not vacuous: frames were being recorded the whole time.
+    expect(framesDuring).toBeGreaterThan(10)
+    expect(searchMs).toBeLessThanOrEqual(NOTIFICATION_BUDGET_MS)
+    await page
+      .locator('.notification-message', { hasText: 'takes too long to search with' })
+      .waitFor({ timeout: TIMEOUT_MS })
+    expect(await count.textContent()).toBe('No matches (stopped)')
+    await expect.poll(regexWorkers, { timeout: TIMEOUT_MS }).toBe(0)
+
+    // Criterion 2: the same search again, then Escape while it runs.
+    await input.fill('')
+    await input.fill('(a+)+$')
+    await expect.poll(regexWorkers, { timeout: TIMEOUT_MS }).toBe(1)
+    await input.press('Escape')
+    await expect.poll(regexWorkers, { timeout: TIMEOUT_MS }).toBe(0)
+  }, 60_000)
 })
