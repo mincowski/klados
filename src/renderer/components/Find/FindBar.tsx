@@ -381,6 +381,20 @@ export function FindBar(): JSX.Element | null {
     }
   }, [result, findState.currentIndex])
 
+  // R239: a regex search that passed its per-window deadline stopped with
+  // what it had found so far. Keyed on `result` alone, so moving between the
+  // kept matches does not say it again; a result only marked stale by an edit
+  // is the same search, not a new one.
+  useEffect(() => {
+    if (!result.complete || !result.timedOut || result.stale) return
+    notify({
+      severity: 'warning',
+      message: 'This pattern takes too long to search with.',
+      documentId: activeDocumentId(),
+      dedupeKey: 'find.regexTimedOut'
+    })
+  }, [result])
+
   function goNext(): void {
     const currentDocumentState = documentStateRef.current
     if (currentDocumentState.phase !== 'ready') return
@@ -618,16 +632,20 @@ export function FindBar(): JSX.Element | null {
   // "Searching…", which costs no width; `(stale)` covered only the window
   // where the number is frozen and approximately right, and in that window
   // the user is looking at the text they're editing, not the find bar.
+  // R239: a regex search that hit its deadline keeps the matches it found and
+  // says it stopped. Chosen from a rendering of the bar (R239 §6): "+" reads
+  // as "there are more", which is not known, and "so far" as still running.
+  const stoppedSuffix = result.timedOut ? ' (stopped)' : ''
   const countLabel = !result.complete
     ? 'Searching…'
     : total === 0
-      ? 'No matches'
-      : `${currentDisplay.toLocaleString()} of ${total.toLocaleString()}`
+      ? `No matches${stoppedSuffix}`
+      : `${currentDisplay.toLocaleString()} of ${total.toLocaleString()}${stoppedSuffix}`
   // §3 — the exact reservation: the widest this label can ever be is
   // `{total} of {total}`, once `(stale)` no longer adds to it. Same
   // `toLocaleString()` formatting as the label itself, so the sizer is
   // exact rather than merely close.
-  const countSizer = `${total.toLocaleString()} of ${total.toLocaleString()}`
+  const countSizer = `${total.toLocaleString()} of ${total.toLocaleString()}${stoppedSuffix}`
 
   // R90 §6 — hidden, not merely disabled, in path mode: a path result is a
   // set of node spans, and "replace every matched element with this text"

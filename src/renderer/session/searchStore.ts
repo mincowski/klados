@@ -35,6 +35,7 @@ import { parsePath, type PathDiagnostic } from '../../core/path/parse'
 import { evaluatePathChunked } from '../navigation/pathQueryJob'
 import type { DocumentSession, OpenDocument } from './documentSession'
 import { JobSlot, runChunkedJob, type SearchJob } from './searchJob'
+import { runRegexFindJob } from './regexFindJob'
 
 /** ~1 MiB per step of the byte path — small enough that several steps fit
  * comfortably inside one of G3's default 8 ms slices on ordinary hardware,
@@ -73,6 +74,10 @@ export interface SearchResult {
    * computed — the count is known wrong, not merely delayed. Cleared the
    * moment a fresh search against the new store lands. */
   readonly stale: boolean
+  /** R239: `true` when a regex search passed its per-window deadline and
+   * stopped. `starts`/`ends` hold the matches found before it, and Find's
+   * counter labels them as partial. */
+  readonly timedOut: boolean
 }
 
 export const EMPTY_SEARCH_RESULT: SearchResult = {
@@ -80,7 +85,8 @@ export const EMPTY_SEARCH_RESULT: SearchResult = {
   ends: new Int32Array(0),
   complete: true,
   provisional: false,
-  stale: false
+  stale: false,
+  timedOut: false
 }
 
 export interface SearchStore {
@@ -102,6 +108,9 @@ export interface SearchStore {
   dispose(): void
 }
 
+/** A job's value. Only a regex job can time out (R239). */
+type FindValue = MatchSet & { readonly timedOut?: boolean }
+
 /** `false` means the query text failed to parse as a path — `diagnostic`
  * carries why, for `FindBar`'s footnote row (R87). Parsing happens fresh on
  * every call, never cached on the query — `parsePath`'s resolver closes
@@ -109,7 +118,7 @@ export interface SearchStore {
  * against the store that produced it (§2's own reasoning for why
  * `SearchQuery` holds text, not a parsed tree). */
 type FindJobOutcome =
-  | { readonly ok: true; readonly job: SearchJob<MatchSet> }
+  | { readonly ok: true; readonly job: SearchJob<FindValue> }
   | { readonly ok: false; readonly diagnostic: PathDiagnostic }
 
 function pathJobFor(document: OpenDocument, text: string): FindJobOutcome {
@@ -175,6 +184,23 @@ function findJobFor(document: OpenDocument, query: SearchQuery): FindJobOutcome 
     }
   }
 
+  // R239: a regex can backtrack for as long as it likes inside one window,
+  // which no slicing between windows can interrupt, so regex mode matches in
+  // a worker the job can terminate. Plain search stays here: neither
+  // `indexOf` nor an escaped literal can backtrack.
+  if (options.regex) {
+    return {
+      ok: true,
+      job: runRegexFindJob({
+        bytes,
+        rowIndex: document.rowIndex,
+        encoding: document.encoding,
+        needle,
+        options
+      })
+    }
+  }
+
   const windows = decodedWindowsFor(document.rowIndex)
   const starts: number[] = []
   const ends: number[] = []
@@ -214,7 +240,7 @@ export function createSearchStore(session: DocumentSession): SearchStore {
   // a query that's no longer active (a fresh `search()`, `clear()`, a
   // document switch, or a path query that goes on to parse successfully).
   let pathDiagnostic: PathDiagnostic | null = null
-  const jobs = new JobSlot<MatchSet>()
+  const jobs = new JobSlot<FindValue>()
   const listeners = new Set<() => void>()
 
   // Initialized from whatever the session's current state already is, not
@@ -254,12 +280,24 @@ export function createSearchStore(session: DocumentSession): SearchStore {
     const job = jobs.start(() => outcome.job)
     job.result.then(
       (matches) => {
-        setResult({ ...matches, complete: true, provisional: false, stale: false })
+        setResult({
+          starts: matches.starts,
+          ends: matches.ends,
+          complete: true,
+          provisional: false,
+          stale: false,
+          timedOut: matches.timedOut === true
+        })
       },
-      () => {
+      (reason: unknown) => {
         // Cancelled — superseded by a newer search, an edit's re-run, or the
         // document closing. Whichever superseded it already owns `result`;
         // there is nothing for this settled-late job to do.
+        if (reason instanceof DOMException && reason.name === 'AbortError') return
+        // R239: anything else is a regex worker that failed to load or
+        // crashed. Without this the counter would say "Searching…" forever.
+        console.error(reason)
+        setResult(EMPTY_SEARCH_RESULT)
       }
     )
   }
