@@ -7,8 +7,10 @@ test result, so the project lead shipped R239's worker without it and asked for 
 to D-097. This plan decides the five questions that change raises (§3–§7), adds one D-082 never
 considered (§4a, keeping today's harmless escapes working), and measures what each answer costs.
 **§0 records that `u` was rejected twice before (D-082, R202), and why neither reason still holds**,
-including a regression in R205 that those measurements could not see. **Nothing here is built yet, and the decisions take effect when the project lead
-approves the plan.**
+including a regression in R205 that those measurements could not see.
+
+**Confirmed by the project lead on 2026-10-19, after reviewing §0's history:** `u` is taken up, as
+this plan describes, including §4a's rewrite of harmless escapes. Nothing is built yet.
 
 D-097, unchanged in purpose: Find has **one folding algorithm**, so plain and regex mode agree **by
 construction**, and equivalence is **canonical**, not compatibility. Turning on `u` keeps all three.
@@ -282,7 +284,7 @@ ends the search with that state, without starting the worker.
 
 ## 4a. Decision 2a — today's harmless escapes keep working
 
-**Decided, for the project lead to confirm with the plan:** before compiling in regex mode, rewrite
+**Decided, and confirmed by the project lead on 2026-10-19:** before compiling in regex mode, rewrite
 every identity escape of a non-alphanumeric, non-syntax character to its `\x` form (§2.13's rule), so
 `\-`, `\:`, `\#` and the rest mean what they mean today. **Non-ASCII too**: `\` followed by a non-ASCII
 character becomes `\u{…}`, which `u` accepts and which is the same literal.
