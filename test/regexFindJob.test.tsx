@@ -152,9 +152,9 @@ describe('R239 — a backtracking pattern stops at the deadline', () => {
   const text = `${lead}${'a'.repeat(30)}b\n`
   const bytes = new TextEncoder().encode(text)
   const rowIndex = buildRowIndex(bytes, DEFAULT_MAX_ROW_BYTES, [0x0a])
-  // The real 2 s deadline. It also covers loading the worker for the first
-  // window: a 300 ms deadline timed out there on a slow `windows-latest`
-  // runner, before any window was searched.
+  // The real 2 s deadline. Loading the worker no longer counts against it (the
+  // worker says `ready` first); a 300 ms deadline once timed out on a slow
+  // `windows-latest` runner before any window was searched.
 
   it('keeps the matches found before it and terminates the worker', async () => {
     const job = runRegexFindJob({

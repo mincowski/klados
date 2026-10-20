@@ -16,6 +16,21 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## Review of 1.3.0 — four fixes before the tag · built
+
+**Plans:** R230 §5.5, R236 §6.5, R239 §6.7, R241 §9.4.
+
+The code review of everything since 1.2.2 found:
+- **The release workflow would have failed on every leg.** R230's packaged-app test needs a `--dir`
+  build that only `ci.yml` made. `release.yml` now makes it too.
+- **`main`'s CI was red** for the version bump. Loading the regex worker counted against the 2 s
+  deadline on `windows-latest`; the worker now says `ready` first.
+- **A symlinked file's changes went unnoticed** on Linux and macOS since R236. The watch now resolves
+  the link, and compares names in NFC as well.
+- **A pattern that NFC makes invalid said `No matches`.** It now says `Invalid pattern`.
+
+---
+
 ## Klados 1.3.0 — version bump, not yet tagged
 
 Version **1.3.0**, carrying the rounds from the security review of 2026-10-16 and what followed it:

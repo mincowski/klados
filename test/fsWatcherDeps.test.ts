@@ -38,8 +38,16 @@
  * cross-platform coverage of the *consequence* (release, close, no re-arm)
  * against injected failures, which needs no OS cooperation.
  */
-import { afterEach, describe, expect, it } from 'vitest'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import {
@@ -335,6 +343,91 @@ describe('R236 — files are watched through one shared directory watch', () => 
 
     expect(seen).toEqual(['a', 'a', 'a', 'b'])
   })
+
+  it('an event spelling the name decomposed reaches a file opened composed, and back', () => {
+    const fake = fakeDirectories()
+    const deps = createFsWatcherDeps(undefined, fake.watchDirectory)
+    const seen: string[] = []
+    deps.watch(
+      path.join(dir, 'ü.json'),
+      () => seen.push('composed'),
+      () => {}
+    )
+    deps.watch(
+      path.join(dir, 'ö.json'),
+      () => seen.push('decomposed'),
+      () => {}
+    )
+
+    fake.opened[0]!.emit('ü.json')
+    fake.opened[0]!.emit('ö.json')
+
+    expect(seen).toEqual(['composed', 'decomposed'])
+  })
+
+  /** A target in its own folder and a symlink to it in another, or `null`
+   * where this process may not create symlinks (Windows without developer
+   * mode). */
+  function symlinkedFile(): { link: string; target: string } | null {
+    const root = mkdtempSync(path.join(tmpdir(), 'klados-r236-link-'))
+    created.push(root)
+    mkdirSync(path.join(root, 'real'))
+    mkdirSync(path.join(root, 'links'))
+    const target = path.join(root, 'real', 'data.json')
+    const link = path.join(root, 'links', 'shortcut.json')
+    writeFileSync(target, '{"a":1}')
+    try {
+      symlinkSync(target, link, 'file')
+    } catch {
+      return null
+    }
+    return { link, target: realpathSync(target) }
+  }
+
+  it("a symlink is watched through its target's directory, under the target's name", (context) => {
+    const files = symlinkedFile()
+    if (files === null) return context.skip('symlinks need developer mode on Windows')
+    const fake = fakeDirectories()
+    const reported: string[] = []
+    const deps = createFsWatcherDeps((p) => reported.push(p), fake.watchDirectory)
+    let events = 0
+    deps.watch(
+      files.link,
+      () => events++,
+      () => {}
+    )
+
+    expect(fake.opened.map((o) => o.dir)).toEqual([path.dirname(files.target)])
+    fake.opened[0]!.emit('shortcut.json')
+    expect(events).toBe(0)
+    fake.opened[0]!.emit('data.json')
+    expect(events).toBe(1)
+    // A failure is still reported under the path the tab opened.
+    fake.opened[0]!.fail(new Error('EPERM'))
+    expect(reported).toEqual([files.link])
+  })
+
+  it.runIf(WATCHES_THROUGH_DIRECTORY)(
+    'a real directory watch sees a change made to a symlinked file',
+    async (context) => {
+      const files = symlinkedFile()
+      if (files === null) return context.skip('symlinks are not available here')
+      let events = 0
+      const handle = createFsWatcherDeps().watch(
+        files.link,
+        () => events++,
+        () => {}
+      )
+      try {
+        appendFileSync(files.link, ' ')
+        await vi.waitFor(() => expect(events).toBeGreaterThan(0), {
+          timeout: WATCH_ERROR_TIMEOUT_MS
+        })
+      } finally {
+        handle.close()
+      }
+    }
+  )
 
   it('a failed directory watch is reported to every file in it, and the next watch opens a new one', () => {
     const fake = fakeDirectories()

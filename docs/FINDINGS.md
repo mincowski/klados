@@ -634,6 +634,12 @@ that does not exist at runtime under `contextIsolation`, which is worse than the
 union in `src/preload/api.ts` (R193) keeps the renderer's declared environment honest.
 
 
+**`release.yml` runs the tests too, with its own steps.** A test that needs something `ci.yml`
+builds first (`out/`, the `--dir` app) needs that build in `release.yml` as well, or the next tag
+fails. R230's packaged-app test did exactly that, and only a review before the 1.3.0 tag caught it,
+since no release had run in between (`docs/plans/R230-shipped-app-hardening.md` §5.5). After
+changing what the tests need, rehearse with `workflow_dispatch` (D-095).
+
 ## Known-wrong, not yet fixed
 
 - **No parser stops at the first failure.** `ParserState.fatal` is a **flag, not a halt**

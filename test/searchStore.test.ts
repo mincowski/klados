@@ -595,4 +595,18 @@ describe('R241 — the search store under u', () => {
     expect(store.getPatternError()).toBeNull()
     store.dispose()
   })
+
+  it('a regex is checked as the worker compiles it, after R204 normalizes it', async () => {
+    // `e` + U+0303 composes to U+1EBD, which puts the range out of order: as
+    // typed it compiles, normalized (what the worker matches with) it does
+    // not. Checked as typed, Find said nothing was found instead of why.
+    const store = await storeOver('{"a":"x"}')
+    store.search({
+      text: '[ẽ-Ѐ]',
+      mode: 'text',
+      options: { caseSensitive: false, regex: true }
+    })
+    expect(store.getPatternError()).toBe('Range out of order in character class')
+    store.dispose()
+  })
 })
