@@ -13,6 +13,12 @@
  * it. The renderer decodes the window, applies R204's normalization, and
  * maps the returned indices back to bytes; this file never sees a byte or a
  * row. One worker serves one search and is terminated when it ends.
+ *
+ * It says `ready` once, when it has loaded, and the renderer posts nothing
+ * before that: the per-window deadline then measures matching, not starting a
+ * worker. Loading counted against it before, and on a slow `windows-latest`
+ * runner a harmless pattern stopped at the first window, as "No matches
+ * (stopped)".
  */
 import { decodedTextMatches, type TextFindOptions } from '../core/textFind'
 
@@ -25,11 +31,14 @@ export interface RegexFindRequest {
   readonly options: TextFindOptions
 }
 
-export interface RegexFindResponse {
-  readonly id: number
-  /** In `text`'s UTF-16 coordinates, ascending. */
-  readonly matches: ReadonlyArray<{ readonly index: number; readonly length: number }>
-}
+export type RegexFindResponse =
+  /** Posted once, when the worker has loaded. */
+  | { readonly ready: true }
+  | {
+      readonly id: number
+      /** In `text`'s UTF-16 coordinates, ascending. */
+      readonly matches: ReadonlyArray<{ readonly index: number; readonly length: number }>
+    }
 
 // The same discriminator `parse.worker.ts` uses, for the same reason: `self`
 // is `window` in the renderer, and a stray value import must not take over
@@ -42,4 +51,5 @@ if (typeof WorkerGlobalScope !== 'undefined' && self instanceof WorkerGlobalScop
       matches: decodedTextMatches(text, needle, options)
     } satisfies RegexFindResponse)
   }
+  postMessage({ ready: true } satisfies RegexFindResponse)
 }

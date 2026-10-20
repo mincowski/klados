@@ -301,3 +301,18 @@ highlighting. So the parse worker, the `klados-file://` read-token fetch and the
 with asar integrity and `onlyLoadAppFromAsar` on. Its fuses were read back beforehand: `RunAsNode`
 off, asar integrity on, `OnlyLoadAppFromAsar` on, `GrantFileProtocolExtraPrivileges` at its
 default.
+
+### 5.5 After the merge: the release workflow never built what the test needs (review of 1.3.0)
+
+Found by the code review of everything since 1.2.2, before 1.3.0 was tagged.
+- **`packagedApp.test.ts` fails on CI, by design, when no fresh `--dir` build exists.** `ci.yml`
+  makes one before its tests. `release.yml` ran `npm test` before building anything, so every leg
+  of the first release carrying R230 would have failed its tests.
+- **No release had run since R230 merged.** The last rehearsal ran on R229's branch, before it.
+- **Nor had `release.yml` ever built `out/`**, so `mainElectron.test.ts` skipped in every release
+  job, with its warning.
+
+`release.yml` now makes the same two builds as `ci.yml` before `Test` (`electron-vite build`,
+`electron-builder --dir`), configures the Linux sandbox helper as `ci.yml` does, and removes `dist/`
+before `Build`. The Intel macOS leg tests the arm64 `--dir` app, as `ci.yml` does on the same
+runner; the installers are still built by `Build`.

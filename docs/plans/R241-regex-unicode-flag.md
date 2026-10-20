@@ -450,3 +450,11 @@ scan now searches a `subarray` of the chunk.
 The diff was read before the commit. Beyond §9.2's two findings, the review moved `decodedWindowsFor`
 out of the byte path, which the restructured job had started building for every plain search, and
 found the `µ`/`μ` claim in `textFind.ts`'s module comment wrong (§9.1, row 12–14).
+
+### 9.4 After the merge: a pattern is checked as the worker compiles it (review of 1.3.0)
+
+The search store decided whether a pattern is valid by compiling it as typed. The worker compiles
+R204's NFC-normalized needle whenever the needle is not pure ASCII. Where normalization changes
+validity, Find said `No matches` instead of `Invalid pattern`. For example, `[e` U+0303 `-` U+0400
+`]` compiles as typed, but composed to U+1EBD its range is out of order. The store now checks the
+normalized form. One test in `searchStore.test.ts`.

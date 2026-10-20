@@ -30,6 +30,7 @@ import {
   findAsciiInRange,
   findDecodedInWindow,
   holdsAsciiFoldTargets,
+  isAsciiOnly,
   knownAsciiFoldTargets,
   recordAsciiFoldTargets,
   type MatchSet,
@@ -177,7 +178,13 @@ function findJobFor(document: OpenDocument, query: SearchQuery): FindJobOutcome 
   // a worker the job can terminate. Plain search stays here: neither
   // `indexOf` nor an escaped literal can backtrack.
   if (options.regex) {
-    const compiled = compileFindPattern(needle, options.caseSensitive)
+    // Checked in the form the worker compiles: R204 normalizes a non-ASCII
+    // needle before matching (`prepareDecodedWindow`), and a pattern that
+    // composes into an invalid one must say so here, not find nothing there.
+    const compiled = compileFindPattern(
+      isAsciiOnly(needle) ? needle : needle.normalize('NFC'),
+      options.caseSensitive
+    )
     if (!compiled.ok) return { ok: false, patternError: compiled.reason }
     return {
       ok: true,

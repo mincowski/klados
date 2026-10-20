@@ -4496,6 +4496,10 @@ which loses every tab's unsaved edits.
   pattern does, so the deadline no longer protects the UI. It only decides when Klados gives up
   without being asked. Matches from earlier windows are kept, and the counter labels them
   `(stopped)`.
+  **It measures matching only.** The worker says `ready` once it has loaded, and the first
+  window and its deadline start then. Loading counted against it at first, and a slow
+  `windows-latest` runner stopped a harmless pattern at window 0 (review of 1.3.0,
+  `docs/plans/R239-regex-find.md` §6.7).
 
 **Why this is consistent with D-041.** D-041 kept search on the main thread because, after a parse,
 there is no worker-side store for a query to run against. Regex matching never touches the store:

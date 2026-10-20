@@ -16,7 +16,7 @@
  * `mainSecurity.ts`, `mainQuitFlow.ts` and `mainDocumentIO.ts` already use, for
  * the same reason: **a guard nobody can test is a guard nobody can trust.**
  */
-import { watch as fsWatch } from 'node:fs'
+import { realpathSync, watch as fsWatch } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { basename, dirname } from 'node:path'
 import type { DocumentWatcherDeps, WatchHandle } from '../core/documentWatchers'
@@ -86,9 +86,29 @@ function watchFileWithFs(
 /** Windows and macOS compare names without case by default, so an event may
  * spell the name differently from the path that was opened. A false match
  * costs one `stat`, which the registry's mtime comparison then ignores; a
- * false miss would lose the change. */
+ * false miss would lose the change.
+ *
+ * Compared in NFC too: macOS file systems treat `ü` and `u` + U+0308 as one
+ * name, and an event may spell it the other way from the path that was
+ * opened. */
 function sameName(a: string, b: string): boolean {
-  return a.toLowerCase() === b.toLowerCase()
+  return a.normalize('NFC').toLowerCase() === b.normalize('NFC').toLowerCase()
+}
+
+/** The file the bytes are in: a symlink resolved, or the path as given when
+ * it cannot be (it does not exist yet, or a fake path in a test).
+ *
+ * A directory watch sees only its own entries. Through a symlink's folder, a
+ * change to the target was invisible: measured on Linux with inotify, no
+ * event at all for a target in another folder, and for one in the same folder
+ * events that name the target, which the name filter drops. The file watch
+ * before R236 followed the link and saw both. */
+function resolvedPath(path: string): string {
+  try {
+    return realpathSync(path)
+  } catch {
+    return path
+  }
 }
 
 interface Listener {
@@ -149,8 +169,10 @@ export function createFsWatcherDeps(
 
     watch: (path, onEvent, onError): WatchHandle => {
       if (watchDirectory === null) return watchFileWithFs(path, onEvent, onError, onWatchError)
-      const dir = dirname(path)
-      const listener: Listener = { path, fileName: basename(path), onEvent, onError }
+      // Watched where the bytes are; reported under the path the tab opened.
+      const target = resolvedPath(path)
+      const dir = dirname(target)
+      const listener: Listener = { path, fileName: basename(target), onEvent, onError }
       let entry = directories.get(dir)
       if (entry === undefined) {
         // `handle` is null until `watchDirectory` returns (R171).

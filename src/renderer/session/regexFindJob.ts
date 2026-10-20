@@ -38,6 +38,9 @@ import type { SearchJob } from './searchJob'
  * 0.18 ms a window (R205), so this is roughly 10,000× that. It no longer
  * protects the window, which stays responsive whatever the pattern does; it
  * only decides when Klados stops on its own rather than keeping a core busy.
+ *
+ * It measures matching only: the first window is posted when the worker says
+ * it is `ready`, so loading the worker never counts against it.
  */
 export const REGEX_WINDOW_DEADLINE_MS = 2000
 
@@ -149,7 +152,13 @@ export function runRegexFindJob(
   }
 
   function onMessage(event: MessageEvent<RegexFindResponse>): void {
-    if (settled || pending === null || event.data.id !== windowIndex) return
+    if (settled) return
+    if ('ready' in event.data) {
+      // The worker has loaded: now the first window, and its deadline.
+      if (pending === null && windowIndex === 0) postNext()
+      return
+    }
+    if (pending === null || event.data.id !== windowIndex) return
     if (deadline !== null) clearTimeout(deadline)
     deadline = null
     const chunk = mapWindowMatches(pending, event.data.matches, rowIndex, encoding)
@@ -179,7 +188,7 @@ export function runRegexFindJob(
       stopWorker()
       rejectResult(new Error(`Regex search worker failed: ${event.message}`))
     }
-    postNext()
+    // Nothing is posted until the worker says `ready` (`onMessage`).
   }, 0)
 
   return {

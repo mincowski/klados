@@ -301,4 +301,19 @@ entry type, so "no long task" cannot pass vacuously. Run against both builds:
 the same PR: no matches, where the first window's matches were expected. The deadline also covers
 loading the worker for the first window, which on that runner took longer than 300 ms. Those cases
 now use the real 2 s deadline. **The app's own 2 s also covers that load**; locally the worker
-started in a few milliseconds.
+started in a few milliseconds. *(No longer: §6.7.)*
+
+### 6.7 After the merge: the deadline measures matching only (review of 1.3.0)
+
+**The real 2 s was not enough for the load either.** `main`'s CI for the 1.3.0 version bump failed on
+`windows-latest` in `findInvalidPattern.test.tsx`: `No matches (stopped)` where `1 of 1` was
+expected, after 2,897 ms. The run before it, for #74, passed. In the app this was a defect, not only a
+flaky test: on a slow or cold machine the first regex search could stop at window 0 and call a
+harmless pattern too slow.
+
+**The worker now posts `{ ready: true }` once it has loaded**, and the job posts the first window,
+and starts its deadline, only then. A worker that fails to load still reports through `onerror`.
+
+`regexFindJob.test.ts`'s scripted worker now loads for a set time and holds messages until then, as
+a real one does. Two new tests (a worker slower to load than the deadline still searches every
+window; nothing is posted before `ready`) fail against the previous job and pass now.

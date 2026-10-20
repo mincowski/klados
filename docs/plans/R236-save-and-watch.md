@@ -391,3 +391,25 @@ Each R id's `git diff` was read before its commit:
   Had it done so, the code would have attached the listener to a dead entry. The case is now handled
   and tested.
 - **R238:** nothing found.
+
+### 6.5 After the merge: symlinks, and names spelled decomposed (review of 1.3.0)
+
+- **A symlinked file's changes went unnoticed on Linux and macOS.** The directory watch took the
+  folder and the name of the path as opened.
+  - **Measured on Linux** (WSL 2, kernel 6.6, inotify called directly, which is what libuv uses
+    there): writing through a symlink raised no event at all in the link's folder when the target is
+    in another folder. With the target in the same folder, the events named the target, which the name
+    filter drops.
+  - **A watch on the link itself, as before R236, saw both.** So this was a regression of R236.
+  - **Fixed:** the watch resolves the path (`realpathSync`, falling back to the path as given) and
+    watches the target's folder for the target's name. A failure is still reported under the path the
+    tab opened.
+  - **Tests:** a real-watcher test, on Linux and macOS only, since Windows does not watch through the
+    directory. And a fake-watcher test of the folder and name, which needs a real symlink, so it skips
+    on Windows without developer mode.
+  - **Not followed:** a symlink retargeted after the file was opened. The watch stays on the target it
+    resolved.
+- **Names are compared in NFC as well as without case.** A macOS file system treats a composed and a
+  decomposed `ü` as one name, so an event may spell it the other way. Not measured on macOS; a
+  fake-watcher test covers the comparison.
+- **Windows is unchanged:** it watches the file itself.

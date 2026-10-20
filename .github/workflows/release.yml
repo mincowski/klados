@@ -155,6 +155,19 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
 
+      # The same two builds ci.yml makes before its tests: `out/` for
+      # `mainElectron.test.ts`, and the unpacked app for R230's
+      # `packagedApp.test.ts`, which on CI fails rather than skips when that
+      # app is missing. Without them every leg failed its tests (found by the
+      # review of 1.3.0, before any release ran with R230). `--dir` builds for
+      # the runner's own architecture, so the Intel leg tests the arm64 app,
+      # exactly as ci.yml does; the installers are built by `Build` below.
+      - run: npx electron-vite build
+      - name: Package (unpacked)
+        run: npx electron-builder --dir
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
       - run: npx playwright install --with-deps chromium
 
       # Linux only: `test/mainElectron.test.ts` launches the built app, and
@@ -164,6 +177,14 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: sudo apt-get update && sudo apt-get install -y xvfb
 
+      # R230, as in ci.yml: the unpacked app's sandbox helper must be setuid
+      # root, or it aborts before its first window.
+      - name: Configure the packaged app's sandbox helper
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo chown root:root dist/linux-unpacked/chrome-sandbox
+          sudo chmod 4755 dist/linux-unpacked/chrome-sandbox
+
       - name: Test
         shell: bash
         run: |
@@ -171,6 +192,18 @@ jobs:
             xvfb-run -a npm test
           else
             npm test
+          fi
+
+      # The unpacked app above was for the tests. Removed so `Build` starts
+      # from an empty `dist/`, as before, and on Linux because its sandbox
+      # helper is now owned by root.
+      - name: Remove the test build
+        shell: bash
+        run: |
+          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+            sudo rm -rf dist
+          else
+            rm -rf dist
           fi
 
       # R229: `--publish never`, and no `GH_TOKEN` in this job at all. The

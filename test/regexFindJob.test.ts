@@ -21,18 +21,47 @@ import type { RegexFindRequest, RegexFindResponse } from '../src/worker/regexFin
 
 const OPTIONS: TextFindOptions = { caseSensitive: true, regex: true }
 
-/** A worker that answers each window on a later task, as a real one does,
- * except for the windows `stuckFrom` and later, which it never answers. */
+/** A worker that loads for `loadMs` once the job listens, then says `ready`,
+ * as a real one does once its module has loaded. Like a real one, it holds a
+ * message posted while loading until it has loaded. It answers each window on
+ * a later task, except for the windows `stuckFrom` and later, which it never
+ * answers. */
 class ScriptedWorker implements RegexFindWorker {
-  onmessage: ((event: MessageEvent<RegexFindResponse>) => void) | null = null
   onerror: ((event: ErrorEvent) => void) | null = null
   readonly received: RegexFindRequest[] = []
   terminated = false
+  private listener: ((event: MessageEvent<RegexFindResponse>) => void) | null = null
+  private loaded = false
+  private readonly held: RegexFindRequest[] = []
 
-  constructor(private readonly stuckFrom = Infinity) {}
+  constructor(
+    private readonly stuckFrom = Infinity,
+    private readonly loadMs = 0
+  ) {}
+
+  get onmessage(): ((event: MessageEvent<RegexFindResponse>) => void) | null {
+    return this.listener
+  }
+
+  set onmessage(listener: ((event: MessageEvent<RegexFindResponse>) => void) | null) {
+    const first = this.listener === null && listener !== null
+    this.listener = listener
+    if (!first) return
+    setTimeout(() => {
+      if (this.terminated) return
+      this.loaded = true
+      for (const message of this.held.splice(0)) this.answer(message)
+      this.listener?.({ data: { ready: true } } as unknown as MessageEvent<RegexFindResponse>)
+    }, this.loadMs)
+  }
 
   postMessage(message: RegexFindRequest): void {
     this.received.push(message)
+    if (this.loaded) this.answer(message)
+    else this.held.push(message)
+  }
+
+  private answer(message: RegexFindRequest): void {
     if (message.id >= this.stuckFrom) return
     setTimeout(() => {
       if (this.terminated) return
@@ -73,6 +102,35 @@ describe('runRegexFindJob', () => {
     expect(worker.received.map((m) => m.id)).toEqual(worker.received.map((_, i) => i))
     expect(worker.terminated).toBe(true)
     expect(liveRegexFindWorkers()).toBe(0)
+  })
+
+  it('a worker slower to load than the deadline still searches every window', async () => {
+    // The review of 1.3.0: loading counted against the first window's
+    // deadline, and a harmless pattern stopped as "No matches (stopped)".
+    const { bytes, rowIndex } = threeWindows()
+    const worker = new ScriptedWorker(Infinity, 200)
+    const value = await runRegexFindJob(
+      { bytes, rowIndex, encoding: 'utf-8', needle: 'n\\d+', options: OPTIONS },
+      { spawn: () => worker, deadlineMs: 50 }
+    ).result
+    const reference = findAll(bytes, rowIndex, 'utf-8', 'n\\d+', OPTIONS)
+    expect(reference.starts.length).toBeGreaterThan(100)
+    expect(value.timedOut).toBe(false)
+    expect([...value.starts]).toEqual([...reference.starts])
+  })
+
+  it('nothing is posted before the worker says ready', async () => {
+    const { bytes, rowIndex } = threeWindows()
+    const worker = new ScriptedWorker(Infinity, 100)
+    const job = runRegexFindJob(
+      { bytes, rowIndex, encoding: 'utf-8', needle: 'n', options: OPTIONS },
+      { spawn: () => worker }
+    )
+    await vi.waitFor(() => expect(liveRegexFindWorkers()).toBe(1))
+    expect(worker.received).toHaveLength(0)
+    await vi.waitFor(() => expect(worker.received.length).toBeGreaterThan(0))
+    job.cancel()
+    await job.result.catch(() => {})
   })
 
   it("on the deadline keeps the earlier windows' matches, marks them, and terminates", async () => {
