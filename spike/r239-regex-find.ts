@@ -11,8 +11,10 @@
  *     64 KB string whose last line is `n` × `a` then `b`, for growing `n`.
  *     Every evaluate is the renderer's own main thread, so this is how long
  *     the window would be frozen by one window's `exec`.
- *  2. **Regex Find over the fixture**, through the Find bar, for each pattern
- *     below. Timed in the page from the count changing to "Searching…" to it
+ *  2. **Find over the fixture**, through the Find bar, for each pattern
+ *     below, in regex mode or, for R241's row, plain case-insensitive mode
+ *     (`status` takes the byte path without `u` and the decoded path with
+ *     it, `docs/plans/R241-regex-unicode-flag.md` §3). Timed in the page from the count changing to "Searching…" to it
  *     changing to anything else, so Find's debounce is excluded. A long-task
  *     observer records the longest main-thread task while it runs.
  *
@@ -27,7 +29,11 @@ import { _electron as electron } from 'playwright'
 
 const fixture = path.resolve(process.argv[2] ?? 'spike/fixtures/cars-200mb.xml')
 const RUNS = Number(process.argv[3] ?? 3)
-const PATTERNS = ['\\d{4}-\\d{2}', '<year>\\d{4}']
+const PATTERNS: readonly { readonly pattern: string; readonly regex: boolean }[] = [
+  { pattern: '\\d{4}-\\d{2}', regex: true },
+  { pattern: '<year>\\d{4}', regex: true },
+  { pattern: 'status', regex: false }
+]
 const BACKTRACK_LENGTHS = process.env.R239_SKIP_BACKTRACK ? [] : [16, 18, 20, 22, 24, 26, 30]
 
 const median = (xs: number[]): number => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)]!
@@ -71,7 +77,7 @@ async function main(): Promise<void> {
     await page.keyboard.press('Control+F')
     const input = page.locator('.find-input').first()
     await input.waitFor()
-    await page.locator('[title="Use regular expression"]').click()
+    const regexToggle = page.locator('[title="Use regular expression"]')
 
     await page.evaluate(() => {
       const w = window as unknown as { __r239: { longest: number; start: number; end: number } }
@@ -87,7 +93,10 @@ async function main(): Promise<void> {
       }).observe(count, { childList: true, characterData: true, subtree: true })
     })
 
-    for (const pattern of PATTERNS) {
+    for (const { pattern, regex } of PATTERNS) {
+      if (((await regexToggle.getAttribute('aria-checked')) === 'true') !== regex) {
+        await regexToggle.click()
+      }
       const times: number[] = []
       let longest = 0
       let label = ''
@@ -119,7 +128,7 @@ async function main(): Promise<void> {
         label = (await page.locator('.find-count-value').textContent()) ?? ''
       }
       console.log(
-        `${pattern}: median ${median(times).toFixed(0)} ms over ${RUNS} (${times.map((t) => t.toFixed(0)).join(', ')}), ` +
+        `${regex ? 'regex' : 'plain'} ${pattern}: median ${median(times).toFixed(0)} ms over ${RUNS} (${times.map((t) => t.toFixed(0)).join(', ')}), ` +
           `longest task ${longest.toFixed(0)} ms, count "${label}"`
       )
     }

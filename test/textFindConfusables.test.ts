@@ -62,16 +62,16 @@ function matchCount(needle: string, caseSensitive: boolean, regex: boolean): num
 //     because NFC touched them: it did not, and could not — that pair is a
 //     compatibility relationship, and D-082 rejected NFKC for equating
 //     characters that are not the same character.
-//   - **ß/ẞ is the accepted loss.** Plain used to find it and no longer does:
-//     the engine folds upward and `'ß'.toUpperCase()` is `'SS'`, a length
-//     change no normalization form repairs. Pinned here rather than left to
-//     be rediscovered, because on screen it is silent — a search for ß simply
-//     stops finding ẞ, with nothing to say why.
+//   - **ß/ẞ was the accepted loss, and R241 recovered it.** R205's engine
+//     folded upward, and `'ß'.toUpperCase()` is `'SS'`, so a search for ß
+//     stopped finding ẞ. Under `u` (`docs/plans/R241-regex-unicode-flag.md`)
+//     the fold is Unicode simple case folding, where ẞ U+1E9E folds to ß, so
+//     both modes find it again. Changed deliberately, per R241 criterion 2.
 //
-// Four of the five pairs now match, and the answer no longer depends on
+// All five pairs now match, and the answer no longer depends on
 // which mode a user happens to have toggled. The ASCII control is unchanged
 // across every column — the assertion that would fail if the fold were ever
-// made fuzzier "to fix" the two rows that remain.
+// made fuzzier than case folding.
 describe('the measured divergence table (R72 §6, R204, R205)', () => {
   const cases: readonly {
     needle: string
@@ -82,7 +82,7 @@ describe('the measured divergence table (R72 §6, R204, R205)', () => {
     // Compatibility, not canonical. R205 made both modes agree by folding
     // through one engine; NFC left the characters themselves alone.
     { needle: 'µ', plain: 2, regexCount: 2, caseSensitive: 1 }, // µ vs μ — both find it
-    { needle: 'ß', plain: 1, regexCount: 1, caseSensitive: 1 }, // ß vs ẞ — neither does
+    { needle: 'ß', plain: 2, regexCount: 2, caseSensitive: 1 }, // ß vs ẞ — both, since R241's `u`
     // Canonical singletons — R204 resolved both, in every mode.
     { needle: 'Å', plain: 2, regexCount: 2, caseSensitive: 2 }, // Å vs Å(U+212B)
     { needle: 'Ω', plain: 2, regexCount: 2, caseSensitive: 2 }, // Ω vs Ω(U+2126)

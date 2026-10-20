@@ -1,8 +1,12 @@
 # R241 — the `u` flag in Find, as a change to D-097
 
-<!-- status: open -->
+<!-- status: built -->
 
-**Open.** Planned 2026-10-19, from R239 §6.4 (`docs/plans/R239-regex-find.md`): turning `u` on changed a
+**Built** (§9). Every Find regex compiles with `u`; D-125 amends D-097. One plan decision was
+replaced by the plan's own fallback: routing every `k`/`s` needle to the decoded path cost 12× in
+the renderer, so the byte path is kept unless the document can hold U+212A or U+017F (§9.2).
+
+Planned 2026-10-19, from R239 §6.4 (`docs/plans/R239-regex-find.md`): turning `u` on changed a
 test result, so the project lead shipped R239's worker without it and asked for `u` as its own change
 to D-097. This plan decides the five questions that change raises (§3–§7), adds one D-082 never
 considered (§4a, keeping today's harmless escapes working), and measures what each answer costs.
@@ -10,7 +14,7 @@ considered (§4a, keeping today's harmless escapes working), and measures what e
 including a regression in R205 that those measurements could not see.
 
 **Confirmed by the project lead on 2026-10-19, after reviewing §0's history:** `u` is taken up, as
-this plan describes, including §4a's rewrite of harmless escapes. Nothing is built yet.
+this plan describes, including §4a's rewrite of harmless escapes.
 
 D-097, unchanged in purpose: Find has **one folding algorithm**, so plain and regex mode agree **by
 construction**, and equivalence is **canonical**, not compatibility. Turning on `u` keeps all three.
@@ -387,3 +391,62 @@ vitest timeout cannot fire because the loop never yields.
   whether a pattern happens to be `u`-valid, is exactly what D-097 removed.
 - **Normalizing for ASCII patterns** (§2.4's decomposed row). That is R204's rule, and a change to it is
   its own question.
+
+## 9. Results
+
+**Built**, with one decision taken from the plan's own fallback: §3's routing as first written
+missed the cost budget by 10×, so §3's presence-scan refinement was built, in a cheaper form than
+planned (§9.2). D-125 amends D-097; D-097 gains a pointer to it.
+
+### 9.1 The criteria
+
+| # | Criterion | Result |
+|---|---|---|
+| 1 | Plain and regex agree on every case code point | green: 3,037 code points (the count matches R239 §6.4), each searched in both modes through `findAll`, no disagreement; `k`/`K`/`s`/`S` each find three of `k K U+212A` / `s S U+017F` in both modes. Mutation, routing removed: red (the 3,037 sweep, the k/s row, and path choice) |
+| 2 | `ß` finds `ẞ` | `textFindConfusables.test.ts`'s row changed deliberately to 2 / 2 / 1, its comment rewritten |
+| 3 | `\p{Lu}+` | precomposed `ÄÖÜ`: one match, bytes 0–6. Decomposed: three, `0:1 3:4 6:7`, commented as §2.4's existing behaviour. Case-sensitive: under `iu`, `\p{Lu}` also matches lower case |
+| 4 | Zero-length match over an astral character | `x*` over `a😀b` at code units `0 1 3 4`, bytes `0 1 5 6`, none on a continuation byte |
+| 5 | The plain-mode hang | `😀` over `😀😀`: two matches. Mutation, `index + 1` restored: red through the development assertion (*"Find stopped advancing: a match at 0 after one at 0"*), in 2.7 s, no hang |
+| 6 | Invalid patterns in the real Find bar | green, `test/findInvalidPattern.test.tsx`: `a(`, `\k` and `a{` show `Invalid pattern`, the reason (`Unterminated group`, `Invalid named reference`, `Incomplete quantifier`), `aria-invalid="true"`, and the spawn counter unchanged. `[\-]`, `\/`, `a\/b` and `x\-y` search, each starting one worker. **Deviation:** the plan named `\-` as the `u`-only invalid case, but §4a, confirmed after the criterion was written, makes `\-` valid; `\k` takes its place |
+| 7 | Plain mode never invalid | every printable ASCII character finds itself under `giu`; `café`, `日本`, an astral character and both lone surrogates compile |
+| 8 | The sizer reserves the label | at 1280 × 800 the input's width is identical with and without `Invalid pattern` |
+| 9 | Worker agrees with in-thread | R239's table gains `x*` over `a😀b 😀`; green |
+| 10 | Path choice | `status`, `KEY`, `s` case-insensitive: **`byte-checked`**, not the plan's `decoded` (§9.2); `status` case-sensitive and `price` case-insensitive: `byte`; regex and non-ASCII: `decoded` |
+| 11 | Cost in the renderer | §9.2 |
+| 12–14 | D-125, FINDINGS, module comment | done; the module comment also corrected a wrong claim that `µ`/`μ` do not match (they do, through case folding, in both modes, before and after) |
+| 15 | Astral scripts | Deseret U+10400/U+10428, Osage U+104B0/U+104D8, Adlam U+1E900/U+1E922 find each other in both modes, both directions. Mutation, `u` removed (today's flags): all three red |
+| 16 | §4a's rewrite | the 26 patterns of §2.13 give, rewritten under `u`, the same spans as the original without `u` on one probe string; 22 of them throw under `u` unrewritten; `\\-` is left alone; `\é` and `\😀` become `\u{…}`. Mutation, rewrite dropped: 23 node tests red (the 18 single escapes, the 4 in context, and `\u{…}`), and the Find bar shows `Invalid pattern` for `x\-y` |
+
+### 9.2 Cost, and the refinement it forced
+
+`spike/r239-regex-find.ts` gained a plain case-insensitive `status` row. `cars-200mb.xml`, the built
+app, Electron 44, Windows 11; `main` before, this branch after:
+
+| Search | Before | After, §3 as planned | After, with the scan |
+|---|---|---|---|
+| regex `\d{4}-\d{2}`, median of 3 | 6,947 ms | 6,980 ms (1.00×) | 6,941 ms (1.00×) |
+| regex `<year>\d{4}`, median of 3 | 9,006 ms | 9,035 ms (1.00×) | 9,321 ms (1.03×) |
+| plain `status`, median of 3 | 625 ms | **7,628 ms (12.2×)** | 641 ms (1.03×) |
+| plain `status`, first search after opening (the scan runs), 3 launches | 659 ms (659, 666, 630) | — | 790 ms (776, 793, 790), **1.20×** |
+
+**§3 as planned missed its 1.25× budget by 10×**: every `k`/`s` needle on the decoded path decodes
+and normalizes all 200 MB. Node's bench (§2.7) had put the two paths level, without the mapping
+back to bytes, the windowing or the scheduler. So, per §7.11, §3's refinement was built.
+
+**Built differently from §3's sketch, for the same answer.** The plan had the presence scan run
+once, ahead of the search. That would be a 120–260 ms long task on the main thread. Instead the
+scan runs inside the byte path's own 1 MiB steps. If it finds U+212A or U+017F, the matches
+collected so far are dropped and the search restarts on the decoded path. Either way the answer is
+cached against the byte buffer, which an edit replaces. Two store tests cover the restart, and
+mutating it (not dropping the earlier matches, or not scanning) turns them red.
+
+**Its first build was quadratic.** `Uint8Array.indexOf` from the chunk's start searches to the end
+of the buffer, not to the end of the chunk, so each of 200 steps rescanned the rest: the first
+`status` took 13,855 ms, and later ones were fast only because the answer was by then cached. The
+scan now searches a `subarray` of the chunk.
+
+### 9.3 Review
+
+The diff was read before the commit. Beyond §9.2's two findings, the review moved `decodedWindowsFor`
+out of the byte path, which the restructured job had started building for every plain search, and
+found the `µ`/`μ` claim in `textFind.ts`'s module comment wrong (§9.1, row 12–14).

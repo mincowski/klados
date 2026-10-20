@@ -145,6 +145,7 @@ Search for the id to jump to one.
 | **D-122** | The packaged binary ships with six Electron fuses set; `grantFileProtocolExtraPrivileges` stays at its default |  |
 | **D-123** | Regex Find matches in a worker that a 2 s per-window deadline or a cancel terminates; amends D-041 for regex matching only |  |
 | **D-124** | The app's own `file:` page is recognized by its percent-decoded pathname, case-sensitively; encoded separators are never decoded |  |
+| **D-125** | Find folds with Unicode simple case folding: the `u` flag in both modes; amends D-097 |  |
 
 ---
 
@@ -3443,6 +3444,9 @@ totals sit beside it on the status bar, read from the index rather than by filte
 
 ### D-097 — one folding algorithm on the decoded path, and canonical equivalence rather than compatibility (R202–R205) · `settled`
 
+**Amended by D-125 (R241):** the one fold is now Unicode simple case folding (`u`, both modes),
+which recovers the `ß`/`ẞ` loss accepted below and the astral scripts R205 lost.
+
 Reverses **D-082**, whose measurements stand and whose premise did not. That entry accepted a
 154-pair fold divergence between plain and `.*` search on the judgement that *"this project's own
 documents are unlikely to be searching"* non-ASCII text. The project lead's "Unicode all the way
@@ -4550,3 +4554,55 @@ alike, including `%2E%2E` (the plan assumed otherwise; measured).
   matters.
 - **Serving the renderer from a custom scheme.** It removes the whole family but changes the
   page's origin and with it `localStorage`; its own round, if ever.
+
+### D-125 — Find folds with Unicode simple case folding: the `u` flag in both modes; amends D-097 (R241) · `settled`
+
+Plan and results: `docs/plans/R241-regex-unicode-flag.md`. Confirmed by the project lead on
+2026-10-19, including §4a's escape rewrite.
+
+**What stays from D-097.** One folding algorithm, so plain and regex mode agree by construction;
+canonical equivalence (R204's NFC), not compatibility; NFC gated on a non-ASCII needle. What
+changes is which algorithm the one fold is: the engine's legacy `toUpperCase` canonicalization
+becomes Unicode simple case folding, because every Find regex now compiles with `u`.
+
+**Why `u` now, when D-082 and R202 rejected it.** Point by point:
+- *"It fixes 58 of 154 and leaves 96; it moves the boundary between two algorithms."* The 154 were
+  disagreements between the modes. R205 removed them: plain case-insensitive search is the regex.
+  With `u` in both modes there is one fold again, except four byte-path pairs, which the routing
+  below closes. Under `u` the engine's fold is the very reference R72 scored the others against.
+- *"It rejects Annex B syntax, and a working regex silently reports zero matches."* The silence is
+  gone: a pattern that does not compile now shows `Invalid pattern` with the engine's reason. Most
+  of the breakage is gone too: escapes of harmless punctuation (`\-`, `\:`, `\#` …) are rewritten
+  to `\xHH` before compiling, which kept the matches of all 26 patterns measured and rescued the 22
+  that `u` rejects. What still fails (a lone `]` or `}`, `a{`, `[a-\d]`, `\1` without a group, `\k`)
+  is rare in typed searches and now says so.
+- *What neither measured:* R205 lost case-insensitive matching above U+FFFF, since `Canonicalize`
+  without `u` folds code units. Deseret, Osage, Adlam and others were found case-insensitively in
+  neither mode. `u` restores them, and the `ß`/`ẞ` loss D-097 accepted.
+
+**Chosen:**
+- **`u` in both modes**; the case-sensitive plain path stays `indexOf`.
+- **`k` and `s`.** Under `u` they also fold to U+212A KELVIN SIGN and U+017F LONG S, which the
+  byte path's ASCII fold cannot reach. A case-insensitive ASCII plain needle holding either letter
+  takes the byte path **only if the document cannot contain either code point**: never in a
+  single-byte code page (none maps to either), always assumed in other multi-byte encodings, and
+  for UTF-8 found by a scan run inside the byte path's own 1 MiB steps and cached per buffer. If the
+  scan meets one, the search restarts on the decoded path. Sending every such needle to the decoded
+  path, as first planned, cost 12× in the renderer (625 → 7,628 ms over 200 MB) against a 1.25×
+  budget; with the scan the first search costs 1.20× (790 against 659 ms, three fresh launches each), and later ones nothing.
+- **Every advance steps by code point**, and a development-only assertion throws if a loop stops
+  advancing. Under `u` the engine moves a `lastIndex` inside a surrogate pair back to its start, so
+  `index + 1` would loop forever on any emoji.
+- **A pattern is compiled once, on the main thread, before the search**; an invalid one starts no
+  worker.
+
+**Rejected:**
+- **Teaching the byte path the two code points.** Variable-width matches inside a fixed-width
+  Boyer–Moore–Horspool scan, UTF-8-specific, to keep a path that is only faster when the scan says
+  it is safe anyway.
+- **Accepting the four-pair disagreement**, which reopens what D-097 closed.
+- **Compiling with `u` and falling back to no `u`** when a pattern is not `u`-valid: two folds,
+  chosen by syntax, which is what D-097 removed.
+- **The `v` flag**, which rejects even `[(]` for no folding difference.
+- **Mapping V8's error messages to Klados wording** (`]` reports *Lone quantifier brackets*): a
+  table that would have to track V8.

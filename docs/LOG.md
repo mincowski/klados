@@ -16,6 +16,31 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R241 — the `u` flag in Find · built
+
+**Plan:** `docs/plans/R241-regex-unicode-flag.md` · **Decision:** D-125, amending D-097
+
+From R239 §6.4, where turning `u` on changed a test, so the project lead had it taken up as its own
+change to D-097. Find's regexes, plain and regex mode alike, now compile with `u`, so the one fold
+is Unicode simple case folding. `ß` finds `ẞ` again, and Deseret, Osage, Adlam and the other astral
+scripts are found case-insensitively for the first time since R205. A regex that does not compile
+shows `Invalid pattern` with the engine's reason instead of "No matches", and escapes of harmless
+punctuation (`\-`, `\:`, `\#`) are rewritten so they keep working under `u`.
+
+**Two traps under `u`, both fixed before they shipped.** A `lastIndex` inside a surrogate pair is
+moved back to the pair's start, so Find's `index + 1` advance would have looped forever on any
+emoji; both loops now step by code point, behind a development assertion. And `k`/`s` fold to
+U+212A and U+017F, which the byte path cannot see.
+
+**The plan's routing for `k`/`s` cost 12×.** Sending every case-insensitive needle with `k` or `s`
+to the decoded path took a plain `status` over 200 MB from 625 to 7,628 ms in the renderer. The
+plan's fallback was built instead: the byte path, unless the document can hold either code point,
+found by a scan inside the byte path's own steps, cached per buffer. Its first version was
+quadratic (`indexOf` searched past the chunk to the end of the buffer: 13.9 s). Now the first
+search after opening costs 1.20× and later ones 1.03×; regex rows are unchanged.
+
+---
+
 ## R240 — the app accepts its own page from any folder name · built
 
 **Plan:** `docs/plans/R240-app-url-spelling.md` · **Decision:** D-124

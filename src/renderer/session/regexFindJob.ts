@@ -75,11 +75,18 @@ function spawnRegexFindWorker(): RegexFindWorker {
 }
 
 let liveWorkers = 0
+let spawnedWorkers = 0
 
 /** Search workers spawned and not yet terminated. Criterion 2's test hook:
  * after a cancel this must return to 0. */
 export function liveRegexFindWorkers(): number {
   return liveWorkers
+}
+
+/** Search workers spawned since the page loaded. R241's test hook: a pattern
+ * that does not compile must start none. */
+export function spawnedRegexFindWorkers(): number {
+  return spawnedWorkers
 }
 
 export function runRegexFindJob(
@@ -164,6 +171,7 @@ export function runRegexFindJob(
     }
     worker = (deps.spawn ?? spawnRegexFindWorker)()
     liveWorkers++
+    spawnedWorkers++
     worker.onmessage = onMessage
     worker.onerror = (event) => {
       if (settled) return

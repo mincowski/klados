@@ -52,6 +52,14 @@ const rows: readonly Row[] = [
   { name: 'zero-length matches advance', text: 'baaab', needle: 'a*', options: CS },
   { name: 'case-insensitive', text: 'Cat cat CAT', needle: 'cat', options: CI },
   { name: 'invalid pattern finds nothing', text: 'a(b', needle: 'a(', options: CS },
+  // R241 criterion 9: under `u`, a zero-length match steps over an astral
+  // character whole.
+  {
+    name: 'zero-length matches over an astral character',
+    text: 'a\u{1F600}b \u{1F600}',
+    needle: 'x*',
+    options: CS
+  },
   // textFindNormalization.test.ts, in regex mode
   { name: 'ASCII regex over a decomposed é', text: 'é', needle: '^e.$', options: CI },
   {

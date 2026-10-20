@@ -82,16 +82,27 @@ function usePathDiagnostic(): PathDiagnostic | null {
   )
 }
 
+function usePatternError(): string | null {
+  return useSyncExternalStore(
+    activeSearchStore.subscribe,
+    activeSearchStore.getPatternError,
+    activeSearchStore.getPatternError
+  )
+}
+
 /** R87 (`R86-find-as-query-surface.md` §3): `.*` and `/` are one exclusive
  * group with `'plain'` as the off state (neither pressed) — `Aa` composes
  * with either, so it isn't part of this group. */
 type MatchMode = 'plain' | 'regex' | 'path'
+
+const INVALID_PATTERN_LABEL = 'Invalid pattern'
 
 export function FindBar(): JSX.Element | null {
   const findState = useFindState()
   const documentState = useDocumentSession()
   const result = useSearchResult()
   const pathDiagnostic = usePathDiagnostic()
+  const patternError = usePatternError()
 
   const [text, setText] = useState('')
   const [caseSensitive, setCaseSensitive] = useState(false)
@@ -636,16 +647,25 @@ export function FindBar(): JSX.Element | null {
   // says it stopped. Chosen from a rendering of the bar (R239 §6): "+" reads
   // as "there are more", which is not known, and "so far" as still running.
   const stoppedSuffix = result.timedOut ? ' (stopped)' : ''
-  const countLabel = !result.complete
-    ? 'Searching…'
-    : total === 0
-      ? `No matches${stoppedSuffix}`
-      : `${currentDisplay.toLocaleString()} of ${total.toLocaleString()}${stoppedSuffix}`
+  // R241 (`docs/plans/R241-regex-unicode-flag.md` §4): a regex that does not
+  // compile says so, rather than "No matches", with the engine's reason in the
+  // footnote row below.
+  const invalidPattern = matchMode === 'regex' && patternError !== null
+  const countLabel = invalidPattern
+    ? INVALID_PATTERN_LABEL
+    : !result.complete
+      ? 'Searching…'
+      : total === 0
+        ? `No matches${stoppedSuffix}`
+        : `${currentDisplay.toLocaleString()} of ${total.toLocaleString()}${stoppedSuffix}`
   // §3 — the exact reservation: the widest this label can ever be is
   // `{total} of {total}`, once `(stale)` no longer adds to it. Same
   // `toLocaleString()` formatting as the label itself, so the sizer is
-  // exact rather than merely close.
-  const countSizer = `${total.toLocaleString()} of ${total.toLocaleString()}${stoppedSuffix}`
+  // exact rather than merely close. R241: the invalid-pattern label is
+  // reserved the same way, so it widens the bar, not squeezes the input.
+  const countSizer = invalidPattern
+    ? INVALID_PATTERN_LABEL
+    : `${total.toLocaleString()} of ${total.toLocaleString()}${stoppedSuffix}`
 
   // R90 §6 — hidden, not merely disabled, in path mode: a path result is a
   // set of node spans, and "replace every matched element with this text"
@@ -683,6 +703,7 @@ export function FindBar(): JSX.Element | null {
           onPaste={handlePaste}
           onKeyDown={handleKeyDown}
           aria-label="Find"
+          aria-invalid={invalidPattern ? true : undefined}
         />
         <span className="find-count" aria-live="polite">
           <span className="find-count-sizer" aria-hidden="true">
@@ -811,6 +832,11 @@ export function FindBar(): JSX.Element | null {
           </div>
           <div>{pathDiagnostic.message}</div>
         </div>
+      )}
+      {/* R241 §4: the engine's reason for a regex that does not compile, in
+       * the footnote row path mode's diagnostic uses, as V8 words it. */}
+      {invalidPattern && (
+        <span className="find-footnote find-footnote-pattern">{patternError}</span>
       )}
       {/* R103 (`R102-find-single-line.md` §3): the one thing reverting the
        * find field to a single line genuinely loses — a plain
