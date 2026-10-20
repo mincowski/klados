@@ -271,7 +271,9 @@ started, but every IPC call failed with "Refused … from an untrusted frame", a
   the main process and the page end up with two spellings of it.
 - **Not fixed here**, since it changes a security guard outside this round's scope. The packaged test
   launches from long-name folders (`realpathSync.native`) so it measures what it is for.
-- **Proposed as its own round.**
+- **Proposed as its own round: R240** (`docs/plans/R240-app-url-spelling.md`). Measured there, the cause
+  is not the short name: Node escapes the `~` in it and Chromium does not. **Fixed there**, and the
+  `realpathSync.native` workaround removed.
 
 ### 5.3 Review
 

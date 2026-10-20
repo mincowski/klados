@@ -43,6 +43,21 @@
  *   (including one an attacker persuaded the user to save) become a
  *   navigation target that inherits `window.api`.
  *
+ *   **The pathnames are compared percent-decoded** (R240,
+ *   `docs/plans/R240-app-url-spelling.md`). The app's URL is Node's
+ *   `pathToFileURL`, which writes `~`, `[`, `]` and `%` as `%7E`, `%5B`, `%5D`
+ *   and `%25`; Chromium reports its page with them literal. Compared raw, a
+ *   Klados installed under any path containing one of them (an 8.3 name such
+ *   as `RUNNER~1`, or `C:\~tools\`) refused every IPC call from its own page.
+ *   Two spellings that decode to the same bytes are the same file to
+ *   Chromium's loader, so this accepts only other spellings of the app's own
+ *   file. See `decodedFilePath` for what is never decoded.
+ *
+ *   **Case stays significant.** Casing alone never differed (both URLs come
+ *   from the same string, measured), and a case-insensitive compare would
+ *   accept a different file on Linux, case-sensitive macOS volumes and
+ *   case-sensitive NTFS folders.
+ *
  * Anything unparseable is denied. A guard that throws on a malformed URL fails
  * open at the call site, which is the wrong direction for this to fail in.
  */
@@ -60,11 +75,49 @@ export function isAppUrl(target: string, appUrl: string): boolean {
     return (
       parsedTarget.protocol === 'file:' &&
       parsedTarget.host === parsedApp.host &&
-      parsedTarget.pathname === parsedApp.pathname
+      decodedFilePath(parsedTarget.pathname) === decodedFilePath(parsedApp.pathname)
     )
   }
 
   return parsedTarget.origin === parsedApp.origin && parsedTarget.origin !== 'null'
+}
+
+/** `/`, `\` and NUL: their escapes are never decoded. */
+const KEPT_BYTES: readonly number[] = [0x2f, 0x5c, 0x00]
+
+/**
+ * A `file:` URL's pathname with every `%XX` replaced by the byte it names, in
+ * one pass, as a string of byte values (R240). `new URL()` has already escaped
+ * every non-ASCII character, so a byte string compares exactly.
+ *
+ * - **An encoded separator or NUL is never decoded**, in either case, so it
+ *   never matches a literal `/` and cannot change the path's structure.
+ *   Chromium refuses such URLs anyway (measured, `ERR_FAILED`). It becomes a
+ *   code unit above 0xFF, which nothing else produces: kept as the text
+ *   `%2F`, it would equal a decoded `%252F`, a file literally named `%2F`.
+ * - **One pass**: `%257E` becomes `%7E`, never `~`.
+ * - **Dot segments are not resolved here.** `new URL()` already resolved
+ *   them, `%2E%2E` included (the URL standard counts it as `..`), so a
+ *   decoded `%2E` is only ever a dot inside a name.
+ * - **Hand-written, not `decodeURIComponent`**, which throws on `%%` and `%FF`
+ *   (a throw here would refuse every IPC call) and decodes `%2F`. A `%` not
+ *   followed by two hex digits stays literal.
+ */
+function decodedFilePath(pathname: string): string {
+  let out = ''
+  let i = 0
+  while (i < pathname.length) {
+    const hex = pathname.slice(i + 1, i + 3)
+    if (pathname[i] === '%' && /^[0-9A-Fa-f]{2}$/.test(hex)) {
+      const byte = parseInt(hex, 16)
+      out += String.fromCharCode(KEPT_BYTES.includes(byte) ? 0x100 + byte : byte)
+      i += 3
+    } else {
+      out += pathname[i]
+      i += 1
+    }
+  }
+  return out
 }
 
 /**
