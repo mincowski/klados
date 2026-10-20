@@ -67,7 +67,10 @@ describe.skipIf(!builtAppAvailable)('launched with a file, as "Open with" does (
 
   afterAll(async () => {
     if (app !== null) await closeApp(app)
-    rmSync(dir, { recursive: true, force: true })
+    // Retried, as `fileErrorsElectron.test.ts` does: Electron's helper
+    // processes can still write to the profile for a moment after the app has
+    // closed. Measured once on `macos-latest`: ENOTEMPTY on `profile`.
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10 })
   })
 
   /** A second launch, as a second "Open with" makes: its exit, and everything

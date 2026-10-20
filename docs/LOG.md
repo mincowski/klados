@@ -16,6 +16,18 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R219 — the built-app tests retry their profile cleanup · built
+
+**Plan:** `docs/plans/R219-open-with.md` § 8, "After the merge"
+
+`openWithElectron.test.ts` failed once on `macos-latest` in `afterAll`, with ENOTEMPTY while deleting the
+profile an already-closed app had used: Electron's helper processes can still write there for a
+moment. R220's test already retried for the same reason; this one and `mainElectron.test.ts`'s profile
+cleanup now do too. Done before tagging 1.3.0, because the release job runs the suite on every
+platform before it packages.
+
+---
+
 ## R241 — the `u` flag in Find · built
 
 **Plan:** `docs/plans/R241-regex-unicode-flag.md` · **Decision:** D-125, amending D-097
