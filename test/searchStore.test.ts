@@ -20,7 +20,7 @@ import {
   type DocumentSession,
   type DocumentSessionDeps
 } from '../src/renderer/session/documentSession'
-import { createSearchStore } from '../src/renderer/session/searchStore'
+import { createSearchStore, EMPTY_SEARCH_RESULT } from '../src/renderer/session/searchStore'
 
 /** M5-PLAN.md H12 — same test-only extension `documentSession.test.ts`
  * uses; see that file's own doc comment on `FakeApi`. */
@@ -529,5 +529,70 @@ describe('createSearchStore (G4)', () => {
       expect(store.getPathDiagnostic()).toBeNull()
       store.dispose()
     })
+  })
+})
+
+/**
+ * R241 (`docs/plans/R241-regex-unicode-flag.md` §3, §4) — a case-insensitive
+ * `k` or `s` and the byte path's chunked check for U+212A / U+017F, and a
+ * regex that does not compile.
+ */
+describe('R241 — the search store under u', () => {
+  async function storeOver(text: string): Promise<ReturnType<typeof createSearchStore>> {
+    const api = fakeApi({ read: vi.fn().mockResolvedValue(utf8(text)) })
+    const session = createDocumentSession({ parse: fakeParse, parseFromUrl: fakeParseFromUrl, api })
+    await session.openPath('C:/docs/data.json')
+    return createSearchStore(session)
+  }
+
+  // The store notifies only when a job settles, so a quiet window does not
+  // mean a search this long has finished.
+  async function untilComplete(store: ReturnType<typeof createSearchStore>): Promise<void> {
+    await vi.waitFor(
+      () => {
+        if (!store.getSnapshot().complete) throw new Error('still searching')
+      },
+      { timeout: 20_000, interval: 20 }
+    )
+  }
+
+  // Past the first 1 MiB step, so the scan finds it after the byte path has
+  // already collected matches it must then drop.
+  const filler = 'status '.repeat(200_000)
+
+  it('restarts on the decoded path when LONG S turns up mid-scan', async () => {
+    const store = await storeOver(`{"a":"${filler}","b":"\u{017F}tatus"}`)
+    store.search({ text: 'status', mode: 'text', options: { caseSensitive: false, regex: false } })
+    await untilComplete(store)
+    const result = store.getSnapshot()
+    expect(result.complete).toBe(true)
+    // Every filler match exactly once, plus the long-s one: nothing doubled
+    // from the abandoned byte pass.
+    expect(result.starts.length).toBe(200_001)
+    expect(new Set(result.starts).size).toBe(200_001)
+    store.dispose()
+  })
+
+  it('stays on the byte path, with the same matches, when neither turns up', async () => {
+    const store = await storeOver(`{"a":"${filler}","b":"STATUS"}`)
+    store.search({ text: 'status', mode: 'text', options: { caseSensitive: false, regex: false } })
+    await untilComplete(store)
+    expect(store.getSnapshot().starts.length).toBe(200_001)
+    store.dispose()
+  })
+
+  it('a regex that does not compile reports why and finds nothing', async () => {
+    const store = await storeOver('{"a":"x-y"}')
+    store.search({ text: 'a(', mode: 'text', options: { caseSensitive: false, regex: true } })
+    expect(store.getPatternError()).toBe('Unterminated group')
+    expect(store.getSnapshot()).toEqual(EMPTY_SEARCH_RESULT)
+    // A valid one clears it. (Its search needs a `Worker`, which the node
+    // project lacks; `findInvalidPattern.test.tsx` runs it for real.)
+    store.search({ text: 'x\\-y', mode: 'text', options: { caseSensitive: false, regex: true } })
+    expect(store.getPatternError()).toBeNull()
+    store.clear()
+    store.search({ text: 'a(', mode: 'text', options: { caseSensitive: false, regex: false } })
+    expect(store.getPatternError()).toBeNull()
+    store.dispose()
   })
 })

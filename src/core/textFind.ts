@@ -35,26 +35,32 @@
  *    `İ` (U+0130) down to the two code units `'İ'.toLowerCase()` produces.
  *    `/İ/i` misses `i̇` for the same reason, so this was never a property
  *    of the old implementation. Measured: 91 single characters in
- *    U+0020–U+2FFF change length under `toLowerCase`.
+ *    U+0020–U+2FFF change length under `toLowerCase`. Under `u` (R241) the
+ *    fold is Unicode simple case folding, one code point to one, so `ß`
+ *    still does not find `ss`; it does find `ẞ` U+1E9E now, which before
+ *    R241 it did not.
  *
  * **Case-insensitivity is one algorithm on the decoded path and another on
  * the byte path, and that no longer produces disagreements users can reach.**
  * R205 deleted `indexOfCaseInsensitive` and made plain case-insensitive
  * search a literal regex, so plain and `.*` modes now fold identically **by
  * construction** rather than by two implementations agreeing. The byte path
- * still ASCII-folds — but it only ever runs for an all-ASCII needle, where
- * ASCII folding and the engine's folding were measured to agree on every
- * case (D-082: zero disagreeing pairs for an ASCII needle).
+ * still ASCII-folds, and it only ever runs for an all-ASCII needle. Without
+ * `u`, ASCII folding and the engine's agreed on every case for such a needle
+ * (D-082). **Under `u` they do not**: `k` and `s` also fold to U+212A KELVIN
+ * SIGN and U+017F LONG S, so a case-insensitive needle holding either letter
+ * keeps the byte path only where the document cannot contain those two
+ * (`FindPath`'s `byte-checked`, R241 §3).
  *
  * What survives is not a path difference but a Unicode one. R204 made both
  * modes see canonical equivalence, so `Å` U+00C5 and the angstrom sign
- * U+212B now match each other everywhere. `µ`/`μ` and `ß`/`ẞ` still do not,
- * because those are **compatibility** relationships rather than canonical
- * ones, and D-082 rejected NFKC for equating characters that are not the
- * same character. `ß`/`ẞ` is the one case R205 made worse — the engine folds
- * upward and `'ß'.toUpperCase()` is `'SS'`, a length change no normalization
- * form repairs — and `docs/plans/R202-unicode-comparison.md` § 7 records that
- * loss as accepted rather than overlooked.
+ * U+212B now match each other everywhere. `µ`/`μ` match through case folding
+ * (U+00B5 folds to U+03BC), not through normalization: D-082 rejected NFKC
+ * for equating characters that are not the same character. R241 turned on
+ * `u` in both modes (`docs/plans/R241-regex-unicode-flag.md`), which also
+ * recovers `ß`/`ẞ`, the loss `docs/plans/R202-unicode-comparison.md` § 7
+ * accepted, and the astral scripts (Deseret, Osage, Adlam, …) that the
+ * engine's code-unit fold never folded.
  */
 
 export interface MatchSet {
@@ -88,9 +94,106 @@ export function isAsciiOnly(text: string): boolean {
 }
 
 /** Which path `findAll`/G3's chunked job should take for this needle —
- * falls out of encoding (see module comment), not a user-facing setting. */
-export function chooseFindPath(needle: string, options: TextFindOptions): 'byte' | 'decoded' {
-  return !options.regex && isAsciiOnly(needle) ? 'byte' : 'decoded'
+ * falls out of encoding (see module comment), not a user-facing setting.
+ *
+ * R241 (`docs/plans/R241-regex-unicode-flag.md` §3): under `u`, `k` and `s`
+ * fold to U+212A KELVIN SIGN and U+017F LONG S, which the byte path's ASCII
+ * fold cannot reach. A case-insensitive needle holding either letter is
+ * `byte-checked`: wherever the document can hold either code point it takes
+ * the decoded path, so it folds through the same engine regex mode uses and
+ * the two modes agree by construction. */
+export function chooseFindPath(needle: string, options: TextFindOptions): FindPath {
+  if (options.regex || !isAsciiOnly(needle)) return 'decoded'
+  return !options.caseSensitive && /[ks]/i.test(needle) ? 'byte-checked' : 'byte'
+}
+
+/**
+ * `'byte-checked'`: the byte path is exact **unless the document holds
+ * U+212A or U+017F**, in which case the decoded path is. R241 §3 first sent
+ * every such needle to the decoded path; measured in the renderer, a plain
+ * `status` over 200 MB then took 7,628 ms against the byte path's 625 (12×,
+ * against a 1.25× budget), so §3's planned refinement applies: decide by
+ * whether the document can contain either code point.
+ * `mayHoldAsciiFoldTargets` answers that.
+ */
+export type FindPath = 'byte' | 'byte-checked' | 'decoded'
+
+/** U+212A KELVIN SIGN and U+017F LONG S in UTF-8: the only non-ASCII code
+ * points an ASCII letter folds to under `u`. */
+const KELVIN_SIGN_UTF8 = [0xe2, 0x84, 0xaa] as const
+const LONG_S_UTF8 = [0xc5, 0xbf] as const
+
+function sequenceStartsIn(
+  bytes: Uint8Array,
+  sequence: readonly number[],
+  from: number,
+  to: number
+): boolean {
+  // `indexOf` on a view of `[from, to)` only: on the whole buffer it would
+  // scan past `to` to the end, so a chunked scan became quadratic (measured,
+  // 13.9 s for one plain `status` over 200 MB before this bound).
+  const range = bytes.subarray(from, to)
+  let at = range.indexOf(sequence[0]!)
+  while (at !== -1) {
+    let whole = true
+    for (let i = 1; i < sequence.length; i++) {
+      if (bytes[from + at + i] !== sequence[i]) {
+        whole = false
+        break
+      }
+    }
+    if (whole) return true
+    at = range.indexOf(sequence[0]!, at + 1)
+  }
+  return false
+}
+
+/** Whether U+212A or U+017F, in UTF-8, **starts** in `[from, to)`; a sequence
+ * may run past `to`, so consecutive ranges miss none (R241 §3). */
+export function holdsAsciiFoldTargets(bytes: Uint8Array, from: number, to: number): boolean {
+  return (
+    sequenceStartsIn(bytes, KELVIN_SIGN_UTF8, from, to) ||
+    sequenceStartsIn(bytes, LONG_S_UTF8, from, to)
+  )
+}
+
+/** Per byte buffer. An edit builds a new `SourceBuffer` around new bytes, so
+ * an answer never outlives the text it was computed for. */
+const asciiFoldTargetScans = new WeakMap<Uint8Array, boolean>()
+
+function isUtf8Encoding(encoding: string): boolean {
+  const normalized = encoding.toLowerCase()
+  return normalized === 'utf-8' || normalized === 'utf8'
+}
+
+/**
+ * Whether the document can contain U+212A or U+017F, when that is known
+ * without a scan; `null` when a UTF-8 document has not been scanned yet.
+ *
+ * - **Single-byte code pages: never.** None of the 28 Klados decodes maps any
+ *   byte to either code point (R241 §2.5, measured).
+ * - **Other multi-byte encodings: assumed so.** GB18030 can encode both, and
+ *   these documents are rare enough not to scan.
+ */
+export function knownAsciiFoldTargets(bytes: Uint8Array, encoding: string): boolean | null {
+  if (isSingleByteEncoding(encoding)) return false
+  if (!isUtf8Encoding(encoding)) return true
+  return asciiFoldTargetScans.get(bytes) ?? null
+}
+
+/** Records a completed scan of `bytes`, for `knownAsciiFoldTargets`. */
+export function recordAsciiFoldTargets(bytes: Uint8Array, present: boolean): void {
+  asciiFoldTargetScans.set(bytes, present)
+}
+
+/** `knownAsciiFoldTargets`, scanning the whole buffer at once when it is not
+ * known. For `findAll`; the search store scans chunk by chunk instead. */
+export function mayHoldAsciiFoldTargets(bytes: Uint8Array, encoding: string): boolean {
+  const known = knownAsciiFoldTargets(bytes, encoding)
+  if (known !== null) return known
+  const present = holdsAsciiFoldTargets(bytes, 0, bytes.length)
+  recordAsciiFoldTargets(bytes, present)
+  return present
 }
 
 function asciiFold(byte: number): number {
@@ -581,17 +684,19 @@ export function decodedTextMatches(
 ): Array<{ index: number; length: number }> {
   const matches: Array<{ index: number; length: number }> = []
   if (options.regex) {
-    let regex: RegExp
-    try {
-      regex = new RegExp(needle, options.caseSensitive ? 'g' : 'gi')
-    } catch {
-      return []
-    }
+    const compiled = compileFindPattern(needle, options.caseSensitive)
+    // Find compiles the pattern before it searches and never gets here with
+    // an invalid one (R241 §4); a direct caller still gets no matches.
+    if (!compiled.ok) return []
+    const regex = compiled.regex
     let match: RegExpExecArray | null
     while ((match = regex.exec(text)) !== null) {
+      assertAdvanced(matches, match.index)
       matches.push({ index: match.index, length: match[0].length })
-      // Zero-length matches (e.g. `a*`) must still advance, or exec loops forever.
-      regex.lastIndex = match.index + Math.max(match[0].length, 1)
+      // Zero-length matches (e.g. `a*`) must still advance, or exec loops
+      // forever, and by a whole code point (R241 §6).
+      regex.lastIndex =
+        match[0].length > 0 ? match.index + match[0].length : nextCodePointIndex(text, match.index)
     }
     return matches
   }
@@ -622,22 +727,102 @@ export function decodedTextMatches(
   // the engine can fold a character to one of a different width, and
   // `MatchSet` already documents that a decoded-path match's byte length
   // varies.
-  let literal: RegExp
-  try {
-    literal = new RegExp(escapeForRegex(needle), 'gi')
-  } catch {
-    return []
-  }
+  //
+  // R241: `giu`, the same fold regex mode uses (§5). The escaped literal
+  // always compiles under `u` (§2.2, and a test keeps it so).
+  const literal = new RegExp(escapeForRegex(needle), 'giu')
   let literalMatch: RegExpExecArray | null
   while ((literalMatch = literal.exec(text)) !== null) {
+    assertAdvanced(matches, literalMatch.index)
     matches.push({ index: literalMatch.index, length: literalMatch[0].length })
-    // **Advance by one, not by the match length.** The regex branch above
-    // advances by the match and this one must not: the plain path has always
-    // allowed overlapping matches ("same as the byte path"), and advancing by
-    // the match would silently drop `aa` in `aaa` from two matches to one.
-    literal.lastIndex = literalMatch.index + 1
+    // **Advance by one code point, not by the match length.** The regex
+    // branch above advances by the match and this one must not: the plain
+    // path has always allowed overlapping matches ("same as the byte path"),
+    // and advancing by the match would silently drop `aa` in `aaa` from two
+    // matches to one. One code point, not one code unit: under `u` the engine
+    // moves a `lastIndex` inside a surrogate pair back to its start, and
+    // `😀` over `😀😀` would match at 0 forever (R241 §2.3).
+    literal.lastIndex = nextCodePointIndex(text, literalMatch.index)
   }
   return matches
+}
+
+/** One code point past `index`: two code units at a high surrogate followed
+ * by a low one, otherwise one (R241 §6). */
+function nextCodePointIndex(text: string, index: number): number {
+  const unit = text.charCodeAt(index)
+  if (unit >= 0xd800 && unit <= 0xdbff && index + 1 < text.length) {
+    const next = text.charCodeAt(index + 1)
+    if (next >= 0xdc00 && next <= 0xdfff) return index + 2
+  }
+  return index + 1
+}
+
+/** Development only (R241 §6): each match starts after the previous one. A
+ * loop that stops advancing then throws in a test instead of hanging the test
+ * runner, where no timeout can fire because the loop never yields.
+ * `import.meta.env` is absent under `tsx` (the CLI), hence the `?.`. */
+function assertAdvanced(matches: ReadonlyArray<{ index: number }>, index: number): void {
+  if (import.meta.env?.DEV !== true) return
+  const previous = matches[matches.length - 1]
+  if (previous !== undefined && index <= previous.index) {
+    throw new Error(`Find stopped advancing: a match at ${index} after one at ${previous.index}`)
+  }
+}
+
+/**
+ * R241 §4a (`docs/plans/R241-regex-unicode-flag.md`): `\` followed by a
+ * character that is neither ASCII alphanumeric nor one of
+ * `^ $ \ . * + ? ( ) [ ] { } | /` becomes the `\x` (or, past ASCII, `\u{…}`)
+ * escape of that character. Under `u` an identity escape of punctuation
+ * (`\-`, `\:`, `\#`) is a syntax error; this keeps what users type "to be
+ * safe", as PCRE, Python and .NET allow, meaning what it meant before `u`.
+ *
+ * `\xHH` is a literal both inside and outside a class, so no class tracking
+ * is needed. One left-to-right pass that consumes `\` together with the
+ * character after it, so `\\-` stays an escaped backslash and a `-`.
+ */
+export function rewriteHarmlessEscapes(pattern: string): string {
+  let out = ''
+  let i = 0
+  while (i < pattern.length) {
+    if (pattern[i] !== '\\' || i + 1 >= pattern.length) {
+      out += pattern[i]
+      i += 1
+      continue
+    }
+    const codePoint = pattern.codePointAt(i + 1)!
+    const char = String.fromCodePoint(codePoint)
+    if (/[A-Za-z0-9^$\\.*+?()[\]{}|/]/.test(char)) out += `\\${char}`
+    else if (codePoint <= 0x7f) out += `\\x${codePoint.toString(16).padStart(2, '0')}`
+    else out += `\\u{${codePoint.toString(16)}}`
+    i += 1 + char.length
+  }
+  return out
+}
+
+export type CompiledFindPattern =
+  | { readonly ok: true; readonly regex: RegExp }
+  /** `reason` is the engine's, without its `Invalid regular expression:
+   * /…/flags: ` prefix, which would repeat the rewritten pattern. */
+  | { readonly ok: false; readonly reason: string }
+
+/** A regex-mode Find pattern as Find compiles it (R241): §4a's rewrite, then
+ * `u`, with `i` unless case-sensitive. Compiled once before a search starts,
+ * so an invalid pattern is a state Find can show (§4), not an empty result. */
+export function compileFindPattern(needle: string, caseSensitive: boolean): CompiledFindPattern {
+  const source = rewriteHarmlessEscapes(needle)
+  const flags = caseSensitive ? 'gu' : 'giu'
+  try {
+    return { ok: true, regex: new RegExp(source, flags) }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    const prefix = `Invalid regular expression: /${source}/${flags}: `
+    return {
+      ok: false,
+      reason: message.startsWith(prefix) ? message.slice(prefix.length) : message
+    }
+  }
 }
 
 /**
@@ -772,7 +957,8 @@ export function findAll(
   needle: string,
   options: TextFindOptions
 ): MatchSet {
-  if (chooseFindPath(needle, options) === 'byte') {
+  const path = chooseFindPath(needle, options)
+  if (path === 'byte' || (path === 'byte-checked' && !mayHoldAsciiFoldTargets(bytes, encoding))) {
     return findAsciiInRange(bytes, needle, options.caseSensitive, 0, bytes.length)
   }
 

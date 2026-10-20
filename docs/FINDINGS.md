@@ -47,7 +47,12 @@ with a `TextDecoder` of your own, and measure in the renderer rather than trusti
 Checked over every code point (R214): `toLowerCase` maps U+0130 to `i̇` and U+212A KELVIN SIGN to `k`;
 NFC maps U+212A to `K`, U+037E to `;` and U+1FEF to a backtick. Any byte-level shortcut for
 case-insensitive or normalized ASCII matching has to account for exactly these — and R202's records
-claimed NFC had none, which R214 corrected.
+claimed NFC had none, which R214 corrected. **Under the `u` flag the regex fold adds two more**
+(R241): `/k/iu` finds U+212A and `/s/iu` finds U+017F LONG S, which `/i` does not.
+
+**Under `u`, V8 moves a `lastIndex` that points inside a surrogate pair back to the pair's start**
+(R241 §2.3). Any `exec` loop that advances by `index + 1` then never terminates on astral text:
+`/😀/giu` over `😀😀` matches at 0 forever. Step by code point.
 
 **Everything above `src/formats/` is format-agnostic, and it holds.** M6 proved it: TOML needed
 zero lines changed outside its own file plus two registration points, no new `NodeKind`, and

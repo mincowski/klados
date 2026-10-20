@@ -25,9 +25,13 @@
  */
 import {
   chooseFindPath,
+  compileFindPattern,
   decodedWindowsFor,
   findAsciiInRange,
   findDecodedInWindow,
+  holdsAsciiFoldTargets,
+  knownAsciiFoldTargets,
+  recordAsciiFoldTargets,
   type MatchSet,
   type TextFindOptions
 } from '../../core/textFind'
@@ -103,6 +107,12 @@ export interface SearchStore {
    * that parsed fine. `FindBar`'s footnote row (R87) reads this rather than
    * re-parsing the query itself, so the two can never disagree. */
   getPathDiagnostic(): PathDiagnostic | null
+  /** R241 (`docs/plans/R241-regex-unicode-flag.md` §4): the engine's reason
+   * when the active query is a regex that does not compile, `null`
+   * otherwise. Plain mode never sets it: its escaped literal always compiles.
+   * The pattern is compiled once, before the search, and an invalid one
+   * starts no worker. */
+  getPatternError(): string | null
   /** Clears the active query and its result without starting a new one. */
   clear(): void
   dispose(): void
@@ -120,6 +130,7 @@ type FindValue = MatchSet & { readonly timedOut?: boolean }
 type FindJobOutcome =
   | { readonly ok: true; readonly job: SearchJob<FindValue> }
   | { readonly ok: false; readonly diagnostic: PathDiagnostic }
+  | { readonly ok: false; readonly patternError: string }
 
 function pathJobFor(document: OpenDocument, text: string): FindJobOutcome {
   const parsed = parsePath(text, (name) =>
@@ -161,34 +172,13 @@ function findJobFor(document: OpenDocument, query: SearchQuery): FindJobOutcome 
   const bytes = document.sourceBuffer.bytes
   const { text: needle, options } = query
 
-  if (chooseFindPath(needle, options) === 'byte') {
-    const starts: number[] = []
-    const ends: number[] = []
-    return {
-      ok: true,
-      job: runChunkedJob(0, (cursor) => {
-        if (cursor >= bytes.length) {
-          return {
-            done: true,
-            value: { starts: Int32Array.from(starts), ends: Int32Array.from(ends) }
-          }
-        }
-        const to = Math.min(cursor + BYTE_CHUNK_BYTES, bytes.length)
-        const chunk = findAsciiInRange(bytes, needle, options.caseSensitive, cursor, to)
-        for (let i = 0; i < chunk.starts.length; i++) {
-          starts.push(chunk.starts[i]!)
-          ends.push(chunk.ends[i]!)
-        }
-        return { done: false, state: to }
-      })
-    }
-  }
-
   // R239: a regex can backtrack for as long as it likes inside one window,
   // which no slicing between windows can interrupt, so regex mode matches in
   // a worker the job can terminate. Plain search stays here: neither
   // `indexOf` nor an escaped literal can backtrack.
   if (options.regex) {
+    const compiled = compileFindPattern(needle, options.caseSensitive)
+    if (!compiled.ok) return { ok: false, patternError: compiled.reason }
     return {
       ok: true,
       job: runRegexFindJob({
@@ -201,36 +191,75 @@ function findJobFor(document: OpenDocument, query: SearchQuery): FindJobOutcome 
     }
   }
 
-  const windows = decodedWindowsFor(document.rowIndex)
-  const starts: number[] = []
-  const ends: number[] = []
+  // Plain search. `byte-checked` (R241 §3): the byte path is exact unless the
+  // document holds U+212A or U+017F, which a case-insensitive `k` or `s`
+  // also finds under `u`. An unscanned UTF-8 document is scanned inside the
+  // byte path's own chunks, so the common case costs one extra `indexOf`
+  // pass and never a long task; if either code point turns up, the matches so
+  // far are dropped and the search starts again on the decoded path.
+  const path = chooseFindPath(needle, options)
+  const known = path === 'byte-checked' ? knownAsciiFoldTargets(bytes, document.encoding) : null
+  const scanning = path === 'byte-checked' && known === null
+  const firstPhase: FindPhase = path === 'decoded' || known === true ? { decoded: 0 } : { byte: 0 }
+  // Built only if the decoded path runs: the byte path never needs it.
+  let windows: ReturnType<typeof decodedWindowsFor> | null = null
+  let starts: number[] = []
+  let ends: number[] = []
+  const collect = (chunk: MatchSet): void => {
+    for (let i = 0; i < chunk.starts.length; i++) {
+      starts.push(chunk.starts[i]!)
+      ends.push(chunk.ends[i]!)
+    }
+  }
   return {
     ok: true,
-    job: runChunkedJob(0, (windowIndex) => {
+    job: runChunkedJob<FindPhase, FindValue>(firstPhase, (phase) => {
+      if ('byte' in phase) {
+        const cursor = phase.byte
+        if (cursor >= bytes.length) {
+          if (scanning) recordAsciiFoldTargets(bytes, false)
+          return {
+            done: true,
+            value: { starts: Int32Array.from(starts), ends: Int32Array.from(ends) }
+          }
+        }
+        const to = Math.min(cursor + BYTE_CHUNK_BYTES, bytes.length)
+        if (scanning && holdsAsciiFoldTargets(bytes, cursor, to)) {
+          recordAsciiFoldTargets(bytes, true)
+          starts = []
+          ends = []
+          return { done: false, state: { decoded: 0 } }
+        }
+        collect(findAsciiInRange(bytes, needle, options.caseSensitive, cursor, to))
+        return { done: false, state: { byte: to } }
+      }
+      const windowIndex = phase.decoded
+      windows ??= decodedWindowsFor(document.rowIndex)
       if (windowIndex >= windows.length) {
         return {
           done: true,
           value: { starts: Int32Array.from(starts), ends: Int32Array.from(ends) }
         }
       }
-      const window = windows[windowIndex]!
-      const chunk = findDecodedInWindow(
-        bytes,
-        document.rowIndex,
-        document.encoding,
-        needle,
-        options,
-        window,
-        bytes.length
+      collect(
+        findDecodedInWindow(
+          bytes,
+          document.rowIndex,
+          document.encoding,
+          needle,
+          options,
+          windows[windowIndex]!,
+          bytes.length
+        )
       )
-      for (let i = 0; i < chunk.starts.length; i++) {
-        starts.push(chunk.starts[i]!)
-        ends.push(chunk.ends[i]!)
-      }
-      return { done: false, state: windowIndex + 1 }
+      return { done: false, state: { decoded: windowIndex + 1 } }
     })
   }
 }
+
+/** Where a plain search's chunked job is: a byte offset on the byte path, or
+ * a window index on the decoded path. */
+type FindPhase = { readonly byte: number } | { readonly decoded: number }
 
 export function createSearchStore(session: DocumentSession): SearchStore {
   let result: SearchResult = EMPTY_SEARCH_RESULT
@@ -240,6 +269,9 @@ export function createSearchStore(session: DocumentSession): SearchStore {
   // a query that's no longer active (a fresh `search()`, `clear()`, a
   // document switch, or a path query that goes on to parse successfully).
   let pathDiagnostic: PathDiagnostic | null = null
+  // R241: the same lifecycle as `pathDiagnostic`, for a regex that does not
+  // compile.
+  let patternError: string | null = null
   const jobs = new JobSlot<FindValue>()
   const listeners = new Set<() => void>()
 
@@ -272,11 +304,13 @@ export function createSearchStore(session: DocumentSession): SearchStore {
       // A path that doesn't parse never reaches `jobs` at all — nothing to
       // cancel a *previous* job for except whatever ran before this call.
       jobs.cancel()
-      pathDiagnostic = outcome.diagnostic
+      if ('diagnostic' in outcome) pathDiagnostic = outcome.diagnostic
+      else patternError = outcome.patternError
       setResult(EMPTY_SEARCH_RESULT)
       return
     }
     pathDiagnostic = null
+    patternError = null
     const job = jobs.start(() => outcome.job)
     job.result.then(
       (matches) => {
@@ -304,6 +338,7 @@ export function createSearchStore(session: DocumentSession): SearchStore {
 
   function search(query: SearchQuery): void {
     pathDiagnostic = null
+    patternError = null
     activeQuery = query.text.length === 0 ? null : query
     if (activeQuery === null) {
       jobs.cancel()
@@ -321,6 +356,7 @@ export function createSearchStore(session: DocumentSession): SearchStore {
   function clear(): void {
     activeQuery = null
     pathDiagnostic = null
+    patternError = null
     jobs.cancel()
     setResult(EMPTY_SEARCH_RESULT)
   }
@@ -345,6 +381,7 @@ export function createSearchStore(session: DocumentSession): SearchStore {
       lastStore = document.store
       activeQuery = null
       pathDiagnostic = null
+      patternError = null
       jobs.cancel()
       setResult(EMPTY_SEARCH_RESULT)
       return
@@ -395,6 +432,7 @@ export function createSearchStore(session: DocumentSession): SearchStore {
     getSnapshot: () => result,
     getQuery: () => activeQuery,
     getPathDiagnostic: () => pathDiagnostic,
+    getPatternError: () => patternError,
     subscribe(listener) {
       listeners.add(listener)
       return () => listeners.delete(listener)

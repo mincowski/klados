@@ -14,6 +14,7 @@ export const activeSearchStore: SearchStore = {
   getSnapshot: () => getActiveSearchStoreInstance().getSnapshot(),
   getQuery: () => getActiveSearchStoreInstance().getQuery(),
   getPathDiagnostic: () => getActiveSearchStoreInstance().getPathDiagnostic(),
+  getPatternError: () => getActiveSearchStoreInstance().getPatternError(),
   subscribe: (listener) => {
     let unsubscribeStore = getActiveSearchStoreInstance().subscribe(listener)
     // Same composition `activeSession.ts` uses: a tab switch is itself a
