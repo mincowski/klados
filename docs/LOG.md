@@ -16,6 +16,23 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## Klados 1.3.0 — version bump, not yet tagged
+
+Version **1.3.0**, carrying the rounds from the security review of 2026-10-16 and what followed it:
+R229 (a release pipeline with no write token where third-party code runs, locked actions, immutable
+releases), R230–R231 (Electron fuses on the packaged binary; `isAppUrl` checks the `file:` host),
+R234–R235 (a reload never discards edits made during it), R236–R238 (Save writes in place after a
+free-space check; the watcher follows the path), R233 (Markdown export escaping), R239 (regex Find in a
+terminable worker), R240 (the app accepts its own page from paths with `~`, `[`, `]` or `%`) and R241
+(Unicode case folding in Find, and `Invalid pattern`). Minor rather than patch: Find matches
+differently and shows a new state, and the release pipeline changed underneath.
+
+Bumped ahead of the tag so a review round can run against it. Not yet done, and owed at the tag:
+the pre-tag installer check 1.2.2 had, and R229's and R167's first real-release checks (`docs/TASKS.md`,
+Owed).
+
+---
+
 ## R219 — the built-app tests retry their profile cleanup · built
 
 **Plan:** `docs/plans/R219-open-with.md` § 8, "After the merge"
