@@ -1,8 +1,12 @@
 # R240 — the app's own page refused when its path contains `~`, `[`, `]` or `%`
 
-<!-- status: open -->
+<!-- status: built -->
 
-**Open.** Found by R230's packaged test on `windows-latest` (`docs/plans/R230-shipped-app-hardening.md`
+**Built** (§7): `isAppUrl` compares `file:` pathnames percent-decoded, and the packaged app starts
+through an 8.3 alias and from a `~[ ]` folder on all three platforms. One claim of §3 C was wrong:
+the URL parser resolves `%2E%2E` itself (§7.2). D-124.
+
+Found by R230's packaged test on `windows-latest` (`docs/plans/R230-shipped-app-hardening.md`
 §5.2) and reported there as "an 8.3 short path". **Measured here, the short name is not the cause.**
 The cause is the `~` in it. R164's guard compares a URL that Node spelled with one that Chromium
 spelled. The two agree on every character except four: `~`, `[`, `]` and `%`. A Klados installed
@@ -242,3 +246,55 @@ round, if ever.
 - Temporary logging was added to `src/main/index.ts` and `src/main/trustedRenderer.ts` for the
   packaged build and reverted before this plan was committed. The probe apparatus lived in the
   session's scratch directory and is not kept.
+
+## 7. Results
+
+**Built as option C.** `isAppUrl`'s `file:` branch compares `decodedFilePath` of both pathnames
+(`src/core/mainSecurity.ts`). Protocol and host checks, case sensitivity and the development branch
+are unchanged. D-124.
+
+### 7.1 The criteria
+
+| # | Criterion | Result |
+|---|---|---|
+| 1 | Node's and Chromium's spellings agree, for every §1.3 row | green, 9 pairs in `test/mainSecurity.test.ts`, the first being `KLADOS%7E1` against `KLADOS~1` |
+| 2 | Still refused: another path, `%2F`/`%2f`, `%5C`/`%5c`, `%00`, `%257E`, case, unparseable | green, except `%2E%2E`, which §7.2 corrects |
+| 3 | Never throws on `%FF`, a trailing `%`, `%%` | green, each asserted both not to throw and to give the expected answer |
+| 4 | Mutations | all red: the raw `pathname ===` (9 tests, `~` among them); decoding `%2F` (the separator test); `decodeURIComponent` (8 tests, `%%` and every criterion 3 case) |
+| 5 | Packaged launch through a looked-up 8.3 alias, Windows | green after; **red before** (locally and on `windows-latest`), the app's stderr showing `Refused view:setZoomFactor from an untrusted frame` |
+| 6 | Packaged launch from `apps~[portable]`, all three platforms | green after; **red before on Windows, macOS and Linux**, which settles §1.4's unmeasured claim |
+| 7 | `tempDir` without `realpathSync.native` | done. Before the fix, `windows-latest` then failed the tamper test's control launch too, from `RUNNER~1` |
+| 8 | `isPermissionGranted` for the `~` pair | green |
+| 9 | `isAppUrl`'s doc comment | says why decoded, citing this plan, and why not case-insensitive |
+| 10 | FINDINGS | the `~ [ ] %` entry removed; the `%XX` folder entry kept |
+
+The "before" runs used this branch's tests against the unfixed `mainSecurity.ts`, pushed to the
+pull request and then replaced by the fixed commit.
+
+### 7.2 What §3 C had wrong
+
+- **`%2E%2E` is not compared as text.** The URL standard treats `%2E%2E`, `.%2E` and `%2E.`, in any
+  case, as a `..` segment, and `new URL()` resolves it before `isAppUrl` sees the pathname.
+  Measured: `file:///C:/Apps/a~b/x/%2E%2E/out/…` has the pathname `/C:/Apps/a~b/out/…`. So it names
+  the app's file and is accepted, as Chromium would load it. Decoding cannot create a `..` the
+  parser did not already resolve: a decoded `%2E` inside a name is just a dot. The test asserts
+  that instead.
+- **"Compared as written" was not enough for the kept escapes.** Kept as the text `%5C`, an encoded
+  `\` would have equalled a decoded `%255C`: a file literally named `%5C`, which Linux allows and
+  which is a different file. `decodedFilePath` writes a kept escape as a code unit above 0xFF,
+  which nothing else produces. A test covers it. `%2F` and `%2f` now compare equal to each other,
+  and still never to a `/`.
+
+### 7.3 Linux and the copied sandbox helper
+
+The first CI run of criterion 6 failed on Linux for a different reason: the copy's `chrome-sandbox`
+is not setuid root, so the packaged app aborts before its first window (`docs/FINDINGS.md` already
+records the trap). Making a copy setuid needs root. That launch passes `--no-sandbox` on Linux only;
+the guard does not depend on the OS sandbox. Run that way, the unfixed build failed with the
+untrusted-frame refusals, as on the other two platforms.
+
+### 7.4 Review
+
+The diff was read before the commit. It found the kept-escape collision (§7.2), which the plan's
+own tests would not have caught, and the `%2E%2E` claim, which the first test run contradicted.
+Nothing else.

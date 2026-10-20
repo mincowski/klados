@@ -30,9 +30,9 @@ import { execFileSync } from 'node:child_process'
 import {
   cpSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
-  realpathSync,
   rmSync,
   statSync,
   writeFileSync
@@ -99,16 +99,11 @@ afterEach(() => {
   }
 })
 
-/** A fresh folder under the OS temp folder, by its **long** name.
- *
- * The Windows runner's temp folder is `C:UsersRUNNER~1…`, an 8.3 short
- * name, and Klados launched from a path with one refuses every IPC call from
- * its own page: R164's sender guard compares the app's `file:` path exactly,
- * and the two spellings differ. That is a defect of its own (found here,
- * reported separately), not what these tests measure, so the copies and
- * profiles they launch live at the long name. */
+/** A fresh folder under the OS temp folder, removed after the test. On the
+ * Windows runner that is under `C:\Users\RUNNER~1\`, an 8.3 short name, which
+ * every launch here then goes through (R240). */
 function tempDir(prefix: string): string {
-  const dir = realpathSync.native(mkdtempSync(path.join(tmpdir(), prefix)))
+  const dir = mkdtempSync(path.join(tmpdir(), prefix))
   temps.push(dir)
   return dir
 }
@@ -280,16 +275,23 @@ function unpackedRoot(binary: string): { root: string; asar: string } {
   return { root, asar: path.join(root, 'resources', 'app.asar') }
 }
 
+/** Copies the `--dir` output into `parent`, and returns the copy's binary and
+ * archive. */
+function copyOfApp(parent: string): { binary: string; asar: string } {
+  const { root, asar } = unpackedRoot(BINARY!)
+  const copyRoot = path.join(parent, path.basename(root))
+  cpSync(root, copyRoot, { recursive: true, verbatimSymlinks: true })
+  return {
+    binary: path.join(copyRoot, path.relative(root, BINARY!)),
+    asar: path.join(copyRoot, path.relative(root, asar))
+  }
+}
+
 describe('R230 — an edited app.asar is refused', () => {
   it.runIf(BINARY !== null && ASAR_VALIDATED)(
     'a copy starts, and the same copy with one byte changed refuses for integrity',
     async () => {
-      const { root, asar } = unpackedRoot(BINARY!)
-      const copyParent = tempDir('klados-r230-tamper-')
-      const copyRoot = path.join(copyParent, path.basename(root))
-      cpSync(root, copyRoot, { recursive: true, verbatimSymlinks: true })
-      const copyAsar = path.join(copyRoot, path.relative(root, asar))
-      const copyBinary = path.join(copyRoot, path.relative(root, BINARY!))
+      const { binary: copyBinary, asar: copyAsar } = copyOfApp(tempDir('klados-r230-tamper-'))
       // The control: untampered, the copy starts. Without it, a refusal below
       // could be the copy failing for any reason at all, which is how the first
       // Linux measurement was confounded twice.
@@ -339,6 +341,67 @@ describe('R230 — an edited app.asar is refused', () => {
       expect(existsSync(theme)).toBe(false)
       // Windows: "ASAR Integrity Violation: got a hash mismatch".
       expect(stderr).toMatch(/integrity/i)
+    },
+    90_000
+  )
+})
+
+/**
+ * R240 (`docs/plans/R240-app-url-spelling.md` §5, criteria 5 and 6) — the
+ * packaged app starts from a path whose `file:` URL Node and Chromium spell
+ * differently. Before R240, R164's sender guard compared the two raw, refused
+ * every IPC call from the app's own page, and the window stayed blank, so
+ * `launch` never saw `started`.
+ */
+describe('R240 — the packaged app starts from any folder name', () => {
+  /** The 8.3 alias `dir /x` lists for `name` inside `parent`, or null when the
+   * volume generates none. Looked up, never assumed. */
+  function shortNameOf(parent: string, name: string): string | null {
+    const listing = execFileSync('cmd', ['/c', 'dir', '/x', parent], { encoding: 'utf8' })
+    for (const line of listing.split(/\r?\n/)) {
+      // `<DIR>  KLADOS~1  klados-long-folder-name`; with no alias, the long
+      // name follows `<DIR>` alone.
+      const match = /<DIR>\s+(\S+)\s+(\S+)\s*$/.exec(line)
+      if (match !== null && match[2] === name) return match[1]!
+    }
+    return null
+  }
+
+  it.runIf(BINARY !== null && process.platform === 'win32')(
+    'through an 8.3 alias of its folder (criterion 5)',
+    async (ctx) => {
+      const parent = tempDir('klados-r240-short-')
+      const longName = 'klados-long-folder-name'
+      mkdirSync(path.join(parent, longName))
+      const { binary } = copyOfApp(path.join(parent, longName))
+      const alias = shortNameOf(parent, longName)
+      if (alias === null) {
+        const reason = `no 8.3 alias for ${longName}: 8.3 name generation is off on this volume`
+        console.warn(`R240 criterion 5 skipped: ${reason}`)
+        ctx.skip(reason)
+        return
+      }
+      expect(alias).toMatch(/~/)
+      const viaAlias = path.join(parent, alias, path.relative(path.join(parent, longName), binary))
+      expect(existsSync(viaAlias)).toBe(true)
+      const { outcome } = await launch({ binary: viaAlias })
+      expect(outcome).toBe('started')
+    },
+    90_000
+  )
+
+  it.runIf(BINARY !== null)(
+    'from a long folder name holding ~, [ and ] (criterion 6)',
+    async () => {
+      const folder = path.join(tempDir('klados-r240-chars-'), 'apps~[portable]')
+      mkdirSync(folder)
+      const { binary } = copyOfApp(folder)
+      // A copy's `chrome-sandbox` is not setuid root, so a packaged Linux build
+      // aborts before its first window (`docs/FINDINGS.md`), and making it so
+      // needs root. The guard under test does not depend on the OS sandbox.
+      const args = process.platform === 'linux' ? ['--no-sandbox'] : []
+      const { outcome } = await launch({ binary, args })
+      expect(outcome).toBe('started')
     },
     90_000
   )

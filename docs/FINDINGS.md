@@ -756,13 +756,6 @@ union in `src/preload/api.ts` (R193) keeps the renderer's declared environment h
   found, but is not configured correctly". `CHROME_DEVEL_SANDBOX` is not honoured by a packaged app.
   CI sets the helper up as the `.deb` does (R230). Any test that launches a packaged Linux build
   inherits this, and it looks exactly like the app failing to start for its own reasons.
-- **Klados installed in a path containing `~`, `[`, `]` or `%` refuses every IPC call from its own
-  page** ("Refused … from an untrusted frame"), and never renders. An 8.3 short path
-  (`C:\Users\RUNNER~1\…`, `windows-latest`'s temp folder) is the common case, but a long name such as
-  `C:\~tools\` fails the same way. Node's `pathToFileURL` escapes those four characters and Chromium
-  does not, and R164's `isAppUrl` compares the raw pathnames. Casing differences do not trigger it.
-  Not yet fixed (R240). Until then, a test that launches a copy from `os.tmpdir()` on Windows needs
-  `realpathSync.native` first.
 - **A folder name containing `%` plus two hex digits (`a%41b`) cannot host any `loadFile` page.**
   Electron does not escape the `%`, Chromium decodes it (presumably looking for `aAb`), and the load fails with
   `ERR_FILE_NOT_FOUND`, before any Klados code runs (R240 §1.3).

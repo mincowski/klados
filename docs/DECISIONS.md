@@ -144,6 +144,7 @@ Search for the id to jump to one.
 | **D-121** | Releases are built with a read-only token and published by a job that runs no third-party code; actions are locked by a lockfile, not by SHAs |  |
 | **D-122** | The packaged binary ships with six Electron fuses set; `grantFileProtocolExtraPrivileges` stays at its default |  |
 | **D-123** | Regex Find matches in a worker that a 2 s per-window deadline or a cancel terminates; amends D-041 for regex matching only |  |
+| **D-124** | The app's own `file:` page is recognized by its percent-decoded pathname, case-sensitively; encoded separators are never decoded |  |
 
 ---
 
@@ -4513,3 +4514,39 @@ This is that swap, for regex mode only.
 
 **Not part of this decision:** the `u` flag. It was measured (R239 §6.4) and not turned on. It would
 change D-097's folding, so it is a separate decision.
+
+### D-124 — The app's own `file:` page is recognized by its percent-decoded pathname, case-sensitively; encoded separators are never decoded (R240) · `settled`
+
+Plan and results: `docs/plans/R240-app-url-spelling.md`. Amends how R164's `isAppUrl` compares a
+`file:` URL; what it accepts is unchanged in kind (the app's own file, on no host).
+
+**The problem.** The app URL comes from Node's `pathToFileURL`, which writes `~`, `[`, `]` and `%`
+as `%7E`, `%5B`, `%5D` and `%25`. Chromium reports the page with them literal. Compared raw, a
+Klados started from any path containing one of them refused every IPC call from its own page and
+never rendered. An 8.3 alias (`RUNNER~1`) is the common case; `C:\~tools\` is another. Measured
+before the fix on all three platforms' CI.
+
+**Chosen:** compare the two pathnames after decoding every `%XX`, in one pass, by hand.
+- **Encoded `/`, `\` and NUL are never decoded.** They become code units above 0xFF, which no
+  decoded byte or literal character produces, so they match only themselves. Kept as the text
+  `%2F`, they would have equalled a decoded `%252F`: a file literally named `%2F`.
+- **One pass**, so `%257E` is `%7E`, not `~`.
+- **Not `decodeURIComponent`**, which throws on `%%` and `%FF` (a throw refuses every call) and
+  decodes `%2F`.
+- **Case stays significant.** Casing alone never differed, since both URLs come from the same
+  string.
+
+**Why it is not a widening.** Two URLs whose pathnames decode to the same bytes are the same file
+to Chromium's loader. Dot segments are resolved by the URL parser before decoding, on both sides
+alike, including `%2E%2E` (the plan assumed otherwise; measured).
+
+**Rejected:**
+- **`realpathSync.native` for the app URL.** It fixes 8.3 names only (`C:\~tools\` still fails),
+  and returns the disk's casing, which would break launches whose casing differs and that work
+  today.
+- **Adopting `webContents.getURL()`.** Too late at `did-finish-load` (the renderer calls IPC while
+  its modules load), and the ordering at commit is unmeasured.
+- **A case-insensitive compare.** Nothing needs it, and it accepts a different file wherever case
+  matters.
+- **Serving the renderer from a custom scheme.** It removes the whole family but changes the
+  page's origin and with it `localStorage`; its own round, if ever.

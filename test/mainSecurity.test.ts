@@ -95,6 +95,121 @@ describe('R231 — isAppUrl compares the host of a file: URL', () => {
   })
 })
 
+/**
+ * R240 (`docs/plans/R240-app-url-spelling.md` §1.3) — the app URL is Node's
+ * `pathToFileURL`; the URL a page reports is Chromium's. Each pair below is a
+ * folder `a<c>b` as the two spelled it, measured on Electron 44.4.5, and the
+ * first is the packaged launch through `KLADOS~1` that R230 found.
+ */
+describe('R240 — isAppUrl accepts both spellings of the same file', () => {
+  const page = (folder: string): string =>
+    `file:///C:/Users/chris/AppData/Local/Temp/scratchpad/${folder}/app/resources/app.asar/out/renderer/index.html`
+
+  // [what the folder holds, Node's spelling, Chromium's spelling]
+  const PAIRS: readonly (readonly [string, string, string])[] = [
+    ['an 8.3 alias', 'KLADOS%7E1', 'KLADOS~1'],
+    ['~', 'a%7Eb', 'a~b'],
+    ['[', 'a%5Bb', 'a[b'],
+    [']', 'a%5Db', 'a]b'],
+    ['%%', 'a%25%25b', 'a%%b'],
+    ['a space', 'a%20b', 'a%20b'],
+    ["! $ & ' ( ) + , ; = @", "a!$&'()+,;=@b", "a!$&'()+,;=@b"],
+    ['^ ` { } #', 'a%5E%60%7B%7D%23b', 'a%5E%60%7B%7D%23b'],
+    ['ä 日 😀', 'a%C3%A4%E6%97%A5%F0%9F%98%80b', 'a%C3%A4%E6%97%A5%F0%9F%98%80b']
+  ]
+
+  for (const [what, node, chromium] of PAIRS) {
+    it(`a folder with ${what}`, () => {
+      expect(isAppUrl(page(chromium), page(node))).toBe(true)
+    })
+  }
+
+  it('the 8.3 pair differs as raw pathnames, so the test is not vacuous', () => {
+    expect(new URL(page('KLADOS~1')).pathname).not.toBe(new URL(page('KLADOS%7E1')).pathname)
+  })
+
+  it('isPermissionGranted inherits it: Copy works from the short path (criterion 8)', () => {
+    expect(
+      isPermissionGranted('clipboard-sanitized-write', page('KLADOS~1'), true, page('KLADOS%7E1'))
+    ).toBe(true)
+  })
+})
+
+describe('R240 — isAppUrl still refuses other files', () => {
+  const APP = 'file:///C:/Apps/a%7Eb/out/renderer/index.html'
+
+  it('another path', () => {
+    expect(isAppUrl('file:///C:/Apps/a~c/out/renderer/index.html', APP)).toBe(false)
+  })
+
+  it('an encoded / in place of a separator, in either case', () => {
+    expect(isAppUrl('file:///C:/Apps/a~b%2Fout/renderer/index.html', APP)).toBe(false)
+    expect(isAppUrl('file:///C:/Apps/a~b%2fout/renderer/index.html', APP)).toBe(false)
+  })
+
+  it('an encoded \\ in place of a separator, in either case', () => {
+    expect(isAppUrl('file:///C:/Apps/a~b%5Cout/renderer/index.html', APP)).toBe(false)
+    expect(isAppUrl('file:///C:/Apps/a~b%5cout/renderer/index.html', APP)).toBe(false)
+  })
+
+  it('an encoded NUL', () => {
+    expect(isAppUrl('file:///C:/Apps/a~b/out/renderer/index.html%00', APP)).toBe(false)
+  })
+
+  it('a file literally named %5C is not the encoded separator it spells', () => {
+    // Linux allows `\` in a name, and `pathToFileURL` writes it `%5C`. Decoded
+    // `%255C` is the text `%5C`; it must not meet the kept escape.
+    const linuxApp = 'file:///opt/a%5Cb/index.html'
+    expect(isAppUrl('file:///opt/a%255Cb/index.html', linuxApp)).toBe(false)
+    expect(isAppUrl(linuxApp, linuxApp)).toBe(true)
+  })
+
+  it('no double decode: %257E is not ~', () => {
+    expect(isAppUrl('file:///C:/Apps/a%257Eb/out/renderer/index.html', APP)).toBe(false)
+  })
+
+  it('an encoded .. segment is the URL parser’s, before any decoding', () => {
+    // The plan expected `%2E%2E` to survive as text. Measured, the URL
+    // standard treats `%2E%2E` (any case) as a `..` segment and resolves it,
+    // for Chromium as for Node, so it names the same file and is accepted;
+    // decoding cannot create a `..` the parser did not already resolve.
+    const encoded = 'file:///C:/Apps/a~b/x/%2E%2E/out/renderer/index.html'
+    expect(new URL(encoded).pathname).toBe('/C:/Apps/a~b/out/renderer/index.html')
+    expect(isAppUrl(encoded, APP)).toBe(true)
+    // An escaped dot inside a name is just a dot.
+    expect(isAppUrl('file:///C:/Apps/a~b/out/renderer/index%2Ehtml', APP)).toBe(true)
+    expect(isAppUrl('file:///C:/Apps/a~b/out/renderer%2E/index.html', APP)).toBe(false)
+  })
+
+  it('a path differing only in case', () => {
+    expect(isAppUrl('file:///C:/Apps/A~B/out/renderer/index.html', APP)).toBe(false)
+    expect(isAppUrl('file:///C:/Apps/a~b/out/renderer/INDEX.html', APP)).toBe(false)
+  })
+
+  it('an unparseable URL', () => {
+    expect(isAppUrl('file://[/a~b', APP)).toBe(false)
+  })
+})
+
+describe('R240 — isAppUrl never throws (criterion 3)', () => {
+  // `decodeURIComponent` throws on these; a throw in the guard refuses every
+  // IPC call.
+  const cases: readonly (readonly [string, string, boolean])[] = [
+    ['file:///C:/a%FFb/index.html', 'file:///C:/a%FFb/index.html', true],
+    ['file:///C:/a%FFb/index.html', 'file:///C:/a%FEb/index.html', false],
+    ['file:///C:/ab/index.html%', 'file:///C:/ab/index.html%25', true],
+    ['file:///C:/ab/index.html%', 'file:///C:/ab/index.html', false],
+    ['file:///C:/a%%b/index.html', 'file:///C:/a%25%25b/index.html', true],
+    ['file:///C:/a%%b/index.html', 'file:///C:/a%25b/index.html', false]
+  ]
+  for (const [target, app, expected] of cases) {
+    it(`${target} against ${app}`, () => {
+      expect(() => isAppUrl(target, app)).not.toThrow()
+      expect(isAppUrl(target, app)).toBe(expected)
+    })
+  }
+})
+
 describe('R164 — isAppUrl fails closed', () => {
   it('denies anything unparseable rather than throwing', () => {
     expect(isAppUrl('', PROD_URL)).toBe(false)

@@ -16,6 +16,30 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R240 — the app accepts its own page from any folder name · built
+
+**Plan:** `docs/plans/R240-app-url-spelling.md` · **Decision:** D-124
+
+Found by R230's packaged test on `windows-latest` and first described as an 8.3 short-path defect.
+The cause was the `~` in the short name: Node's `pathToFileURL` escapes `~`, `[`, `]` and `%`,
+Chromium does not, and R164's `isAppUrl` compared the raw pathnames. So every IPC call from the
+app's own page was refused, and the window stayed blank. `isAppUrl` now compares the pathnames
+percent-decoded in one pass, never decoding an encoded `/`, `\` or NUL, with case significant.
+
+**Measured before the fix, on CI:** a copy launched from a folder named `apps~[portable]` failed on
+Windows, macOS and Linux, and a copy launched through an 8.3 alias failed on Windows. After it,
+all of them start. `test/packagedApp.test.ts` no longer launches from `realpathSync.native`, so on
+`windows-latest` its tamper test now runs from `RUNNER~1` as well: a second regression check.
+
+**Two things the plan had wrong.** The URL parser resolves `%2E%2E` as a `..` segment itself, so it
+never reaches the comparison as text. And keeping an encoded separator as the text `%2F` would have
+let a decoded `%252F` (a file literally named `%2F`) equal it; it is kept as a code unit no decoded
+byte can produce instead. **On Linux a copied packaged app cannot start with its sandbox on** (its
+`chrome-sandbox` is not setuid root), so that launch passes `--no-sandbox`; the guard does not
+depend on it.
+
+---
+
 ## R239 — a regex Find that can be stopped · built
 
 **Plan:** `docs/plans/R239-regex-find.md` · **Decision:** D-123, amending D-041
