@@ -114,7 +114,10 @@ describe.skipIf(!builtAppAvailable)('the built app via _electron (R51, R58)', ()
       new Promise<false>((resolve) => setTimeout(() => resolve(false), CLOSE_BUDGET_MS))
     ])
     if (!exited) app.process().kill()
-    rmSync(userDataDir, { recursive: true, force: true })
+    // Retried: Electron's helper processes can still write to the profile for
+    // a moment after the app has closed (ENOTEMPTY, seen on `macos-latest` in
+    // `openWithElectron.test.ts`; EPERM on Windows).
+    rmSync(userDataDir, { recursive: true, force: true, maxRetries: 10 })
   })
 
   it('starts at zoom factor 1 on a fresh file:// load, not the unexplained 1.25 (R58/R59)', async () => {

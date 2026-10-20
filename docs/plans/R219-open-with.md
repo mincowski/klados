@@ -227,3 +227,14 @@ Read from `git diff` before committing.
 - Invariants: nothing format-specific above `src/formats/` (the extension list comes from the
   registry); no literal colours in components (the icon colours live in asset SVGs, as the app icon's
   do).
+
+### After the merge: the profile cleanup is retried
+
+`test/openWithElectron.test.ts` failed once on `macos-latest`, on `main` at 33a7ecc, in `afterAll`:
+`ENOTEMPTY: directory not empty, rmdir '…/klados-openwith-…/profile'`. The app had closed and every
+test had passed. Electron's helper processes can still write to the profile for a moment after
+the app closes, which R220's `fileErrorsElectron.test.ts` had already met (EPERM on Windows) and
+fixed by retrying the removal. It was the first such failure in the last 60 CI runs. The removal now
+retries (`maxRetries: 10`) here, and in `mainElectron.test.ts`'s profile cleanup, which has the same
+exposure. Test-only; it matters because `release.yml` runs the suite on every platform before
+packaging.
