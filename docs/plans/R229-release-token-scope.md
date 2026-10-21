@@ -2,9 +2,10 @@
 
 <!-- status: built-caveat -->
 
-**Built, with checks owed** (§5). The token, the lockfile, `--ignore-scripts` and the documentation
-landed and were measured. Immutability can only be measured on the first tagged release after this
-round, and two settings and the first Dependabot actions PR come after the merge (§5.5). GitHub
+**Built, with one check owed: criterion 9, the first Dependabot pull request for an action** (§5.5).
+The token, the lockfile, `--ignore-scripts` and the documentation landed and were measured.
+Immutability was measured on `v1.3.0`, the first tagged release after this round: the release is
+immutable, verifies, and refused a replaced file (§5.6). GitHub
 enforces the lockfile at run time without the *Require lockfile* policy (§5.2). Planned from the security review of 2026-10-16, finding 1 (medium), and widened by the
 project lead on 2026-10-17 to cover the whole release supply chain: the token (§2A, B, D, E), the
 actions the workflows run (§2C, a lockfile), and the published release itself (§2F, immutability).
@@ -348,7 +349,7 @@ binary was copied over the truncated one. CI's Linux install was not affected.
 | 5 | Rehearsal draft matches 1.2.2 | Below |
 | 6 | §2E recorded per runner | §5.3 |
 | 7 | `dependabot.yml` exact; no configuration error after merge | Content exact. The check after the merge is owed (§5.5) |
-| 8 | Immutability on the first tagged release | Owed (§5.5) |
+| 8 | Immutability on the first tagged release | **Pass**, on `v1.3.0` (§5.6) |
 | 9 | First Dependabot actions PR | Owed (§5.5) |
 | 10 | Documentation describes what landed | §5.1. No comment still says electron-builder uploads the artifacts |
 
@@ -455,13 +456,7 @@ The workflow diff was read before the first commit. Findings, all fixed before t
 
 **Still owed:**
 
-- **Criterion 8, on the first tagged release after this round.**
-  - `gh api repos/mincowski/klados/immutable-releases` reports `"enabled": true`, and the release's
-    own `immutable` field is `true`.
-  - `gh release verify` and `gh release verify-asset` pass.
-  - `gh release upload … SHA256SUMS.txt --clobber` is refused, and the refusal is quoted here.
-
-  Immutability was switched on after the merge (above), so the README's description holds.
+- ~~**Criterion 8, on the first tagged release after this round.**~~ **Done on `v1.3.0`, §5.6.**
 - **Criterion 9, at the first Dependabot pull request for an action:**
   - whether it changed `actions.lock` in the same PR;
   - whether the `lockfile` job was green;
@@ -471,3 +466,25 @@ The workflow diff was read before the first commit. Findings, all fixed before t
   Note §5.2's finding: a PR whose lockfile is stale is refused by GitHub before any job runs, so that
   failure will look like `startup_failure`, not like a red `lockfile` job.
 
+### 5.6 Criterion 8, on `v1.3.0` (2026-10-21)
+
+`v1.3.0` is the first release tagged after this round: built by the tag's run from `f10d223`, its
+draft published by the project lead at 09:45 UTC.
+
+| Check | Result |
+|---|---|
+| `gh api repos/mincowski/klados/immutable-releases` | `{"enabled":true,"enforced_by_owner":false}` |
+| The release's own flag | `immutable: true` (`isImmutable` in `gh release view`) |
+| `gh release verify v1.3.0` | `✓ Release v1.3.0 verified!`, listing all six files with their digests |
+| `gh release verify-asset v1.3.0 klados-1.3.0-setup.exe` | `✓ Verification succeeded! klados-1.3.0-setup.exe is present in release v1.3.0` |
+| `gh release verify-asset v1.3.0 SHA256SUMS.txt` | `✓ Verification succeeded!` |
+| The attested digests against `SHA256SUMS.txt` | identical for all five installers |
+| `gh release upload v1.3.0 SHA256SUMS.txt --clobber` | **refused**: `HTTP 422: Validation Failed … Cannot delete asset from an immutable release` |
+
+**The upload was made safe before it was tried**, with the project lead's go-ahead: the file sent
+was the release's own `SHA256SUMS.txt`, downloaded first, byte for byte, so an accepted upload would
+have changed nothing. After the refusal the asset kept its id, its digest and the timestamp from when
+the draft was built.
+
+The refusal names a *delete*: `--clobber` replaces a file by deleting it first, and that first step
+is what an immutable release forbids.
