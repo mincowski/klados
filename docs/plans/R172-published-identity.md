@@ -1,14 +1,14 @@
 # R172–R174 — freeze the published identity before the first release
 
-<!-- status: built-caveat -->
+<!-- status: built -->
 
-**Built, with one check owed.** Register: `docs/TASKS.md`. **No winget submission happened here**,
-and none is implied.
+**Built.** Register: `docs/TASKS.md`. **No winget submission happened here**, and none is implied.
 The goal was that when one is decided on it needs *zero changes to this repository* — every field a
 package manager correlates against already correct, already frozen, and now enforced by
 `test/publishedIdentity.test.ts` rather than by a comment. §11 records what landed, including the
-one thing this plan got wrong about itself — and what it owes: nobody has run the installer and read
-the values back out of a real machine's registry, which is what acceptance 1 asks for.
+one thing this plan got wrong about itself. §12 records the checks it owed, all now run: the Windows
+registry values on an installed machine (2026-09-11, acceptance 1), and the `.deb`'s `Maintainer` on
+the `v1.3.0` package (2026-10-21).
 
 ---
 
@@ -534,3 +534,18 @@ control fields from the artifact. Expect `Maintainer: mincowski <8300485+mincows
 
 macOS's `NSHumanReadableCopyright` is readable the same way, from `Info.plist` inside the `.app`,
 and is already covered at its source by `test/publishedIdentity.test.ts`.
+
+**Done, 2026-10-21, on the `v1.3.0` package.** `dpkg-deb -I klados_1.3.0_amd64.deb`, run in
+WSL's Ubuntu against the file downloaded from the tag's draft (its checksum matched
+`SHA256SUMS.txt`):
+
+```
+ Package: klados
+ Version: 1.3.0
+ Vendor: mincowski <8300485+mincowski@users.noreply.github.com>
+ Maintainer: mincowski <8300485+mincowski@users.noreply.github.com>
+ Homepage: https://github.com/mincowski/klados
+```
+
+`Maintainer` is the person, as expected, not `author.name`'s `Klados`: the split R172b exists to
+make reaches the package.

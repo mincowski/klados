@@ -16,6 +16,37 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## Klados 1.3.0 — tagged, and the owed release checks
+
+**`v1.3.0` is tagged on `f10d223`** (annotated, *Klados 1.3.0*), on 2026-10-21. The release run
+passed on all four builds and created the draft with five installers and `SHA256SUMS.txt`. Each
+build ran 2,551 tests, R242's round trip and R230's packaged-app checks included, and asserted that
+the tag and `package.json` agree. The project lead publishes the draft.
+
+**Before the tag:**
+- **Two rehearsals by `workflow_dispatch`** (D-095), each draft deleted afterwards: on `1f43443`, the
+  first release run carrying the review's `release.yml` fix, and on `f10d223` once R242 was in.
+- **The installer check 1.2.2 had**, on the first rehearsal's `klados-1.3.0-setup.exe` (before
+  R242, which changes neither the installer nor the packaged binary's settings): its hash matched
+  `SHA256SUMS.txt`; a silent install over the installed 1.2.2 exited 0 in 20 s without starting
+  Klados; one uninstall entry, now 1.3.0, under the same key; every extension's associations
+  identical to the baseline taken first; R230's fuses read back from the installed `Klados.exe`;
+  launched with its registered command, a document and a throwaway profile, it rendered in 1.8 s,
+  recorded the document in its session and closed normally. Not repeated: the byte comparison with
+  the build, since the release carries no unpacked app.
+- **Dependabot's vite 7.3.7** (#77, alert 51) was merged first, so the rehearsal built what was
+  tagged.
+
+**After the tag, two owed checks closed:**
+- **R167**: every file on the tag's draft, downloaded with `gh release download`, passes
+  `sha256sum -c SHA256SUMS.txt`.
+- **R172**: `dpkg-deb -I` on the `.deb` reads `Maintainer: mincowski <…>`, as R172b intended.
+
+**Still owed:** R229's checks on the published release (`immutable: true`, `gh release verify`,
+an upload refused) and on the first Dependabot actions pull request.
+
+---
+
 ## R242 — Copy path finds the node it was copied from · built
 
 **Plan:** `docs/plans/R242-copy-path-round-trip.md` · **Decision:** D-126
@@ -60,6 +91,9 @@ at the project lead's request.
 Bumped ahead of the tag so a review round can run against it. Not yet done, and owed at the tag:
 the pre-tag installer check 1.2.2 had, and R229's and R167's first real-release checks (`docs/TASKS.md`,
 Owed).
+
+*Tagged on 2026-10-21; the installer check and R167's check were run, and R229's waits for
+publication. See "Klados 1.3.0 — tagged" above.*
 
 ---
 

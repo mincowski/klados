@@ -1,8 +1,8 @@
 # R164–R167 — security hardening before the first public release
 
-<!-- status: built-caveat -->
+<!-- status: built -->
 
-**Built, with four things owed — see §9.** Register: `docs/TASKS.md`. Results in §8. A security review run against the whole Electron surface and
+**Built.** Everything §9 owed is done, the last of it (R167) on the `v1.3.0` tag, 2026-10-21. Register: `docs/TASKS.md`. Results in §8. A security review run against the whole Electron surface and
 the parser layer, ahead of the first public 1.0.0 release. Motivated by a threat model of *a
 malicious actor who knows the victim uses Klados and hands them a crafted input file, or a link
 they are asked to drag into the app.*
@@ -503,8 +503,12 @@ had not. Deleted rather than named.
   § 10.
 - ~~**R166 — the manual lifecycle under `sandbox: true`, now narrower.**~~ **Done, 2026-09-11** —
   see § 10.
-- **R167 — its first genuine exercise is the `v1.x` tag.** The dry-run covers the hashing logic;
-  `gh release download` against a real draft release cannot be rehearsed without making one.
+- ~~**R167 — its first genuine exercise is the `v1.x` tag.** The dry-run covers the hashing logic;
+  `gh release download` against a real draft release cannot be rehearsed without making one.~~
+  **Done, 2026-10-21, on the `v1.3.0` tag.** All five files were downloaded from the tag's draft
+  with `gh release download`, and `sha256sum -c SHA256SUMS.txt` reported every one `OK`. The job
+  itself is R229's now: `publish` hashes the build jobs' files before uploading them, so the sums
+  never round-trip through the release.
 **Not owed, resolved:** `@electron-toolkit/preload` was left declared when R166 removed its only
 import, on the grounds that a lockfile change before a release is the user's call. Asked and
 answered — **removed**, one dependency line and one lockfile entry, no transitive fallout since its
