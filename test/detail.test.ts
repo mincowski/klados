@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { Interner } from '../src/core/interner'
 import { NodeStore } from '../src/core/nodeStore'
 import { parsePath } from '../src/core/path/parse'
+import { evaluatePath } from '../src/core/path/evaluate'
+import { buildNameIndex } from '../src/core/nameIndex'
 import { SourceBuffer } from '../src/core/buffer'
 import { buildLineIndex, buildRowIndex, DEFAULT_MAX_ROW_BYTES } from '../src/core/rowIndex'
 import type { ParseOptions } from '../src/core/types'
@@ -169,38 +171,63 @@ describe('toKladosPath (R75, R72-path-query.md §4)', () => {
     const second = store.nextSiblingOf(store.firstChildOf(array))
     const segments = pathSegmentsOf(store, second)
 
-    expect(toKladosPath(segments)).toBe('/list/*[2]')
+    // R242: the top-level object and the array holding `list`'s value are
+    // steps too (`*`), since the evaluator walks them.
+    expect(toKladosPath(segments)).toBe('/*/list/*/*[2]')
     expect(toXPath(segments)).toBe('/list/*') // the defect: every element looks identical
   })
 
-  it('the round trip: parsePath can actually parse what toKladosPath emits for a JSON array element', () => {
-    const { store } = parseJson('[10,20,30]')
+  // R242: R75's version of this test stopped at "it parses", and the path it
+  // checked (`/*[3]`) parsed and found nothing. The round trip over every
+  // node of every format is `copyPathRoundTrip.test.ts`.
+  it('the round trip: what toKladosPath emits for a JSON array element finds that element', () => {
+    const { store, source } = parseJson('[10,20,30]')
     const array = store.firstChildOf(ROOT)
     const third = store.nextSiblingOf(store.nextSiblingOf(store.firstChildOf(array)))
     const path = toKladosPath(pathSegmentsOf(store, third))
-    expect(path).toBe('/*[3]')
+    expect(path).toBe('/*/*[3]')
 
-    // Mirrors the palette's own mode-prefix strip (`parsePaletteInput`)
-    // before handing the rest to `parsePath` — the R75 round trip this
-    // exists to fix.
-    const stripped = path.slice(1)
-    const result = parsePath(stripped, () => null)
-    expect(result.ok).toBe(true)
+    // Mirrors the palette's own mode-prefix strip (`parsePaletteInput`).
+    const result = parsePath(path.slice(1), (name) => store.interner.lookup(name))
+    if (!result.ok) throw new Error(result.diagnostic.message)
+    const sourceBuffer = new SourceBuffer(source, 'utf-8', 0)
+    const nameIndex = buildNameIndex(store, store.interner.size)
+    expect([...evaluatePath(store, nameIndex, sourceBuffer, result.path)]).toEqual([third])
   })
 
-  it('a bare top-level scalar (no addressable step) is just "/"', () => {
+  it('a bare top-level scalar is one wildcard step, "/*"', () => {
     const { store } = parseJson('42')
     const scalar = store.firstChildOf(ROOT)
-    expect(toKladosPath(pathSegmentsOf(store, scalar))).toBe('/')
+    expect(toKladosPath(pathSegmentsOf(store, scalar))).toBe('/*')
   })
 
-  it('an object nested directly in an array addresses the object positionally, and its own property by name', () => {
+  it('the document itself is just "/"', () => {
+    const { store } = parseJson('42')
+    expect(toKladosPath(pathSegmentsOf(store, ROOT))).toBe('/')
+  })
+
+  it('an unnamed only child is a bare "*", and a property by name', () => {
     const { store } = parseJson('[{"a":1}]')
     const array = store.firstChildOf(ROOT)
     const element = store.firstChildOf(array)
     const propA = store.firstChildOf(element)
-    expect(toKladosPath(pathSegmentsOf(store, element))).toBe('/*[1]')
-    expect(toKladosPath(pathSegmentsOf(store, propA))).toBe('/*[1]/a')
+    expect(toKladosPath(pathSegmentsOf(store, element))).toBe('/*/*')
+    expect(toKladosPath(pathSegmentsOf(store, propA))).toBe('/*/*/a')
+  })
+
+  it('quotes a name the grammar cannot read bare (R242)', () => {
+    const { store } = parseJson('{"first name":1,"a\\"b":2,"":3,"plain":4}')
+    const props = [...store.childrenOf(store.firstChildOf(ROOT))]
+    expect(props.map((p) => toKladosPath(pathSegmentsOf(store, p)))).toEqual([
+      '/*/"first name"',
+      // A JSON name is stored as the source spells it, escape included
+      // (`a\"b`), and the path quotes that spelling, doubling its `"`.
+      '/*/"a\\""b"',
+      // The JSON parser stores an empty key as no name at all, so it is
+      // addressed by position like any unnamed node.
+      '/*/*[3]',
+      '/*/plain'
+    ])
   })
 })
 

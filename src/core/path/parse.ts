@@ -9,6 +9,7 @@
  * car[price>100]         child element's value, numeric
  * car[3]                 positional
  * *                      any name
+ * "first name"           a quoted name (R242), "" inside for one "
  * ```
  *
  * Produces a small step list — `{ axis, nameId, predicate }` per step — not
@@ -227,10 +228,6 @@ function isNameChar(ch: string | undefined): boolean {
   return !(code < 0x20 || (code >= 0x7f && code <= 0x9f))
 }
 
-function isNameStart(ch: string | undefined): boolean {
-  return ch !== undefined && (isNameChar(ch) || ch === '*')
-}
-
 class Cursor {
   pos = 0
   constructor(readonly source: string) {}
@@ -311,10 +308,19 @@ function consumeSeparator(cursor: Cursor): Axis | null {
   return null
 }
 
-function consumeName(cursor: Cursor): { name: string; isWildcard: boolean } | null {
+/** A step's name: `*`, a bare name, or (R242) a quoted one. `'unterminated'`
+ * for a quote with no closing quote, `null` when nothing name-like is at the
+ * cursor. A quoted `"*"` is the name `*`, never the wildcard. */
+function consumeName(
+  cursor: Cursor
+): { name: string; isWildcard: boolean } | 'unterminated' | null {
   if (cursor.peek() === '*') {
     cursor.pos += 1
     return { name: '*', isWildcard: true }
+  }
+  if (isQuote(cursor.peek())) {
+    const quoted = consumeQuotedString(cursor)
+    return quoted === null ? 'unterminated' : { name: quoted, isWildcard: false }
   }
   const start = cursor.pos
   cursor.advancePastName()
@@ -322,20 +328,58 @@ function consumeName(cursor: Cursor): { name: string; isWildcard: boolean } | nu
   return { name: cursor.source.slice(start, cursor.pos), isWildcard: false }
 }
 
-/** The quoted-string grammar `[@id="c-001"]` needs — single or double
- * quotes, no escape sequences (a query string is a short, hand-typed
- * literal; nothing here needs to round-trip arbitrary attribute values
- * containing a quote character, and §6.3 names none). */
+function isQuote(ch: string | undefined): ch is '"' | "'" {
+  return ch === '"' || ch === "'"
+}
+
+/** A quoted string, single or double quotes: the literal of `[@id="c-001"]`
+ * and (R242) a quoted name. A quote character is written inside by doubling
+ * it, as in XPath 2.0 and SQL: `'it''s'` is `it's`. `null`, with the cursor
+ * left where it was, when no quote is there or the quote is never closed. */
 function consumeQuotedString(cursor: Cursor): string | null {
   const quote = cursor.peek()
-  if (quote !== '"' && quote !== "'") return null
+  if (!isQuote(quote)) return null
+  const open = cursor.pos
   cursor.pos += 1
-  const start = cursor.pos
-  while (!cursor.eof() && cursor.peek() !== quote) cursor.pos += 1
-  if (cursor.eof()) return null // unterminated
-  const value = cursor.source.slice(start, cursor.pos)
-  cursor.pos += 1 // closing quote
-  return value
+  let value = ''
+  let start = cursor.pos
+  while (!cursor.eof()) {
+    if (cursor.peek() !== quote) {
+      cursor.pos += 1
+      continue
+    }
+    value += cursor.source.slice(start, cursor.pos)
+    if (cursor.peekAt(1) === quote) {
+      value += quote
+      cursor.pos += 2
+      start = cursor.pos
+      continue
+    }
+    cursor.pos += 1 // closing quote
+    return value
+  }
+  cursor.pos = open
+  return null
+}
+
+/**
+ * R242: `name` as a path step that reads back as exactly `name` — bare when
+ * the grammar can read it bare, otherwise between double quotes with any `"`
+ * doubled. What Copy path writes for a name with a space or a reserved
+ * character. An empty name is quoted too (`""`), though no format stores one
+ * today: JSON and TOML store an empty key as no name, addressed by position.
+ * Defined here, beside `isNameChar`, so what is quoted and what needs quoting
+ * cannot drift apart.
+ */
+export function quotePathName(name: string): string {
+  let bare = name.length > 0
+  for (const ch of name) {
+    if (!isNameChar(ch)) {
+      bare = false
+      break
+    }
+  }
+  return bare ? name : `"${name.split('"').join('""')}"`
 }
 
 function skipSpaces(cursor: Cursor): void {
@@ -469,11 +513,24 @@ function parseOperand(
 
   let isWildcard = false
   let subjectName: string
+  let quotedSubject = false
   const nameStart = cursor.pos
   if (cursor.peek() === '*') {
     isWildcard = true
     cursor.pos += 1
     subjectName = '*'
+  } else if (isQuote(cursor.peek())) {
+    // R242: a quoted subject, `*["unit price">3]`. Never the start of
+    // anything else here: a string literal only follows an operator.
+    const quoted = consumeQuotedString(cursor)
+    if (quoted === null) {
+      return {
+        ok: false,
+        diagnostic: { offset: at(nameStart), message: 'unterminated quoted name' }
+      }
+    }
+    subjectName = quoted
+    quotedSubject = true
   } else {
     cursor.advancePastName()
     if (cursor.pos === nameStart) {
@@ -491,7 +548,7 @@ function parseOperand(
     subjectName = cursor.source.slice(nameStart, cursor.pos)
   }
 
-  if (!isWildcard && /^[0-9]+$/.test(subjectName)) {
+  if (!isWildcard && !quotedSubject && /^[0-9]+$/.test(subjectName)) {
     return {
       ok: false,
       diagnostic: {
@@ -778,7 +835,22 @@ function consumePredicate(
   const bracketOffset = cursor.pos
   cursor.pos += 1
   const start = cursor.pos
-  while (!cursor.eof() && cursor.peek() !== ']') cursor.pos += 1
+  // R242: a `]` inside quotes is text, not the end of the predicate, so
+  // `[@id="a]b"]` and a quoted subject holding `]` both parse. A doubled
+  // quote needs nothing special: it reads as one quoted run ending where the
+  // next begins.
+  while (!cursor.eof() && cursor.peek() !== ']') {
+    const quote = cursor.peek()
+    if (isQuote(quote)) {
+      const quoteOffset = cursor.pos
+      cursor.pos += 1
+      while (!cursor.eof() && cursor.peek() !== quote) cursor.pos += 1
+      if (cursor.eof()) {
+        return { ok: false, diagnostic: { offset: quoteOffset, message: 'unterminated quote' } }
+      }
+    }
+    cursor.pos += 1
+  }
   if (cursor.eof()) {
     return { ok: false, diagnostic: { offset: bracketOffset, message: "unterminated '['" } }
   }
@@ -808,11 +880,11 @@ export function parsePath(query: string, resolveName: NameResolver): PathParseRe
       }
     }
 
-    if (!isNameStart(cursor.nextCodePoint())) {
-      return fail(cursor.pos, "expected a name or '*'")
-    }
     const nameStart = cursor.pos // just past the separator, if any
     const nameResult = consumeName(cursor)
+    if (nameResult === 'unterminated') {
+      return fail(nameStart, 'unterminated quoted name')
+    }
     if (nameResult === null) {
       return fail(cursor.pos, "expected a name or '*'")
     }

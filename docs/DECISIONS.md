@@ -146,6 +146,7 @@ Search for the id to jump to one.
 | **D-123** | Regex Find matches in a worker that a 2 s per-window deadline or a cancel terminates; amends D-041 for regex matching only |  |
 | **D-124** | The app's own `file:` page is recognized by its percent-decoded pathname, case-sensitively; encoded separators are never decoded |  |
 | **D-125** | Find folds with Unicode simple case folding: the `u` flag in both modes; amends D-097 |  |
+| **D-126** | Copy path writes every step, and the path grammar quotes names; amends D-081 |  |
 
 ---
 
@@ -2793,6 +2794,10 @@ palette/title-bar command for a shape (JSON Pointer) nothing in this codebase cu
 against a first option that costs nothing beyond the one function and closes the actual reported gap.
 Worth building if a real JSON Pointer consumer shows up; not speculatively.
 
+**Amended by D-126 (R242):** the grammar stays the copied format, but `toKladosPath` no longer skips
+JSON Pointer's transparent nodes. The measurement above was XML's; JSON's path parsed and found
+nothing, which the test of the time did not check.
+
 ### D-082 — Find's byte/decoded case-fold divergence is accepted as-is; only the footnote's
 condition and wording change (R72 §6, R76) · `superseded` **by D-097 (R205)**
 
@@ -4610,3 +4615,32 @@ becomes Unicode simple case folding, because every Find regex now compiles with 
 - **The `v` flag**, which rejects even `[(]` for no folding difference.
 - **Mapping V8's error messages to Klados wording** (`]` reports *Lone quantifier brackets*): a
   table that would have to track V8.
+
+### D-126 — Copy path writes every step, and the path grammar quotes names; amends D-081 (R242) · `settled`
+
+Plan and results: `docs/plans/R242-copy-path-round-trip.md`. Decided by the project lead on 2026-10-21.
+
+**The problem.** D-081 made Copy path emit the path grammar so that it pastes back into the palette.
+It did in XML. In JSON and CSV it never did: `toKladosPath` kept JSON Pointer's address space, which
+skips the document's top-level value and the Object or Array holding a property's value, while the
+evaluator walks the store one level per step. Measured over every node of a sample per format:
+XML 7 of 8, JSON 0 of 11 and 0 of 8, TOML 9 of 13, CSV 0 of 3. Separately, a name containing
+whitespace or a reserved character (`/ [ ] @ * ( ) = ! < > " '`) could not be written in a path.
+
+**Chosen:**
+- **Copy path writes every node below the document as a step.** A named node is its name, with
+  `[n]` when siblings share it; an unnamed node is `*`, with `[n]` when its parent has more than
+  one child. `{"books":[…]}`'s second title is `/*/books/*/*[2]/title`. The evaluator, and so the
+  meaning of every query, is unchanged.
+- **A name may be quoted**, `"first name"` or `'first name'`, with a quote inside doubled
+  (XPath 2.0, SQL). A quoted `"*"` is a name, not the wildcard. Copy path quotes only names that
+  need it (`quotePathName`, defined beside `isNameChar`). Allowed for a step and for a predicate
+  subject. Predicate string literals take the doubling as well, and a `]` inside quotes no longer
+  ends a predicate. All three only give meaning to text that was an error before.
+
+**Rejected:**
+- **Making the evaluator skip the same unnamed nodes**, so `/books/*[2]/title` would work as
+  written. Shorter paths, but it changes what every existing JSON query means and touches D-030 and
+  invariant 8's same-query-same-answer claim. Not during a release; a round of its own if the longer
+  paths turn out to matter.
+- **Backslash escapes** (`first\ name`): harder to read, and one more reserved character.

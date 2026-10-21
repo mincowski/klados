@@ -16,6 +16,18 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## R242 — Copy path finds the node it was copied from · built
+
+**Plan:** `docs/plans/R242-copy-path-round-trip.md` · **Decision:** D-126
+
+Checking, for the project lead, what the copied path is for found that it pastes back into the palette
+and finds its node in XML only. JSON and CSV paths never found anything, some TOML paths didn't, and a
+key with a space could not be written. Copy path now writes every step (`/*/books/*/*[2]/title`), and
+the grammar quotes a name (`"first name"`). Every node of a fixture per format, and keys built from
+every reserved character, now find exactly themselves; confirmed in the built app. For 1.3.0.
+
+---
+
 ## Review of 1.3.0 — four fixes before the tag · built
 
 **Plans:** R230 §5.5, R236 §6.5, R239 §6.7, R241 §9.4.
@@ -41,6 +53,9 @@ free-space check; the watcher follows the path), R233 (Markdown export escaping)
 terminable worker), R240 (the app accepts its own page from paths with `~`, `[`, `]` or `%`) and R241
 (Unicode case folding in Find, and `Invalid pattern`). Minor rather than patch: Find matches
 differently and shows a new state, and the release pipeline changed underneath.
+
+*Added before the tag:* R242 (Copy path finds its node in every format, and names can be quoted),
+at the project lead's request.
 
 Bumped ahead of the tag so a review round can run against it. Not yet done, and owed at the tag:
 the pre-tag installer check 1.2.2 had, and R229's and R167's first real-release checks (`docs/TASKS.md`,
