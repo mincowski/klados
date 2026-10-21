@@ -923,6 +923,7 @@ cars//price            any descendant
 car[@id="c-001"]       scalar facet predicate
 car[3]                 positional
 *                      any name
+"first name"           a quoted name ("" inside for one ")
 ```
 
 Comparison predicates (`car[price>100]`) are deferred to M7. They are where a small query

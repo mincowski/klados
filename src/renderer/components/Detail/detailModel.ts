@@ -11,6 +11,7 @@ import { lineAtOffset, DEFAULT_MAX_ROW_BYTES, type LineIndex } from '../../../co
 import { EMPTY_DELTA_LIST, type DeltaList } from '../../../core/deltaList'
 import { childCountOf, hasChildren, kindLabelOf, labelOf, previewOf } from '../../nodeDisplay'
 import { translateSpan } from '../../session/spanTranslation'
+import { quotePathName } from '../../../core/path/parse'
 
 // ---------------------------------------------------------------------------
 // Breadcrumb path
@@ -29,6 +30,9 @@ export interface PathSegment {
   readonly sameNamePosition: number
   /** How many siblings (including this one) share `name`. */
   readonly sameNameCount: number
+  /** How many children the parent has, this one included. 0 for the root
+   * segment. R242: whether an unnamed step needs its position. */
+  readonly siblingCount: number
 }
 
 /**
@@ -50,6 +54,7 @@ export function pathSegmentsOf(store: NodeStore, node: NodeRef): PathSegment[] {
     let siblingIndex = 0
     let sameNamePosition = 0
     let sameNameCount = 0
+    let siblingCount = 0
 
     if (parent !== -1) {
       let index = 0
@@ -65,6 +70,7 @@ export function pathSegmentsOf(store: NodeStore, node: NodeRef): PathSegment[] {
         if (sibling === current) siblingIndex = index
         index++
       }
+      siblingCount = index
     }
 
     segments.unshift({
@@ -74,7 +80,8 @@ export function pathSegmentsOf(store: NodeStore, node: NodeRef): PathSegment[] {
       kind: store.kindOf(current),
       siblingIndex,
       sameNamePosition,
-      sameNameCount
+      sameNameCount,
+      siblingCount
     })
     current = parent
   }
@@ -110,6 +117,10 @@ function escapeJsonPointerToken(token: string): string {
  * XML has no unnamed non-root node this ever filters (every element has a
  * tag name), so this only ever changes JSON's — and later TOML/YAML's —
  * output; an XML path keeps every element exactly as before.
+ *
+ * **JSON Pointer's and XPath's address space, not the path grammar's.**
+ * `toKladosPath` stopped using this in R242: the evaluator does not skip
+ * these nodes, so a path that skips them finds nothing.
  */
 function isAddressableStep(segment: PathSegment, parent: PathSegment): boolean {
   return segment.name !== null || parent.kind === NodeKind.Array
@@ -157,11 +168,20 @@ export function toXPath(segments: readonly PathSegment[]): string {
  * position") is exactly what an array element needs, using `siblingIndex`
  * (0-based, "position among ALL of the parent's children") rather than
  * `sameNamePosition`, converted to the grammar's 1-based `[n]`.
+ *
+ * **R242 (`docs/plans/R242-copy-path-round-trip.md`, D-126): every node
+ * below the document is a step**, not only `addressableSteps`. The evaluator
+ * walks the store one level per step, so leaving out JSON's top-level value,
+ * the Object or Array holding a property's value, or CSV's table made every
+ * such path find nothing. An unnamed node is `*`, with its position when its
+ * parent has more than one child; a name the grammar cannot read bare is
+ * quoted (`quotePathName`).
  */
 export function toKladosPath(segments: readonly PathSegment[]): string {
-  const parts = addressableSteps(segments).map((s) => {
-    if (s.name === null) return `*[${s.siblingIndex + 1}]`
-    return s.sameNameCount > 1 ? `${s.name}[${s.sameNamePosition}]` : s.name
+  const parts = segments.slice(1).map((s) => {
+    if (s.name === null) return s.siblingCount > 1 ? `*[${s.siblingIndex + 1}]` : '*'
+    const name = quotePathName(s.name)
+    return s.sameNameCount > 1 ? `${name}[${s.sameNamePosition}]` : name
   })
   return parts.length === 0 ? '/' : `/${parts.join('/')}`
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parsePath, type NameResolver } from '../src/core/path/parse'
+import { parsePath, quotePathName, type NameResolver } from '../src/core/path/parse'
 
 function resolverFor(names: readonly string[]): NameResolver {
   const map = new Map(names.map((name, i) => [name, i]))
@@ -569,5 +569,113 @@ describe('parsePath (M4-PLAN.md G7)', () => {
     expect(result.ok).toBe(false)
     if (result.ok) return
     expect(result.diagnostic.offset).toBeGreaterThan(0)
+  })
+})
+
+describe('R242 — quoted names (docs/plans/R242-copy-path-round-trip.md §2.2)', () => {
+  /** The name each step resolved, through a resolver that records it. */
+  function stepNames(query: string): string[] {
+    const asked: string[] = []
+    const result = parsePath(query, (name) => {
+      asked.push(name)
+      return asked.length
+    })
+    if (!result.ok) throw new Error(`${query}: ${result.diagnostic.message}`)
+    return asked
+  }
+
+  it('reads a quoted step name, in either quote, with a doubled quote as one', () => {
+    expect(stepNames('"first name"')).toEqual(['first name'])
+    expect(stepNames("'unit price'")).toEqual(['unit price'])
+    expect(stepNames('"say ""hi"""')).toEqual(['say "hi"'])
+    expect(stepNames("'it''s'")).toEqual(["it's"])
+    expect(stepNames('"it\'s"')).toEqual(["it's"])
+    expect(stepNames('a/"b c"//"[d]"/e')).toEqual(['a', 'b c', '[d]', 'e'])
+  })
+
+  it('a quoted "*" is the name *, not the wildcard, and "" is the empty name', () => {
+    const star = parsePath('"*"', resolverFor(['*']))
+    expect(star.ok && star.path.steps[0]).toMatchObject({ isWildcard: false, nameId: 0 })
+    expect(stepNames('""')).toEqual([''])
+  })
+
+  it('a quoted step takes a predicate like any other', () => {
+    const result = parsePath('"first name"[2]', resolverFor(['first name']))
+    expect(result.ok && result.path.steps[0]).toMatchObject({
+      nameId: 0,
+      predicate: { kind: 'positional', index: 2 }
+    })
+  })
+
+  it('an unterminated quoted name is a diagnostic at its opening quote', () => {
+    const result = parsePath('a/"b c', resolverFor(['a']))
+    expect(result).toEqual({
+      ok: false,
+      diagnostic: { offset: 2, message: 'unterminated quoted name' }
+    })
+  })
+
+  it('a predicate subject may be quoted, even when it is all digits', () => {
+    const comparison = parsePath('*["unit price">3]', resolverFor(['unit price']))
+    expect(comparison.ok && comparison.path.steps[0]!.predicate).toMatchObject({
+      kind: 'comparison',
+      subjectAxis: 'child',
+      subjectName: 'unit price',
+      subjectNameId: 0,
+      op: '>',
+      literalNumber: 3
+    })
+    const attribute = parsePath('*[@"x y"]', resolverFor(['x y']))
+    expect(attribute.ok && attribute.path.steps[0]!.predicate).toMatchObject({
+      kind: 'existence',
+      subjectAxis: 'attribute',
+      subjectName: 'x y'
+    })
+    const digits = parsePath('*["3"]', resolverFor(['3']))
+    expect(digits.ok && digits.path.steps[0]!.predicate).toMatchObject({
+      kind: 'existence',
+      subjectName: '3'
+    })
+  })
+
+  it('a ] inside quotes does not end the predicate', () => {
+    const result = parsePath('car[@id="a]b"]', resolverFor(['car', 'id']))
+    expect(result.ok && result.path.steps[0]!.predicate).toMatchObject({ literalText: 'a]b' })
+    const subject = parsePath('*["x]y"]', resolverFor(['x]y']))
+    expect(subject.ok && subject.path.steps[0]!.predicate).toMatchObject({ subjectName: 'x]y' })
+  })
+
+  it('a literal reads a doubled quote as one', () => {
+    const result = parsePath("car[@title='it''s']", resolverFor(['car', 'title']))
+    expect(result.ok && result.path.steps[0]!.predicate).toMatchObject({ literalText: "it's" })
+  })
+
+  it('an unclosed quote inside a predicate is a diagnostic at that quote', () => {
+    const result = parsePath('car[@id="abc]', resolverFor(['car', 'id']))
+    expect(result).toEqual({ ok: false, diagnostic: { offset: 8, message: 'unterminated quote' } })
+  })
+})
+
+describe('R242 — quotePathName', () => {
+  it('leaves a name the grammar reads bare as it is', () => {
+    for (const name of ['car', 'größe', 'ns:item', 'a.b-c_d', '3', '𠀀']) {
+      expect(quotePathName(name)).toBe(name)
+    }
+  })
+
+  it('quotes an empty name, whitespace and every reserved character, doubling "', () => {
+    expect(quotePathName('')).toBe('""')
+    expect(quotePathName('first name')).toBe('"first name"')
+    expect(quotePathName('a\tb')).toBe('"a\tb"')
+    expect(quotePathName('say "hi"')).toBe('"say ""hi"""')
+    for (const ch of ['/', '[', ']', '@', '*', '(', ')', '=', '!', '<', '>', '"', "'"]) {
+      const name = `a${ch}b`
+      const quoted = quotePathName(name)
+      expect(quoted.startsWith('"'), name).toBe(true)
+      const asked: string[] = []
+      const result = parsePath(quoted, (n) => (asked.push(n), 0))
+      expect(result.ok, `${name} -> ${quoted}`).toBe(true)
+      expect(asked).toEqual([name])
+    }
   })
 })
