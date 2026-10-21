@@ -16,6 +16,19 @@ lines — read in full at the start of every session, and never once pruned.
 
 ---
 
+## Klados 1.3.0 — published, and R229's immutability checks
+
+**Published by the project lead on 2026-10-21**, 09:45 UTC, with release notes added to the draft
+first. It is the first release made immutable: `immutable: true`; `gh release verify` and
+`verify-asset` (the Windows installer and `SHA256SUMS.txt`) pass; the attested digests equal
+`SHA256SUMS.txt`; and replacing a file was refused with *Cannot delete asset from an immutable
+release*. The replacement tried was the release's own `SHA256SUMS.txt`, byte for byte, so nothing
+could have changed. R229's criterion 8 is done
+(`docs/plans/R229-release-token-scope.md` §5.6); criterion 9 waits for Dependabot's first actions
+pull request.
+
+---
+
 ## Klados 1.3.0 — tagged, and the owed release checks
 
 **`v1.3.0` is tagged on `f10d223`** (annotated, *Klados 1.3.0*), on 2026-10-21. The release run
